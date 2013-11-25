@@ -99,10 +99,10 @@ Bundle "AndrewRadev/splitjoin.vim"
 Bundle "Raimondi/delimitMate"
 
 "YouCompleteMe all around autocomplete
-Bundle "Valloric/YouCompleteMe"
+"Bundle "Valloric/YouCompleteMe"
 
 "ultisnips (used in YouCompleteMe)
-Bundle "SirVer/ultisnips"
+"Bundle "SirVer/ultisnips"
 
 "implements some of TextMate's snippets features
 "Bundle "garbas/vim-snipmate.git"
