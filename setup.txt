@@ -1,0 +1,60 @@
+Setup Instructions
+==================
+
+Install mac os
+
+Install Xcode -> install command line tools
+
+Install iterm 2
+
+install homebrew -> 
+	-chown /usr/local
+	-brew doctor until no errors
+
+install git
+	-configure globals
+	-add SSH key for github
+
+install RVM/ruby/rails
+	-"--no-ri --no-rdoc"?
+
+install vim w/ brew
+install macvim w/ brew
+
+install zsh w/ brew
+	-add to /etc/shells
+	-choose w/ chsh -s <path>
+
+install oh-my-zsh (manually)
+	-clone repo
+
+install /tarruda/zsh-autosuggestions
+  -clone repo
+
+git clone dotfiles repo
+  -run links.sh
+  OR
+	-remove existing .rc's
+	-symlink to new .rc's
+  -symlink vundles.vim to ~/.vim/vundles.vim
+
+install vundle
+  -BundleInstall
+
+install witch
+  -setup keys
+
+install dropbox?
+  -custom sync folders
+
+mac os changes
+  -remove useless links from sidebar
+  -change default view ->finder -> prefs
+  -hotcorners: prefs->Mission control
+  -zoom: prefs->accessibility
+  -tab key: prefs->keyboard->shortcuts
+
+
+install mongodb? w/ brew
+install python w/brew
+
