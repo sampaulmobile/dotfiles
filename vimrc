@@ -14,6 +14,10 @@ set gcr=a:blinkon0              "Disable cursor blink
 set visualbell                  "No sounds
 set autoread                    "Reload files changed outside vim
 
+if $TMUX == ''
+  set clipboard+=unnamed
+endif
+
 " Mappings
 imap jj <Esc>
 

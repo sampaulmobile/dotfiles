@@ -90,6 +90,8 @@ Bundle "tpope/vim-fugitive"
 "Git syntax, indent, and filetype plugin files
 Bundle "tpope/vim-git"
 
+"show Git diffs in gutter
+Bundle 'airblade/vim-gitgutter'
 
 " ======================== General Text Editing =======================
 "switching between single-line and multiline code
