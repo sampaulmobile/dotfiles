@@ -60,6 +60,7 @@ nnoremap <leader>b :TagbarToggle<CR>
 
 "CtrlP toggle set to leader + t
 map <leader>t :CtrlP<CR>
+nnoremap <silent> <leader>T :ClearCtrlPCache<cr>\|:CtrlP<cr>
 
 "TComment remap to c key
 map <leader>/ <c-_><c-_>
@@ -133,8 +134,8 @@ set linebreak    "Wrap lines at convenient points
 " ================ Folds ============================
 "set foldmethod=indent   "fold based on indent
 set foldmethod=syntax   "fold by syntax
-set foldnestmax=3       "deepest fold is 3 levels
-set nofoldenable        "dont fold by default
+set foldnestmax=5       "deepest fold is 3 levels
+"set nofoldenable        "dont fold by default
 " toggle hold with <S-Space> if over a fold
 nnoremap <silent> <S-Space> @=(foldlevel('.')?'za':'l')<CR>
 

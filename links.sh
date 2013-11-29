@@ -25,10 +25,11 @@ for file in $files; do
     ln -s $dir/$file ~/.$file
 done
 
-echo "Linking in vundles"
-mv ~/.vim/vundles.vim $deldir
-ln -s $dir/vundles.vim ~/.vim/vundles.vim
-echo "Done"
+#echo "Linking in vundles"
+#mkdir -p ~/.vim
+#mv ~/.vim/vundles.vim $deldir
+#ln -s $dir/vundles.vim ~/.vim/vundles.vim
+#echo "Done"
 
 
 echo "ALL FINISHED LINKING RCs"

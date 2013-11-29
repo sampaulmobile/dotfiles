@@ -219,7 +219,7 @@ Bundle "vim-scripts/AutoTag.git"
 Bundle "vim-scripts/sudo.vim"
 
 "Visually shows the location of marks
-Bundle "xsunsmile/showmarks.git"
+"Bundle "xsunsmile/showmarks.git"
 
 "vim-misc is required for vim-session
 "Bundle "xolox/vim-misc"
