@@ -90,6 +90,8 @@ Bundle "tpope/vim-fugitive"
 "Git syntax, indent, and filetype plugin files
 Bundle "tpope/vim-git"
 
+"show Git diffs in gutter
+Bundle 'airblade/vim-gitgutter'
 
 " ======================== General Text Editing =======================
 "switching between single-line and multiline code
@@ -219,7 +221,7 @@ Bundle "vim-scripts/AutoTag.git"
 Bundle "vim-scripts/sudo.vim"
 
 "Visually shows the location of marks
-Bundle "xsunsmile/showmarks.git"
+"Bundle "xsunsmile/showmarks.git"
 
 "vim-misc is required for vim-session
 "Bundle "xolox/vim-misc"

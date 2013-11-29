@@ -55,6 +55,13 @@ mac os changes
   -tab key: prefs->keyboard->shortcuts
 
 
+install TMUX w/ brew
+
+
+clipboard fix
+  -make and cp to /usr/local/bin 
+  -https://github.com/ChrisJohnsen/tmux-MacOSX-pasteboard
+
 install mongodb? w/ brew
 install python w/brew
 

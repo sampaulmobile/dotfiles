@@ -30,6 +30,10 @@ mv ~/.vim/vundles.vim $deldir
 ln -s $dir/vundles.vim ~/.vim/vundles.vim
 echo "Done"
 
+echo "Linking in custom theme (sampaul)"
+mv ~/.oh-my-zsh/custom/sampaul.zsh-theme $deldir
+ln -s $dir/sampaul.zsh-theme ~/.oh-my-zsh/custom/sampaul.zsh-theme
+echo "Done"
 
 echo "ALL FINISHED LINKING RCs"
 echo "Be sure to Review/DELETE old dotfiles"
