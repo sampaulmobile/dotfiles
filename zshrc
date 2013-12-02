@@ -5,7 +5,7 @@ ZSH=$HOME/.oh-my-zsh
 ZSH_THEME="sampaul"
 
 
-# History Stuff
+# ======== History Stuff =========
 
 # Where it gets saved
 HISTFILE=~/.history

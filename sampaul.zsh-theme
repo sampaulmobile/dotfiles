@@ -38,15 +38,33 @@ function put_spacing() {
   echo $spacing
 }
 
-# if superuser make the username green
-if [ $UID -eq 0 ]; then NCOLOR="green"; else NCOLOR="white"; fi
+# if superuser make the username red
+if [ $UID -eq 0 ]; then NCOLOR="red"; else NCOLOR="white"; fi
+
+# If connected to ssh, show "@ hostname"
+if [[ -z "$SSH_CLIENT" ]]; then
+  SSH=""
+else
+  SSH=%{$fg_bold[grey]%}@%{$reset_color$fg[yellow]%}$(hostname -s)
+fi
 
 # prompt
-HOST="[%{$fg[$NCOLOR]%}%B%n%b"
-DIR="%{$reset_color%}:%{$fg[red]%}%30<...<%~%<<%{$reset_color%}]|"
+HOST="%{$fg[$NCOLOR]%}%B%n%b"$SSH
+
+#DIR="%{$reset_color%}:%{$FG[208]%}%30<...<%~%<<%{$reset_color%}|"
+DIR="%{$reset_color%}:%{$FG[208]%}%~%{$reset_color%}|"
 
 GIT=$'$(git_super_status)
 %(!.#.$) ' 
 
 PROMPT=$HOST$DIR$RUBY_PROMPT_$GIT
-RPROMPT='!%{%B%F{cyan}%}%!%{%f%k%b%}'
+#RPROMPT='!%{%B%F{cyan}%}%!%{%f%k%b%}'
+
+# Display time in rprompt
+RPROMPT='%{$FG[045]%}%*%{$reset_color%}'
+
+
+
+
+
+
