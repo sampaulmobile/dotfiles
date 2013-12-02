@@ -72,8 +72,15 @@ alias egrep='egrep --colour=auto'
 
 # Fix $PATH
 export PATH=/usr/local/bin:/usr/local/sbin:/bin:/usr/sbin:/sbin:/usr/bin:/opt/X11/bin:$PATH
+
+#RVM/Rubies
 export PATH=$PATH:/Users/sampaul/.rvm/gems/ruby-2.0.0-p247/bin:/Users/sampaul/.rvm/gems/ruby-2.0.0-p247@global/bin:/Users/sampaul/.rvm/rubies/ruby-2.0.0-p247/bin:/Users/sampaul/.rvm/bin:/Users/sampaul/.rvm/bin
-export PATH=$PATH:/Users/sampaul/Library/Python/2.7/bin/
+
+#Python
+export PATH=$PATH:/Users/sampaul/Library/Python/2.7/bin
+
+### Added by the Heroku Toolbelt
+export PATH="/usr/local/heroku/bin:$PATH"
 
 # Load RVM into a shell session *as a function*
 [[ -s "$HOME/.rvm/scripts/rvm" ]] && source "$HOME/.rvm/scripts/rvm" 

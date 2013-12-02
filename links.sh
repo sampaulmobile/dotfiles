@@ -8,7 +8,7 @@
 
 dir=~/dotfiles               # dotfiles directory
 deldir=~/DELETE_dotfiles     # backup directory
-files="bashrc vimrc zshrc"   # list of files/folders to symlink in homedir
+files="bashrc vimrc zshrc gemrc"   # list of files/folders to symlink in homedir
 
 ##########
 
@@ -25,11 +25,11 @@ for file in $files; do
     ln -s $dir/$file ~/.$file
 done
 
-#echo "Linking in vundles"
-#mkdir -p ~/.vim
-#mv ~/.vim/vundles.vim $deldir
-#ln -s $dir/vundles.vim ~/.vim/vundles.vim
-#echo "Done"
+echo "Linking in vundles"
+mkdir -p ~/.vim
+mv ~/.vim/vundles.vim $deldir
+ln -s $dir/vundles.vim ~/.vim/vundles.vim
+echo "Done"
 
 echo "Linking in custom theme (sampaul)"
 mv ~/.oh-my-zsh/custom/sampaul.zsh-theme $deldir

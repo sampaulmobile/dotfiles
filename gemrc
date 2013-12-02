@@ -1,0 +1,3 @@
+
+#supress ri and rdoc documentation
+gem: --no-ri --no-rdoc
