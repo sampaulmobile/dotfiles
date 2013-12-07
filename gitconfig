@@ -1,5 +1,56 @@
 [user]
 	name = Sam Paul
-	email = sampaulmobile@gmail.com
+	email = sam@docurated.com
 [push]
 	default = simple
+[core]
+    editor = vim
+    excludesfile = ~/.gitignore
+    # pager less -r
+[alias]
+    # init
+    this = !git init && git add . && git commit -m \"initial commit\"
+
+    # remove already deleted files
+    r = !git ls-files -z --deleted | xargs -0 git rm
+
+    # display all git alias's
+    alias = !git config --list | grep 'alias\\.' | sed 's/alias\\.\\([^=]*\\)=\\(.*\\)/\\1\\ => \\2/' | sort
+
+    # ignore a file on the fly
+    ignore=!([ ! -e .gitignore ] && touch .gitignore) | echo $1 >>.gitignore
+
+    # speed up master checkout
+    master = checkout master
+
+    # nice log output
+    lg = log --graph --pretty=oneline --abbrev-commit --decorate
+    ll = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%an, %cr)%Creset' --abbrev-commit --date=relative
+    l = log --stat --abbrev-commit
+
+    # git commit
+    commit = commit --verbose
+    ci = commit --verbose
+
+    # git branch and remote
+    b = branch -av ### Added -av parameter
+    rv = remote -v
+
+    # git add
+    a = add
+    au = add --update
+    ap = add --patch
+
+    # git checkout
+    co = checkout
+
+    # git fetch
+    f = fetch
+
+    # git diff
+    d = diff --color-words
+    p = diff --cached'   # mnemonic: "patch"
+
+    # git status
+    s = status
+

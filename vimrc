@@ -48,12 +48,12 @@ endif
 let mapleader=","
 
 " Set some shortcuts for Tabularize
-if exists(":Tabularize")
+"if exists(":Tabularize")
   nmap <Leader>a= :Tabularize /=<CR>
   vmap <Leader>a= :Tabularize /=<CR>
   nmap <Leader>a: :Tabularize /:\zs<CR>
   vmap <Leader>a: :Tabularize /:\zs<CR>
-endif
+"endif
 
 "NERDTree toggle set to capital T
 map T :NERDTreeToggle<CR>
@@ -116,19 +116,29 @@ silent !mkdir ~/.vim/backups > /dev/null 2>&1
 set undodir=~/.vim/backups
 set undofile
 
-
 " ================ Indentation ======================
-set cin             "c indent
-set autoindent
-set smartindent
-set smarttab
-set shiftwidth=2
-set softtabstop=2
-set tabstop=2
+
+"filetype on
+
+"set cin             "c indent
+"set autoindent
+"set smartindent
+"set smarttab
+set shiftwidth=4
+set softtabstop=4
+set tabstop=4
 set expandtab
+
 " Filetype Settings
-filetype plugin on
-filetype indent on
+"filetype indent on
+"filetype plugin on
+
+autocmd FileType ruby set sw=4 sts=4 et
+autocmd FileType haml set sw=4 sts=4 et
+autocmd FileType coffee set sw=4 sts=4 et
+autocmd FileType scss set sw=4 sts=4 et
+autocmd FileType erb set sw=4 sts=4 et
+
 " Display tabs and trailing spaces visually
 set list listchars=tab:\ \ ,trail:·
 set nowrap       "Don't wrap lines
@@ -157,12 +167,14 @@ set wildignore+=*.gem
 set wildignore+=log/**
 set wildignore+=tmp/**
 set wildignore+=*.png,*.jpg,*.gif
+
 " Search
 set ignorecase      "ignore case when searching
 set wrapscan        "search wrap around the EOF
 set smartcase       "override 'ignorecase' if search has uppercase
 set incsearch       "do incremental searching
 set hlsearch        "highlight searches
+
 "make search results appear in middle of screen
 nnoremap n nzz
 nnoremap N Nzz

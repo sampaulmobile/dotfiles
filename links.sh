@@ -8,7 +8,7 @@
 
 dir=~/dotfiles               # dotfiles directory
 deldir=~/DELETE_dotfiles     # backup directory
-files="bashrc vimrc zshrc gemrc gitconfig"   # list of files/folders to symlink in homedir
+files="bashrc vimrc zshrc gemrc gitconfig gitignore"   # list of files/folders to symlink in homedir
 
 ##########
 
