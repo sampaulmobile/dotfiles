@@ -19,6 +19,12 @@ alias egrep='egrep --colour=auto'
 
 alias g='git'
 
+# rvm stuff
+alias rvml='rvm list'
+alias rvmgl='rvm gemset list'
+alias rvmg='rvm gemset use'
+alias rvmrc="echo 'rvm --create use$1' >> .rvmrc"
+
 # Use vi-mode in the shell
 bindkey -v
 bindkey -M viins 'jj' vi-cmd-mode #map jj to exit (mimic ESC)
@@ -53,10 +59,9 @@ plugins=(git autojump brew bunder command-not-found gem nyan osx python rails4 r
 
 source $ZSH/oh-my-zsh.sh
 
+
 # =========== $PATH Stuff ==========
 export PATH=/usr/local/bin:/usr/local/sbin:/bin:/usr/sbin:/sbin:/usr/bin:/opt/X11/bin:$PATH
-#RVM/Rubies
-export PATH=$PATH:/Users/sampaul/.rvm/gems/ruby-2.0.0-p247/bin:/Users/sampaul/.rvm/gems/ruby-2.0.0-p247@global/bin:/Users/sampaul/.rvm/rubies/ruby-2.0.0-p247/bin:/Users/sampaul/.rvm/bin:/Users/sampaul/.rvm/bin
 #Python
 export PATH=$PATH:/Users/sampaul/Library/Python/2.7/bin
 ### Added by the Heroku Toolbelt
@@ -64,6 +69,7 @@ export PATH="/usr/local/heroku/bin:$PATH"
 # Load RVM into a shell session *as a function*
 [[ -s "$HOME/.rvm/scripts/rvm" ]] && source "$HOME/.rvm/scripts/rvm" 
 typeset -U path
+
 
 # =============== Autocomplete Stuff ==============
 source ~/.zsh-autosuggestions/autosuggestions.zsh
@@ -76,6 +82,6 @@ zle -N zle-line-init
 # zsh-autosuggestions is designed to be unobtrusive)
 bindkey '^T' autosuggest-toggle
 # Auto completion for git aliased as g
-complete -o bashdefault -o default -o nospace -F _git g 2>/dev/null \
-        || complete -o default -o nospace -F _git g
+# complete -o bashdefault -o default -o nospace -F _git g 2>/dev/null \
+#         || complete -o default -o nospace -F _git g
 
