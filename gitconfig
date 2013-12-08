@@ -9,7 +9,7 @@
     # pager less -r
 [alias]
     # init
-    this = !git init && git add . && git commit -m \"initial commit\"
+    this = !git init && cp ~/.gitignore . && git add . && git commit -m \"initial commit\"
 
     # remove already deleted files
     r = !git ls-files -z --deleted | xargs -0 git rm
