@@ -27,6 +27,10 @@ nnoremap <silent> <C-l> <C-w>l
 nnoremap <silent> <C-k> <C-w>k
 nnoremap <silent> <C-j> <C-w>j
 
+" 5x the up/down scrolling of the window
+" nmap <C-y> 5<C-y>
+" nmap <C-e> 5<C-e>
+
 " This makes vim act like all other editors, buffers can
 " exist in the background without being in a window.
 " http://items.sjbach.com/319/configuring-vim-right

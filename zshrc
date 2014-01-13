@@ -6,7 +6,16 @@ ZSH_THEME="sampaul"
 
 
 # ============ Aliases =============
-alias dev="cd ~/Dropbox/Development/"
+alias dev="cd ~/Development/SBP"
+DOC_HOME='/Users/sampaul/Development/Docurated'
+
+alias docweb='cd $DOC_HOME/website/rails'
+alias docutil='cd $DOC_HOME/utilities'
+alias cdemo='$DOC_HOME/utilities/docformation/docconnection.rb demo.web.0'
+alias crailsapp='$DOC_HOME/utilities/docformation/docconnection.rb demo.railsapp.0'
+alias cfdb='$DOC_HOME/utilities/docformation/docconnection.rb demo.foundationdb.0'
+alias cprod='$DOC_HOME/utilities/docformation/docconnection.rb production.web.12'
+
 alias cp='cp -iv'
 alias mv='mv -iv'
 alias rm='rm -iv'
@@ -16,6 +25,9 @@ alias grep='grep --colour=auto'
 alias egrep='egrep --colour=auto'
 #alias rcp='rsync -v --progress'
 #alias rmv='rsync -v --progress --remove-source-files'
+
+#fix for rake tasks
+alias rake='noglob rake'
 
 alias g='git'
 
