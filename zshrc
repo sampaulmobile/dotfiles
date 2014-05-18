@@ -9,13 +9,78 @@ ZSH_THEME="sampaul"
 alias dev="cd ~/Development/SBP"
 DOC_HOME='/Users/sampaul/Development/Docurated'
 
-alias docweb='cd $DOC_HOME/website/rails'
-alias docutil='cd $DOC_HOME/utilities'
-alias cdemo='$DOC_HOME/utilities/docformation/docconnection.rb demo.web.0'
-alias crailsapp='$DOC_HOME/utilities/docformation/docconnection.rb demo.railsapp.0'
-alias cfdb='$DOC_HOME/utilities/docformation/docconnection.rb demo.foundationdb.0'
-alias cprod='$DOC_HOME/utilities/docformation/docconnection.rb production.web.12'
+alias docweb='cd $DOC_HOME/website/rails && rvmgd'
+alias docutil='cd $DOC_HOME/utilities && rvmgdu'
+alias doccli='cd $DOC_HOME/clients && rvmgdu'
 
+alias con='$DOC_HOME/utilities/docformation/docconnection.rb'
+webconnect() {
+    $DOC_HOME/utilities/docformation/docconnection.rb $1.web.$2
+}
+alias cweb=webconnect
+railsappconnect() {
+    $DOC_HOME/utilities/docformation/docconnection.rb $1.railsapp.$2
+}
+alias crapp=railsappconnect
+
+dwebconnect() {
+    $DOC_HOME/utilities/docformation/docconnection.rb demo.web.$1
+}
+alias cdweb=dwebconnect
+alias cdweb0='$DOC_HOME/utilities/docformation/docconnection.rb demo.web.0'
+alias cdweb1='$DOC_HOME/utilities/docformation/docconnection.rb demo.web.1'
+
+drappconnect() {
+    $DOC_HOME/utilities/docformation/docconnection.rb demo.railsapp.$1
+}
+alias cdrapp=drappconnect
+# alias cdrapp='$DOC_HOME/utilities/docformation/docconnection.rb demo.railsapp.0'
+
+dfdbconnect() {
+    $DOC_HOME/utilities/docformation/docconnection.rb demo.foundationdb.$1
+}
+alias cdfdb=dfdbconnect
+alias cdfdb='$DOC_HOME/utilities/docformation/docconnection.rb demo.foundationdb.0'
+
+pwebconnect() {
+    $DOC_HOME/utilities/docformation/docconnection.rb production.web.$1
+}
+alias cpweb=pwebconnect
+# alias cpweb='$DOC_HOME/utilities/docformation/docconnection.rb production.web.12'
+
+prappconnect() {
+    $DOC_HOME/utilities/docformation/docconnection.rb production.railsapp.$1
+}
+alias cprapp=prappconnect
+alias cprapp='$DOC_HOME/utilities/docformation/docconnection.rb production.railsapp.0'
+
+dwebdeploy() {
+    $DOC_HOME/utilities/docformation/docformation.rb deploy_web demo --branch=$1
+}
+alias ddweb=dwebdeploy
+drappdeploy() {
+    $DOC_HOME/utilities/docformation/docformation.rb deploy_railsapp demo --branch=$1
+}
+alias ddrapp=drappdeploy
+
+webdeploy() {
+    $DOC_HOME/utilities/docformation/docformation.rb deploy_web $1 --branch=$2
+}
+alias dweb=webdeploy
+alias dpweb='$DOC_HOME/utilities/docformation/docformation.rb deploy_web production'
+
+alias tag='$DOC_HOME/utilities/docformation/docformation.rb tag_release --repo='
+
+alias rvmgd='rvm gemset use docurated'
+alias rvmgdu='rvm gemset use docurated_util'
+alias rs='rails s'
+alias rc='rails c'
+alias rsp='rails s -p '
+alias rcd='rails c development'
+alias solrs='cd $DOC_HOME/website/rails/opt/solr/jetty && java -Dsolr.solr.home=docu -jar start.jar'
+alias jira='history | grep -e "DIOR" -e "CAS"'
+
+alias c='clear'
 alias cp='cp -iv'
 alias mv='mv -iv'
 alias rm='rm -iv'
@@ -26,10 +91,26 @@ alias egrep='egrep --colour=auto'
 #alias rcp='rsync -v --progress'
 #alias rmv='rsync -v --progress --remove-source-files'
 
+alias g='grep -rn '
+alias gi='grep -rni '
+alias hist='history'
+alias histg='history | grep'
+
+alias psx='ps aux | grep'
+
 #fix for rake tasks
 alias rake='noglob rake'
 
-alias g='git'
+# alias g='git'
+alias gs='git status'
+alias ga='git add '
+alias gco='git checkout '
+alias gci='git commit '
+alias gb='git branch '
+alias gcam='git commit -a -m '
+alias gpull='git pull origin '
+alias gpush='git push origin '
+alias gmm='git merge master'
 
 # rvm stuff
 alias rvml='rvm list'
@@ -44,10 +125,10 @@ bindkey -M viins 'jj' vi-cmd-mode #map jj to exit (mimic ESC)
 
 # ======== History Stuff =========
 HISTFILE=~/.history
-SAVEHIST=10000
-HISTSIZE=10000
+SAVEHIST=100000
+HISTSIZE=100000
 setopt APPEND_HISTORY
-setopt SHARE_HISTORY # share history between multiple shells
+# setopt SHARE_HISTORY # share history between multiple shells
 # dont save duplicates
 setopt HIST_IGNORE_DUPS
 setopt HIST_IGNORE_ALL_DUPS
@@ -67,10 +148,9 @@ setopt HIST_FIND_NO_DUPS
 # DISABLE_AUTO_TITLE="true"
 
 # Oh-my-zsh plugins
-plugins=(git autojump brew bunder command-not-found gem nyan osx python rails4 ruby rvm sublime textmate vi-mode web-search zsh-syntax-highlighting)
+plugins=(autojump brew bunder command-not-found gem nyan osx python rails ruby rvm sublime textmate vi-mode web-search zsh-syntax-highlighting)
 
 source $ZSH/oh-my-zsh.sh
-
 
 # =========== $PATH Stuff ==========
 export PATH=/usr/local/bin:/usr/local/sbin:/bin:/usr/sbin:/sbin:/usr/bin:/opt/X11/bin:$PATH
