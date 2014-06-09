@@ -6,6 +6,9 @@ ZSH_THEME="sampaul"
 
 
 # ============ Aliases =============
+alias dotz="vim ~/dotfiles/zshrc"
+alias dotv="vim ~/dotfiles/vimrc"
+
 alias dev="cd ~/Development/SBP"
 DOC_HOME='/Users/sampaul/Development/Docurated'
 
@@ -13,17 +16,23 @@ alias docweb='cd $DOC_HOME/website/rails && rvmgd'
 alias docutil='cd $DOC_HOME/utilities && rvmgdu'
 alias doccli='cd $DOC_HOME/clients && rvmgdu'
 
-alias con='$DOC_HOME/utilities/docformation/docconnection.rb'
+alias con='docutil && $DOC_HOME/utilities/docformation/docconnection.rb'
 webconnect() {
+    cd $DOC_HOME/utilities/docformation
+    rvm gemset use docurated_util
     $DOC_HOME/utilities/docformation/docconnection.rb $1.web.$2
 }
 alias cweb=webconnect
 railsappconnect() {
+    cd $DOC_HOME/utilities/docformation
+    rvm gemset use docurated_util
     $DOC_HOME/utilities/docformation/docconnection.rb $1.railsapp.$2
 }
 alias crapp=railsappconnect
 
 dwebconnect() {
+    cd $DOC_HOME/utilities/docformation
+    rvm gemset use docurated_util
     $DOC_HOME/utilities/docformation/docconnection.rb demo.web.$1
 }
 alias cdweb=dwebconnect
@@ -31,43 +40,58 @@ alias cdweb0='$DOC_HOME/utilities/docformation/docconnection.rb demo.web.0'
 alias cdweb1='$DOC_HOME/utilities/docformation/docconnection.rb demo.web.1'
 
 drappconnect() {
+    cd $DOC_HOME/utilities/docformation
+    rvm gemset use docurated_util
     $DOC_HOME/utilities/docformation/docconnection.rb demo.railsapp.$1
 }
 alias cdrapp=drappconnect
 # alias cdrapp='$DOC_HOME/utilities/docformation/docconnection.rb demo.railsapp.0'
 
 dfdbconnect() {
+    cd $DOC_HOME/utilities/docformation
+    rvm gemset use docurated_util
     $DOC_HOME/utilities/docformation/docconnection.rb demo.foundationdb.$1
 }
 alias cdfdb=dfdbconnect
 alias cdfdb='$DOC_HOME/utilities/docformation/docconnection.rb demo.foundationdb.0'
 
 pwebconnect() {
+    cd $DOC_HOME/utilities/docformation
+    rvm gemset use docurated_util
     $DOC_HOME/utilities/docformation/docconnection.rb production.web.$1
 }
 alias cpweb=pwebconnect
 # alias cpweb='$DOC_HOME/utilities/docformation/docconnection.rb production.web.12'
 
 prappconnect() {
+    cd $DOC_HOME/utilities/docformation
+    rvm gemset use docurated_util
     $DOC_HOME/utilities/docformation/docconnection.rb production.railsapp.$1
 }
 alias cprapp=prappconnect
 alias cprapp='$DOC_HOME/utilities/docformation/docconnection.rb production.railsapp.0'
 
 dwebdeploy() {
+    cd $DOC_HOME/utilities/docformation
+    rvm gemset use docurated_util
     $DOC_HOME/utilities/docformation/docformation.rb deploy_web demo --branch=$1
 }
 alias ddweb=dwebdeploy
 drappdeploy() {
+    cd $DOC_HOME/utilities/docformation
+    rvm gemset use docurated_util
     $DOC_HOME/utilities/docformation/docformation.rb deploy_railsapp demo --branch=$1
 }
 alias ddrapp=drappdeploy
 
 webdeploy() {
+    cd $DOC_HOME/utilities/docformation
+    rvm gemset use docurated_util
     $DOC_HOME/utilities/docformation/docformation.rb deploy_web $1 --branch=$2
 }
 alias dweb=webdeploy
 alias dpweb='$DOC_HOME/utilities/docformation/docformation.rb deploy_web production'
+alias cchef='docutil && $DOC_HOME/utilities/docformation/docconnection.rb chef.workstation'
 
 alias tag='$DOC_HOME/utilities/docformation/docformation.rb tag_release --repo='
 
@@ -96,10 +120,25 @@ alias gi='grep -rni '
 alias hist='history'
 alias histg='history | grep'
 
-alias psx='ps aux | grep'
+alias psg='ps aux | grep'
+
+grepfind() {
+    find . -name "*.$1" | xargs grep -n "$2"
+}
+alias gf=grepfind
+grepfindi() {
+    find . -name "*.$1" | xargs grep -ni "$2"
+}
+alias gfi=grepfindi
 
 #fix for rake tasks
 alias rake='noglob rake'
+
+fixedrake() {
+    bundle exec rake "$1"
+}
+alias berake=fixedrake
+alias berspec='bundle exec rspec'
 
 # alias g='git'
 alias gs='git status'
