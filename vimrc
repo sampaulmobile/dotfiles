@@ -61,6 +61,7 @@ let mapleader=","
 
 "NERDTree toggle set to capital T
 map T :NERDTreeToggle<CR>
+let g:NERDTreeWinSize = 20
 
 "TagBar toggle set to leader + b
 let g:tagbar_usearrows = 1

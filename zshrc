@@ -53,7 +53,7 @@ dfdbconnect() {
     $DOC_HOME/utilities/docformation/docconnection.rb demo.foundationdb.$1
 }
 alias cdfdb=dfdbconnect
-alias cdfdb='$DOC_HOME/utilities/docformation/docconnection.rb demo.foundationdb.0'
+# alias cdfdb='$DOC_HOME/utilities/docformation/docconnection.rb demo.foundationdb.0'
 
 pwebconnect() {
     cd $DOC_HOME/utilities/docformation
@@ -69,7 +69,7 @@ prappconnect() {
     $DOC_HOME/utilities/docformation/docconnection.rb production.railsapp.$1
 }
 alias cprapp=prappconnect
-alias cprapp='$DOC_HOME/utilities/docformation/docconnection.rb production.railsapp.0'
+# alias cprapp='$DOC_HOME/utilities/docformation/docconnection.rb production.railsapp.0'
 
 dwebdeploy() {
     cd $DOC_HOME/utilities/docformation
@@ -94,6 +94,9 @@ alias dpweb='$DOC_HOME/utilities/docformation/docformation.rb deploy_web product
 alias cchef='docutil && $DOC_HOME/utilities/docformation/docconnection.rb chef.workstation'
 
 alias tag='$DOC_HOME/utilities/docformation/docformation.rb tag_release --repo='
+
+alias pyserv='python -m SimpleHTTPServer'
+alias coffserv='coffee --watch --compile --output lib/ src/'
 
 alias rvmgd='rvm gemset use docurated'
 alias rvmgdu='rvm gemset use docurated_util'
@@ -131,6 +134,9 @@ grepfindi() {
 }
 alias gfi=grepfindi
 
+#remove vim swap files
+alias rmswp='find . -name "*.sw*" | xargs rm'
+
 #fix for rake tasks
 alias rake='noglob rake'
 
@@ -139,6 +145,9 @@ fixedrake() {
 }
 alias berake=fixedrake
 alias berspec='bundle exec rspec'
+
+#FOR FUNN!!!!
+alias hip='cd $DOC_HOME/scratch && ruby hippost.rb'
 
 # alias g='git'
 alias gs='git status'
