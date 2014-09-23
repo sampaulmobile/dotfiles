@@ -62,6 +62,7 @@ let mapleader=","
 "NERDTree toggle set to capital T
 map T :NERDTreeToggle<CR>
 let g:NERDTreeWinSize = 20
+let NERDTreeIgnore = ['\.pyc$','\.pyo$']
 
 "TagBar toggle set to leader + b
 let g:tagbar_usearrows = 1
@@ -70,6 +71,9 @@ nnoremap <leader>b :TagbarToggle<CR>
 "CtrlP toggle set to leader + t
 map <leader>t :CtrlP<CR>
 nnoremap <silent> <leader>T :ClearCtrlPCache<cr>\|:CtrlP<cr>
+let g:ctrlp_custom_ignore = {
+  \ 'file': '\v\.(pyc|pyo)$',
+  \ }
 
 "TComment remap to c key
 map <leader>/ <c-_><c-_>
@@ -190,6 +194,8 @@ nnoremap g# g#zz
 "clear searches
 nnoremap <Esc> :noh<Return><Esc> 
 
+"global find of word under cursor
+map <leader>g :execute "vimgrep /" . expand("<cword>") . "/j **" <Bar> cw<CR>
 
 " ================ Scrolling ========================
 set scrolloff=8         "Start scrolling when we're 8 lines away from margins

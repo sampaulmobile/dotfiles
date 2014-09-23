@@ -4,93 +4,41 @@ ZSH=$HOME/.oh-my-zsh
 # Theme is symlinked to ~/.oh-my-zsh/custom/
 ZSH_THEME="sampaul"
 
-
+DOC_HOME='/Users/sampaul/Development/Docurated'
 # ============ Aliases =============
 alias dotz="vim ~/dotfiles/zshrc"
 alias dotv="vim ~/dotfiles/vimrc"
-
 alias dev="cd ~/Development/SBP"
-DOC_HOME='/Users/sampaul/Development/Docurated'
+alias startup="~/dotfiles/startup.sh"
 
 alias docweb='cd $DOC_HOME/website/rails && rvmgd'
 alias docutil='cd $DOC_HOME/utilities && rvmgdu'
 alias doccli='cd $DOC_HOME/clients && rvmgdu'
 
+#connect and update docconnections
 alias con='docutil && $DOC_HOME/utilities/docformation/docconnection.rb'
-webconnect() {
-    cd $DOC_HOME/utilities/docformation
-    rvm gemset use docurated_util
-    $DOC_HOME/utilities/docformation/docconnection.rb $1.web.$2
-}
-alias cweb=webconnect
-railsappconnect() {
-    cd $DOC_HOME/utilities/docformation
-    rvm gemset use docurated_util
-    $DOC_HOME/utilities/docformation/docconnection.rb $1.railsapp.$2
-}
-alias crapp=railsappconnect
+alias cupdate='docutil && $DOC_HOME/utilities/docformation/docconnection.rb update'
 
-dwebconnect() {
+baseconnect() {
     cd $DOC_HOME/utilities/docformation
     rvm gemset use docurated_util
-    $DOC_HOME/utilities/docformation/docconnection.rb demo.web.$1
+    $DOC_HOME/utilities/docformation/docconnection.rb $1.$2.$3
 }
-alias cdweb=dwebconnect
-alias cdweb0='$DOC_HOME/utilities/docformation/docconnection.rb demo.web.0'
-alias cdweb1='$DOC_HOME/utilities/docformation/docconnection.rb demo.web.1'
 
-drappconnect() {
-    cd $DOC_HOME/utilities/docformation
-    rvm gemset use docurated_util
-    $DOC_HOME/utilities/docformation/docconnection.rb demo.railsapp.$1
-}
-alias cdrapp=drappconnect
-# alias cdrapp='$DOC_HOME/utilities/docformation/docconnection.rb demo.railsapp.0'
+alias cdweb='baseconnect demo web'
+alias cdapi='baseconnect demo api'
+alias cdrapp='baseconnect demo railsapp'
+alias cdfdb='baseconnect demo foundationdb'
 
-dfdbconnect() {
-    cd $DOC_HOME/utilities/docformation
-    rvm gemset use docurated_util
-    $DOC_HOME/utilities/docformation/docconnection.rb demo.foundationdb.$1
-}
-alias cdfdb=dfdbconnect
-# alias cdfdb='$DOC_HOME/utilities/docformation/docconnection.rb demo.foundationdb.0'
+alias cpweb='baseconnect production web'
+alias cpapi='baseconnect production api'
+alias cprapp='baseconnect production railsapp'
+alias cpfdb='baseconnect production foundationdb'
 
-pwebconnect() {
-    cd $DOC_HOME/utilities/docformation
-    rvm gemset use docurated_util
-    $DOC_HOME/utilities/docformation/docconnection.rb production.web.$1
-}
-alias cpweb=pwebconnect
-# alias cpweb='$DOC_HOME/utilities/docformation/docconnection.rb production.web.12'
+alias csweb='baseconnect stage web'
+alias csrapp='baseconnect stage railsapp'
+alias csfdb='baseconnect stage foundationdb'
 
-prappconnect() {
-    cd $DOC_HOME/utilities/docformation
-    rvm gemset use docurated_util
-    $DOC_HOME/utilities/docformation/docconnection.rb production.railsapp.$1
-}
-alias cprapp=prappconnect
-# alias cprapp='$DOC_HOME/utilities/docformation/docconnection.rb production.railsapp.0'
-
-dwebdeploy() {
-    cd $DOC_HOME/utilities/docformation
-    rvm gemset use docurated_util
-    $DOC_HOME/utilities/docformation/docformation.rb deploy_web demo --branch=$1
-}
-alias ddweb=dwebdeploy
-drappdeploy() {
-    cd $DOC_HOME/utilities/docformation
-    rvm gemset use docurated_util
-    $DOC_HOME/utilities/docformation/docformation.rb deploy_railsapp demo --branch=$1
-}
-alias ddrapp=drappdeploy
-
-webdeploy() {
-    cd $DOC_HOME/utilities/docformation
-    rvm gemset use docurated_util
-    $DOC_HOME/utilities/docformation/docformation.rb deploy_web $1 --branch=$2
-}
-alias dweb=webdeploy
-alias dpweb='$DOC_HOME/utilities/docformation/docformation.rb deploy_web production'
 alias cchef='docutil && $DOC_HOME/utilities/docformation/docconnection.rb chef.workstation'
 
 alias tag='$DOC_HOME/utilities/docformation/docformation.rb tag_release --repo='
@@ -105,7 +53,15 @@ alias rc='rails c'
 alias rsp='rails s -p '
 alias rcd='rails c development'
 alias solrs='cd $DOC_HOME/website/rails/opt/solr/jetty && java -Dsolr.solr.home=docu -jar start.jar'
+alias testsolrs='docweb && bundle exec sunspot-solr start -p 8984'
+alias testsolrr='docweb && bundle exec sunspot-solr run -p 8984'
 alias jira='history | grep -e "DIOR" -e "CAS"'
+
+#start up dynamo for tests to run properly
+alias start_dynamo='cd ~/dynamo && nohup java -Djava.library.path=./DynamoDBLocal_lib -jar DynamoDBLocal.jar -inMemory -port 8888 > ~/dynamoout.txt 2> ~/dynamoerr.text < /dev/null &'
+
+#mount /volumes/vol
+alias mount_vol='sudo mount -t smbfs //Guest@50.17.45.211/vol /private/nfs'
 
 alias c='clear'
 alias cp='cp -iv'
@@ -136,6 +92,11 @@ alias gfi=grepfindi
 
 #remove vim swap files
 alias rmswp='find . -name "*.sw*" | xargs rm'
+rmpython() {
+    find . -name "*.pyc*" | xargs rm
+    find . -name "*.pyo*" | xargs rm
+}
+alias rmpy=rmpython
 
 #fix for rake tasks
 alias rake='noglob rake'
@@ -159,6 +120,11 @@ alias gcam='git commit -a -m '
 alias gpull='git pull origin '
 alias gpush='git push origin '
 alias gmm='git merge master'
+
+# plunchy stuff
+alias pstart='plunchy start '
+alias pstop='plunchy stop '
+alias plist='plunchy -v ls '
 
 # rvm stuff
 alias rvml='rvm list'
