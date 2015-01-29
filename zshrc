@@ -36,26 +36,54 @@ alias cprapp='baseconnect production railsapp'
 alias cpfdb='baseconnect production foundationdb'
 
 alias csweb='baseconnect stage web'
+alias csback='con stage.backends'
 alias csrapp='baseconnect stage railsapp'
 alias csfdb='baseconnect stage foundationdb'
+
+alias cadmin='baseconnect production admin'
 
 alias cchef='docutil && $DOC_HOME/utilities/docformation/docconnection.rb chef.workstation'
 
 alias tag='$DOC_HOME/utilities/docformation/docformation.rb tag_release --repo='
 
-alias pyserv='python -m SimpleHTTPServer'
-alias coffserv='coffee --watch --compile --output lib/ src/'
+alias pyserv='doccli && python -m SimpleHTTPServer'
+alias coffserv='doccli && cd browser && coffee --watch --compile --output lib/ src/'
+# alias cliserv='doccli && pyserv'
+# alias cliserv='doccli && cd browser && coffserv'
+alias clogd='doccli && tail -f app.log'
+alias clog='tail -f ~/.docurated/app.log'
 
 alias rvmgd='rvm gemset use docurated'
 alias rvmgdu='rvm gemset use docurated_util'
 alias rs='rails s'
 alias rc='rails c'
 alias rsp='rails s -p '
-alias rcd='rails c development'
-alias solrs='cd $DOC_HOME/website/rails/opt/solr/jetty && java -Dsolr.solr.home=docu -jar start.jar'
+alias rcd='docweb && rails c development'
+alias rsd='docweb && thin start --ssl --ssl-verify --ssl-key-file ~/Development/server.key --ssl-cert-file ~/Development/server.crt'
+alias solrsold='cd $DOC_HOME/website/rails/opt/solr/jetty && java -Dsolr.solr.home=docu -jar start.jar'
+alias solrs='cd /opt/solr/solr-4.10.2/example && java -jar start.jar'
 alias testsolrs='docweb && bundle exec sunspot-solr start -p 8984'
 alias testsolrr='docweb && bundle exec sunspot-solr run -p 8984'
 alias jira='history | grep -e "DIOR" -e "CAS"'
+
+alias wlog='docweb && tail -f log/development.log'
+
+
+alias pd='doccli && python docurated.py'
+
+# alias events='docweb && bundle exec ruby bin/event_trackor_server_control.rb start'
+alias eventr='docweb && bundle exec ruby bin/event_trackor_server_control.rb restart'
+alias events='docweb && bundle exec ruby bin/event_trackor_server_control.rb stop'
+
+#workers
+alias ressched='docweb && resque-scheduler --environment development'
+alias respool='docweb && resque-pool --environment development'
+alias sidekiq='docweb && RAILS_ENV=development sh bin/sidekiq.sh start'
+alias dresq='docutil && docformation/docconnection.rb demo.railsapp "ps -ef f | grep resque"'
+alias sresq='docutil && docformation/docconnection.rb stage.railsapp "ps -ef f | grep resque"'
+
+alias bci='cd $DOC_HOME/time && rmswp && vim bci.txt'
+alias notes='cd ~/Development/SBP/notes && rmswp && vim notes.txt'
 
 #start up dynamo for tests to run properly
 alias start_dynamo='cd ~/dynamo && nohup java -Djava.library.path=./DynamoDBLocal_lib -jar DynamoDBLocal.jar -inMemory -port 8888 > ~/dynamoout.txt 2> ~/dynamoerr.text < /dev/null &'
@@ -79,14 +107,21 @@ alias gi='grep -rni '
 alias hist='history'
 alias histg='history | grep'
 
-alias psg='ps aux | grep'
+alias psg=psgrep
+psgrep() {
+    ps aux | grep $1 | grep -v grep
+}
+psgrepi() {
+    ps aux | grep -i $1 | grep -v grep
+}
+alias psgi=psgrepi
 
 grepfind() {
-    find . -name "*.$1" | xargs grep -n "$2"
+    find . -name "*.$1" | xargs grep --color=auto -n "$2"
 }
 alias gf=grepfind
 grepfindi() {
-    find . -name "*.$1" | xargs grep -ni "$2"
+    find . -name "*.$1" | xargs grep --color=auto -ni "$2"
 }
 alias gfi=grepfindi
 
@@ -110,6 +145,35 @@ alias berspec='bundle exec rspec'
 #FOR FUNN!!!!
 alias hip='cd $DOC_HOME/scratch && ruby hippost.rb'
 
+#websites!!
+alias hubc='open https://github.com/Docurated/clients'
+alias hubw='open https://github.com/Docurated/website'
+alias hubu='open https://github.com/Docurated/utilities'
+alias hubs='open https://github.com/Docurated/services'
+
+searchgit() {
+    open "https://github.com/Docurated/$1/search?utf8=✓&q=$2"
+}
+alias hubcs='searchgit clients'
+alias hubws='searchgit website'
+alias hubus='searchgit utilities'
+alias hubss='searchgit services'
+
+alias sl='open http://www.seamless.com/food-delivery/vendors.m'
+alias slmmg='open http://www.seamless.com/food-delivery/muscle-maker-grill-chelsea-new-york-city.29481.r'
+alias sltoast='open http://www.seamless.com/food-delivery/toasties-delicatessen-new-york-city.1898.r'
+alias slzumi='open http://www.seamless.com/food-delivery/izumi-sushi-new-york-city.1688.r'
+
+alias weather='open http://www.weather.com/weather/hourbyhour/l/10012:4:US'
+
+alias resqd='open https://demosecure.docurated.com/site/resque/overview'
+alias resqp='open https://admin.docurated.com/site/resque/overview'
+
+alias jenk='open https://jenkins.docurated.com/'
+alias jenkc='open https://jenkins.docurated.com/job/Client%20Build/'
+alias jenks='open https://jenkins.docurated.com/job/BuildTestDeployWebStage/'
+alias jenkw='open https://jenkins.docurated.com/job/BuildTestDeployWebMaster/'
+
 # alias g='git'
 alias gs='git status'
 alias ga='git add '
@@ -125,12 +189,22 @@ alias gmm='git merge master'
 alias pstart='plunchy start '
 alias pstop='plunchy stop '
 alias plist='plunchy -v ls '
+alias pstarts='pstart redis && pstart post && pstart mongo'
+alias startworkers='ressched &; respool &; sidekiq &'
+alias startall='pstarts; testsolrs; start_dynamo; startworkers; solrs &'
+alias startcli='pyserv &; coffserv &; doccli; mount_vol'
 
 # rvm stuff
 alias rvml='rvm list'
 alias rvmgl='rvm gemset list'
 alias rvmg='rvm gemset use'
 alias rvmrc="echo 'rvm --create use$1' >> .rvmrc"
+
+#spec testing
+alias ber='bundle exec rspec'
+
+#shared drive mounting
+alias msd='sudo mount -t smbfs //Guest@50.17.45.211/vol /private/nfs'
 
 # Use vi-mode in the shell
 bindkey -v
@@ -162,7 +236,7 @@ setopt HIST_FIND_NO_DUPS
 # DISABLE_AUTO_TITLE="true"
 
 # Oh-my-zsh plugins
-plugins=(autojump brew bunder command-not-found gem nyan osx python rails ruby rvm sublime textmate vi-mode web-search zsh-syntax-highlighting)
+plugins=(autojump brew bunder command-not-found gem nyan osx python ruby rvm sublime textmate vi-mode web-search zsh-syntax-highlighting)
 
 source $ZSH/oh-my-zsh.sh
 

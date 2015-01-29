@@ -62,7 +62,7 @@ let mapleader=","
 "NERDTree toggle set to capital T
 map T :NERDTreeToggle<CR>
 let g:NERDTreeWinSize = 20
-let NERDTreeIgnore = ['\.pyc$','\.pyo$']
+let NERDTreeIgnore = ['\.pyc$','\.pyo$', '\.db$']
 
 "TagBar toggle set to leader + b
 let g:tagbar_usearrows = 1
@@ -70,6 +70,8 @@ nnoremap <leader>b :TagbarToggle<CR>
 
 "CtrlP toggle set to leader + t
 map <leader>t :CtrlP<CR>
+
+"leader + shift + t => reload CtrlP"
 nnoremap <silent> <leader>T :ClearCtrlPCache<cr>\|:CtrlP<cr>
 let g:ctrlp_custom_ignore = {
   \ 'file': '\v\.(pyc|pyo)$',

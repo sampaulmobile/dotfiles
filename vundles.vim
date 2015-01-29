@@ -174,6 +174,9 @@ Bundle "mattn/webapi-vim.git"
 "siver searcher, similar to ack
 "Bundle "rking/ag.vim"
 
+"enable ack in vim
+Bundle 'mileszs/ack.vim'
+
 Bundle "scrooloose/nerdtree.git"
 
 "syntax checking
