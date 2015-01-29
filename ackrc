@@ -1,0 +1,17 @@
+#ACK rc file woooo
+
+# Always sort the files
+#--sort−files
+ 
+# Always color, even if piping to a another program
+--color
+ 
+# group
+--group
+
+# Use "less −r" as my pager
+# --pager
+# less -r
+
+
+
