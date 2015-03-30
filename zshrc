@@ -44,7 +44,18 @@ alias cadmin='baseconnect production admin'
 
 alias cchef='docutil && $DOC_HOME/utilities/docformation/docconnection.rb chef.workstation'
 
+alias dfdbstat='docutil && $DOC_HOME/utilities/docformation/docconnection.rb demo.foundationdb.10 "fdbcli --exec \"status details\""'
+alias pfdbstat='docutil && $DOC_HOME/utilities/docformation/docconnection.rb production.foundationdb.3 "fdbcli --exec \"status details\""'
+
 alias tag='$DOC_HOME/utilities/docformation/docformation.rb tag_release --repo='
+
+setDemoVersion() {
+    cd $DOC_HOME/clients/deploy
+    rm client_demo_version.txt
+    touch client_demo_version.txt
+    echo $1 > client_demo_version.txt
+    s3cmd put client_demo_version.txt s3://docurated-private/client_demo_version.txt
+}
 
 alias pyserv='doccli && python -m SimpleHTTPServer'
 alias coffserv='doccli && cd browser && coffee --watch --compile --output lib/ src/'
@@ -76,9 +87,20 @@ alias eventr='docweb && bundle exec ruby bin/event_trackor_server_control.rb res
 alias events='docweb && bundle exec ruby bin/event_trackor_server_control.rb stop'
 
 #workers
-alias ressched='docweb && resque-scheduler --environment development'
-alias respool='docweb && resque-pool --environment development'
-alias sidekiq='docweb && RAILS_ENV=development sh bin/sidekiq.sh start'
+alias start_resqs='docweb && resque-scheduler --environment development &'
+alias start_resqp='docweb && resque-pool --environment development &'
+alias start_sidekiq='docweb && RAILS_ENV=development sh bin/sidekiq.sh start &'
+
+alias stop_resqs='pkill -f "resque-scheduler"'
+alias stop_resqp='pkill -f "resque-pool-master"'
+alias stop_sidekiq='docweb && RAILS_ENV=development sh bin/sidekiq.sh stop'
+
+alias start_workers='start_resqs; start_resqp; start_sidekiq'
+alias stop_workers='stop_resqs; stop_resqp; stop_sidekiq'
+
+alias start_all='pstarts; testsolrs; start_dynamo; start_workers; solrs &'
+alias start_cli='pyserv &; coffserv &; doccli; mount_vol'
+
 alias dresq='docutil && docformation/docconnection.rb demo.railsapp "ps -ef f | grep resque"'
 alias sresq='docutil && docformation/docconnection.rb stage.railsapp "ps -ef f | grep resque"'
 
@@ -190,9 +212,6 @@ alias pstart='plunchy start '
 alias pstop='plunchy stop '
 alias plist='plunchy -v ls '
 alias pstarts='pstart redis && pstart post && pstart mongo'
-alias startworkers='ressched &; respool &; sidekiq &'
-alias startall='pstarts; testsolrs; start_dynamo; startworkers; solrs &'
-alias startcli='pyserv &; coffserv &; doccli; mount_vol'
 
 # rvm stuff
 alias rvml='rvm list'

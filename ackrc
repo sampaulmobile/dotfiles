@@ -13,5 +13,8 @@
 # --pager
 # less -r
 
+# only search with case sensitivity if there is mixed case
+--smart-case
 
-
+# Sort the files
+--sort-files

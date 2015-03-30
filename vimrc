@@ -47,7 +47,6 @@ if filereadable(expand("~/.vim/vundles.vim"))
   source ~/.vim/vundles.vim
 endif
 
-
 " Change leader to a comma because the backslash is too far away
 let mapleader=","
 
@@ -58,6 +57,11 @@ let mapleader=","
   nmap <Leader>a: :Tabularize /:\zs<CR>
   vmap <Leader>a: :Tabularize /:\zs<CR>
 "endif
+
+" leader + f to startup an ack search
+nmap <Leader>f :Ack<Space>
+let g:ack_default_options =
+      \ " -s -H --nocolor --nogroup --nocolumn --smart-case --follow"
 
 "NERDTree toggle set to capital T
 map T :NERDTreeToggle<CR>
@@ -89,6 +93,8 @@ map <leader>u :GundoToggle<CR>
 "Remapping yankring n/p to meta key
 let g:yankring_replace_n_pkey = '<m-p>'
 let g:yankring_replace_n_nkey = '<m-n>'
+
+map <leader>gb :Gblame<CR>
 
 "let g:UltiSnipsExpandTrigger=""
 "let g:UltiSnipsJumpForwardTrigger=""
@@ -197,7 +203,7 @@ nnoremap g# g#zz
 nnoremap <Esc> :noh<Return><Esc> 
 
 "global find of word under cursor
-map <leader>g :execute "vimgrep /" . expand("<cword>") . "/j **" <Bar> cw<CR>
+"map <leader>g :execute "vimgrep /" . expand("<cword>") . "/j **" <Bar> cw<CR>
 
 " ================ Scrolling ========================
 set scrolloff=8         "Start scrolling when we're 8 lines away from margins
