@@ -49,6 +49,17 @@ alias pfdbstat='docutil && $DOC_HOME/utilities/docformation/docconnection.rb pro
 
 alias tag='$DOC_HOME/utilities/docformation/docformation.rb tag_release --repo='
 
+taillog() {
+    cd $DOC_HOME/utilities/docformation
+    rvm gemset use docurated_util
+    lines=100
+    N=${2:-$lines}
+    ./docconnection.rb $1.web "tail -n $N /mnt/app/website/rails/log/$1.log"
+}
+
+alias taild='taillog demo'
+alias tailp='taillog production'
+
 setDemoVersion() {
     cd $DOC_HOME/clients/deploy
     rm client_demo_version.txt
