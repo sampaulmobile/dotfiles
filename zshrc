@@ -14,6 +14,7 @@ alias startup="~/dotfiles/startup.sh"
 alias docweb='cd $DOC_HOME/website/rails && rvmgd'
 alias docutil='cd $DOC_HOME/utilities && rvmgdu'
 alias doccli='cd $DOC_HOME/clients && rvmgdu'
+alias docserv='cd $DOC_HOME/services'
 
 #connect and update docconnections
 alias con='docutil && $DOC_HOME/utilities/docformation/docconnection.rb'
@@ -108,6 +109,8 @@ alias stop_sidekiq='docweb && RAILS_ENV=development sh bin/sidekiq.sh stop'
 
 alias start_workers='start_resqs; start_resqp; start_sidekiq'
 alias stop_workers='stop_resqs; stop_resqp; stop_sidekiq'
+
+alias start_services='cd $DOC_HOME/services/javaworker && ./gradlew -Denv=development master:run'
 
 alias start_all='pstarts; testsolrs; start_dynamo; start_workers; solrs &'
 alias start_cli='pyserv &; coffserv &; doccli; mount_vol'
@@ -222,7 +225,7 @@ alias gmm='git merge master'
 alias pstart='plunchy start '
 alias pstop='plunchy stop '
 alias plist='plunchy -v ls '
-alias pstarts='pstart redis && pstart post && pstart mongo'
+alias pstarts='pstart redis && pstart post && pstart mongo && pstart fluxdb88 && pstart cass'
 
 # rvm stuff
 alias rvml='rvm list'
@@ -266,7 +269,7 @@ setopt HIST_FIND_NO_DUPS
 # DISABLE_AUTO_TITLE="true"
 
 # Oh-my-zsh plugins
-plugins=(autojump brew bunder command-not-found gem nyan osx python ruby rvm sublime textmate vi-mode web-search zsh-syntax-highlighting)
+plugins=(autojump brew bunder command-not-found gem nyan osx python ruby rvm vi-mode web-search zsh-syntax-highlighting)
 
 source $ZSH/oh-my-zsh.sh
 
@@ -280,14 +283,13 @@ export PATH="/usr/local/heroku/bin:$PATH"
 [[ -s "$HOME/.rvm/scripts/rvm" ]] && source "$HOME/.rvm/scripts/rvm" 
 typeset -U path
 
-
 # =============== Autocomplete Stuff ==============
-source ~/.zsh-autosuggestions/autosuggestions.zsh
+# source ~/.zsh-autosuggestions/autosuggestions.zsh
 # Enable autosuggestions automatically
-zle-line-init() {
-    zle autosuggest-start
-}
-zle -N zle-line-init
+# zle-line-init() {
+#     zle autosuggest-start
+# }
+# zle -N zle-line-init
 # use ctrl+t to toggle autosuggestions(hopefully this wont be needed as
 # zsh-autosuggestions is designed to be unobtrusive)
 bindkey '^T' autosuggest-toggle
