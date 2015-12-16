@@ -7,10 +7,14 @@ ZSH_THEME="sampaul"
 DOC_HOME='/Users/sampaul/Development/Docurated'
 
 
+# ===== ENV VARIABLES ========
+source ~/dotfiles/envrc
+
 # ===== DOCKER ENV VARIABLES ========
 export DOCKER_HOST=tcp://192.168.59.103:2376
 export DOCKER_CERT_PATH=/Users/sampaul/.boot2docker/certs/boot2docker-vm
 export DOCKER_TLS_VERIFY=1
+
 
 # ============ Aliases =============
 alias dotz="vim ~/dotfiles/zshrc"
