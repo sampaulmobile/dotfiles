@@ -5,6 +5,13 @@ ZSH=$HOME/.oh-my-zsh
 ZSH_THEME="sampaul"
 
 DOC_HOME='/Users/sampaul/Development/Docurated'
+
+
+# ===== DOCKER ENV VARIABLES ========
+export DOCKER_HOST=tcp://192.168.59.103:2376
+export DOCKER_CERT_PATH=/Users/sampaul/.boot2docker/certs/boot2docker-vm
+export DOCKER_TLS_VERIFY=1
+
 # ============ Aliases =============
 alias dotz="vim ~/dotfiles/zshrc"
 alias dotv="vim ~/dotfiles/vimrc"
@@ -15,6 +22,7 @@ alias docweb='cd $DOC_HOME/website/rails && rvmgd'
 alias docutil='cd $DOC_HOME/utilities && rvmgdu'
 alias doccli='cd $DOC_HOME/clients && rvmgdu'
 alias docserv='cd $DOC_HOME/services'
+alias docevents='cd $DOC_HOME/events'
 
 #connect and update docconnections
 alias con='docutil && $DOC_HOME/utilities/docformation/docconnection.rb'
@@ -47,6 +55,9 @@ alias cchef='docutil && $DOC_HOME/utilities/docformation/docconnection.rb chef.w
 
 alias dfdbstat='docutil && $DOC_HOME/utilities/docformation/docconnection.rb demo.foundationdb.10 "fdbcli --exec \"status details\""'
 alias pfdbstat='docutil && $DOC_HOME/utilities/docformation/docconnection.rb production.foundationdb.3 "fdbcli --exec \"status details\""'
+
+alias dcql='cqlsh demo.cassandra.0'
+alias pcql='cqlsh production.cassandra.0'
 
 alias tag='$DOC_HOME/utilities/docformation/docformation.rb tag_release --repo='
 
@@ -112,7 +123,7 @@ alias stop_workers='stop_resqs; stop_resqp; stop_sidekiq'
 
 alias start_services='cd $DOC_HOME/services/javaworker && ./gradlew -Denv=development master:run'
 
-alias start_all='pstarts; testsolrs; start_dynamo; start_workers; solrs &'
+alias start_all='pstarts; testsolrs; start_dynamo; solrs &'
 alias start_cli='pyserv &; coffserv &; doccli; mount_vol'
 
 alias dresq='docutil && docformation/docconnection.rb demo.railsapp "ps -ef f | grep resque"'
@@ -225,7 +236,7 @@ alias gmm='git merge master'
 alias pstart='plunchy start '
 alias pstop='plunchy stop '
 alias plist='plunchy -v ls '
-alias pstarts='pstart redis && pstart post && pstart mongo && pstart fluxdb88 && pstart cass'
+alias pstarts='pstart redis && pstart post && pstart mongo && pstart fluxdb88 && pstart cass && pstart zoo && pstart kafka && pstart elastic && pstart kibana'
 
 # rvm stuff
 alias rvml='rvm list'
