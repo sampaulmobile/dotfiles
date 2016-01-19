@@ -17,6 +17,8 @@ export DOCKER_TLS_VERIFY=1
 
 
 # ============ Aliases =============
+alias todo="vim ~/TODO.taskpaper"
+
 alias dotz="vim ~/dotfiles/zshrc"
 alias dotv="vim ~/dotfiles/vimrc"
 alias dev="cd ~/Development/SBP"
@@ -42,6 +44,7 @@ alias cdweb='baseconnect demo web'
 alias cdapi='baseconnect demo api'
 alias cdrapp='baseconnect demo railsapp'
 alias cdfdb='baseconnect demo foundationdb'
+alias cdev='baseconnect demo events'
 
 alias cpweb='baseconnect production web'
 alias cpapi='baseconnect production api'
@@ -294,9 +297,21 @@ export PATH=/usr/local/bin:/usr/local/sbin:/bin:/usr/sbin:/sbin:/usr/bin:/opt/X1
 export PATH=$PATH:/Users/sampaul/Library/Python/2.7/bin
 ### Added by the Heroku Toolbelt
 export PATH="/usr/local/heroku/bin:$PATH"
+
+# initialize pyenv
+eval "$(pyenv init -)"
+
+# Virtualenv/VirtualenvWrapper
+#export WORKON_HOME=$HOME/.virtualenvs
+#source ~/.pyenv/shims/virtualenvwrapper.sh
+
 # Load RVM into a shell session *as a function*
 [[ -s "$HOME/.rvm/scripts/rvm" ]] && source "$HOME/.rvm/scripts/rvm" 
 typeset -U path
+
+
+alias nw='~/Downloads/nwjs-v0.12.3-osx-x64/nwjs.app/Contents/MacOS/nwjs'
+
 
 # =============== Autocomplete Stuff ==============
 # source ~/.zsh-autosuggestions/autosuggestions.zsh

@@ -16,6 +16,11 @@ call vundle#rc()
 " let Vundle manage Vundle (required)
 Bundle "gmarik/vundle"
 
+" Taskpaper (todo list) helpers/syntax
+Bundle "davidoc/taskpaper.vim"
+
+" syntax highlighting for salt
+Bundle "saltstack/salt-vim.git"
 
 " ======================== Ruby, Rails, Rake =======================
 "Bundle "astashov/vim-ruby-debugger"
