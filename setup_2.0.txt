@@ -1,0 +1,140 @@
+install Xcode FIRST (not just command line tools), download takes forever
+
+INSTALL CHROME
+
+INSTALL HOME-BREW
+ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)”
+
+INSTALL GIT
+ssh-keygen -t rsa -b 4096 -C "sampaulmobile@gmail.com”
+pbcopy < ~/.ssh/id_rsa.pub
+paste into https://github.com/settings/ssh
+
+INSTALL ZSH
+brew install zsh
+sudo chsh -s /bin/zsh
+
+INSTALL OH-MY-ZSH
+sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh)”
+
+INSTALL VIM / MACVIM (REQUIRES XCODE TO BE INSTALLED/RUN)
+brew install vim
+brew install macvim
+
+brew install redis
+ln -sfv /usr/local/opt/redis/*.plist ~/Library/LaunchAgents
+launchctl load ~/Library/LaunchAgents/homebrew.mxcl.redis.plist
+
+brew install mongo
+ln -sfv /usr/local/opt/mongodb/*.plist ~/Library/LaunchAgents
+launchctl load ~/Library/LaunchAgents/homebrew.mxcl.mongodb.plist
+mongo
+db.createUser({user: "sampaul", pwd: "password", roles: ["readWrite"]})
+
+brew install postgresql
+ln -sfv /usr/local/opt/postgresql/*.plist ~/Library/LaunchAgents
+launchctl load ~/Library/LaunchAgents/homebrew.mxcl.postgresql.plist
+createuser sampaul -P -s
+createdb -h localhost -p 5432 -U sampaul docurated
+createdb -h localhost -p 5432 -U sampaul docurated_test
+
+INSTALL DOT FILES
+cd ~ && git clone git@github.com:sampaulmobile/dotfiles.git
+~/dotfiles/links.sh
+install/setup vundle
+git clone https://github.com/VundleVim/Vundle.vim.git ~/.vim/bundle/Vundle.vim
+cd ~ && vim +PluginInstall +qall
+
+INSTALL RVM
+\curl -sSL https://get.rvm.io | bash
+source /Users/sampaul/.rvm/scripts/rvm
+rvm install ruby-1.9.3
+
+CLONE REPOS
+git clone git@github.com:Docurated/website.git
+rvm use 1.9.3@docurated —create
+brew install imagemagick
+(brew uninstall v8) - if v8 is already installed
+gem install therubyracer -v ‘0.12.1'
+brew install v8
+gem install libv8 -v '3.16.14.7' -- --with-system-v8
+bundle install
+
+SETUP CONFIGS
+copy siteconfig.yml from email
+copy database.yml from email
+
+RAILS CONSOLE
+DO THIS FIRST because migrations create the UNKNOWN ORGANIZATION
+o = Organization.create(name: "Docurated", domain: "docurated.com")
+u = User.new(first_name: "Sam", last_name: "Paul", organization_id: 1, password: 'asdfasdf', email: "sam@docurated.com", confirmed: true)
+u.save validate:false
+u.confirm!
+os = OrganizationsSolrCluster.first
+os.update_attribute(:cluster_url, 'http://localhost:8983/solr')
+os.update_attribute(:in_zookeeper, false)
+
+rake db:migrate 
+
+git clone git@github.com:Docurated/utilities.git
+rvm use 1.9.3@docurated_util —create
+bundle install gemfile in utilities folder and in chef-server
+
+git clone git@github.com:Docurated/services.git
+git clone git@github.com:techblue/jmagick.git
+sudo mkdir -p /usr/local/lib/jmagick/lib
+cd jmagick
+./configure --with-java-home=/System/Library/Frameworks/JavaVM.framework/Versions/Current --with-magick-home=/usr/local/Cellar/imagemagick/6.9.3-0 --prefix=/usr/local/lib/jmagick
+sudo make all
+sudo make install
+sudo ln -s /usr/local/lib/jmagick/lib/libJMagick-6.7.7.so /Library/Java/Extensions/libJMagick.jnilib
+sudo ln -s /usr/local/lib/jmagick/lib/libJMagick-6.7.7.so /usr/local/lib/jmagick/lib/libJMagick.jnilib
+copy over newest config.groovy from email
+copy over newest hibernate.properties
+copy over newest log4j.properties
+sudo mkdir -p /var/run/jworker/pids
+sudo chmod 777 /var/run/jworker/pids
+
+./gradlew -Denv=development master:run
+
+
+git clone git@github.com:Docurated/events.git
+
+SETUP SOLR
+download - http://archive.apache.org/dist/lucene/solr/4.10.4/solr-4.10.4.tgz
+sudo mkdir -p /opt/solr
+sudo mv ~/Downloads/solr-4.10.4 /opt/solr
+sudo mkdir -p /opt/solr/cores /opt/solr/plugins
+sudo mkdir -p /opt/cores/default/conf /opt/cores/space/conf /opt/cores/spacestile/conf
+sudo cp -r /opt/solr/solr-4.10.4/example/solr/collection1/conf /opt/solr/cores/default
+sudo cp -r /opt/solr/solr-4.10.4/example/solr/collection1/conf /opt/solr/cores/space
+sudo cp -r /opt/solr/solr-4.10.4/example/solr/collection1/conf /opt/solr/cores/spacestile
+cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/*_synonyms.txt /opt/solr/cores/default/conf
+cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/*_synonyms.txt /opt/solr/cores/space/conf
+cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/*_synonyms.txt /opt/solr/cores/spacestile/conf
+cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/schema.xml /opt/solr/cores/default/conf
+cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/schema.xml /opt/solr/cores/space/conf
+cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/schema.xml /opt/solr/cores/spacestile/conf
+cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/solrconfig.xml /opt/solr/cores/default/conf
+cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/solrconfig.xml /opt/solr/cores/space/conf
+cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/solrconfig.xml /opt/solr/cores/spacestile/conf
+cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/wdfftypes.txt /opt/solr/cores/default/conf
+cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/wdfftypes.txt /opt/solr/cores/space/conf
+cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/wdfftypes.txt /opt/solr/cores/spacestile/conf
+sudo mkdir -p /opt/cores/default/data /opt/cores/space/data /opt/cores/spacestile/data
+echo "name=default" >> /opt/solr/cores/default/core.properties
+echo “name=space" >> /opt/solr/cores/space/core.properties
+echo “name=spacestile" >> /opt/solr/cores/spacestile/core.properties
+
+con copy demo-solr-2.solr.2b:/opt/solr/cores/solr.xml /opt/solr/cores/
+con copy demo-solr-2.solr.2b:/opt/solr/plugins/hon-lucene-synonyms-1.3.4-solr-4.3.0.jar /opt/solr/plugins
+con copy demo-solr-2.solr.2b:/opt/solr/plugins/solr-profile-score-0.1.4.jar /opt/solr/plugins
+sudo chown -R sampaul /opt/solr
+
+INSTALL JDK
+http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html
+
+
+
+
+

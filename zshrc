@@ -8,7 +8,8 @@ DOC_HOME='/Users/sampaul/Development/Docurated'
 
 
 # ===== ENV VARIABLES ========
-source ~/dotfiles/envrc
+# source envrc (if it exists)
+[[ -f ~/dotfiles/envrc ]] && source ~/dotfiles/envrc
 
 # ===== DOCKER ENV VARIABLES ========
 export DOCKER_HOST=tcp://192.168.59.103:2376
@@ -102,7 +103,8 @@ alias rsp='rails s -p '
 alias rcd='docweb && rails c development'
 alias rsd='docweb && thin start --ssl --ssl-verify --ssl-key-file ~/Development/server.key --ssl-cert-file ~/Development/server.crt'
 alias solrsold='cd $DOC_HOME/website/rails/opt/solr/jetty && java -Dsolr.solr.home=docu -jar start.jar'
-alias solrs='cd /opt/solr/solr-4.10.2/example && java -jar start.jar'
+alias solrs='cd /opt/solr/solr-4.*/example && java -jar start.jar'
+alias solrsnew='/opt/solr/solr-4.*/bin/solr start -s /opt/solr/cores'
 alias testsolrs='docweb && bundle exec sunspot-solr start -p 8984'
 alias testsolrr='docweb && bundle exec sunspot-solr run -p 8984'
 alias jira='history | grep -e "DIOR" -e "CAS"'
