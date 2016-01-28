@@ -10,8 +10,10 @@
 " Filetype off is required by vundle
 filetype off
 
-set rtp+=~/.vim/bundle/vundle/
-call vundle#rc()
+" set rtp+=~/.vim/bundle/vundle/ *** OLD ***
+" call vundle#rc() *** OLD ***
+set rtp+=~/.vim/bundle/Vundle.vim
+call vundle#begin()
 
 " let Vundle manage Vundle (required)
 Bundle "gmarik/vundle"
@@ -294,5 +296,6 @@ Bundle "vim-scripts/TagHighlight.git"
 "Bundle 'file:///Users/gmarik/path/to/plugin'
 " ...
 
+call vundle#end() " required now for new vundle
 "Filetype plugin indent on is required by vundle
 filetype plugin indent on

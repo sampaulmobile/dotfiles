@@ -53,6 +53,7 @@ mac os changes
   -hotcorners: prefs->Mission control
   -zoom: prefs->accessibility
   -tab key: prefs->keyboard->shortcuts
+  -double click to minimize: prefs->dock
 
 
 install TMUX w/ brew
