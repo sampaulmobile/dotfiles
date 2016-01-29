@@ -7,8 +7,8 @@ JIRA_URL='https://docurated.atlassian.net'
 
 alias todo='vim $NOT_PUBLIC/TODO.taskpaper'
 
-alias dotz='vim $DOTFILES/zshrc'
-alias dotv='vim $DOTFILES/vimrc'
+alias dotz='vim $LINKS/zshrc'
+alias dotv='vim $LINKS/vimrc'
 alias dev='cd ~/Development/SBP'
 
 alias docweb='cd $DOC_HOME/website/rails && rvmgd'

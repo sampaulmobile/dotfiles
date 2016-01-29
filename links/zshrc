@@ -1,6 +1,7 @@
 ###### ===== THE BEST ZSHRC FILE EVER by Sam Paul ===== ######
 DOTFILES='/Users/sampaul/dotfiles'
 SOURCES="$DOTFILES/sources"
+LINKS="$DOTFILES/links"
 
 # ===== OH-MY-ZSH ========
 ZSH=$HOME/.oh-my-zsh
