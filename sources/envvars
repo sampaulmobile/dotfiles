@@ -1,6 +1,0 @@
-# Environment Variables for various sht (not checked into git)
-
-export AWS_ACCESS_KEY_ID=AKIAJFLNMDITIBJ6JWHA
-export AWS_SECRET_ACCESS_KEY=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
-export AWS_DEFAULT_REGION=us-east-1
-export CONSUL_TOKEN=adb4a007-72fa-bc81-86e7-d86382c4601c

@@ -1,7 +1,5 @@
 
 
-
 # Dont want to put our ENV vars in GITHUB
-
-envrc
+**/*env*
 
