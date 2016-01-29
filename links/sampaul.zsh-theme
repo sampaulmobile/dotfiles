@@ -1,7 +1,3 @@
-
-# Load git-prompt methods
-source ~/dotfiles/git-prompt/zshrc.sh
-
 # Get the current ruby version in use with RVM:
 if [ -e ~/.rvm/bin/rvm-prompt ]; then
     RUBY_PROMPT_="%{$fg_bold[blue]%}(%{$FG[124]%}\$(~/.rvm/bin/rvm-prompt s i v g)%{$fg_bold[blue]%})%{$reset_color%} "

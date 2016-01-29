@@ -1,5 +1,7 @@
 #!/bin/bash
 
+DOTFILES=~/dotfiles
+
 echo "Installing homebrew..."
 ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)”
 
@@ -44,10 +46,12 @@ brew cask install utorrent
 # brew cask install 1password
 
 echo "Setting up dotfiles..."
-git clone git@github.com:sampaulmobile/dotfiles.git ~/dotfiles
-~/dotfiles/links.sh
+git clone git@github.com:sampaulmobile/dotfiles.git $DOTFILES
+$DOTFILES/links.sh
 git clone https://github.com/VundleVim/Vundle.vim.git ~/.vim/bundle/Vundle.vim
 cd ~ && vim +PluginInstall +qall
+
+git clone git://github.com/zsh-users/zsh-syntax-highlighting.git ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting
 
 echo "Installing RVM... (+Ruby 1.9.3)"
 \curl -sSL https://get.rvm.io | bash
