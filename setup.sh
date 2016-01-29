@@ -51,8 +51,6 @@ $DOTFILES/links.sh
 git clone https://github.com/VundleVim/Vundle.vim.git ~/.vim/bundle/Vundle.vim
 cd ~ && vim +PluginInstall +qall
 
-git clone git://github.com/zsh-users/zsh-syntax-highlighting.git ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting
-
 echo "Installing RVM... (+Ruby 1.9.3)"
 \curl -sSL https://get.rvm.io | bash
 source /Users/sampaul/.rvm/scripts/rvm

@@ -5,8 +5,13 @@ SOURCES="$DOTFILES/sources"
 # ===== OH-MY-ZSH ========
 ZSH=$HOME/.oh-my-zsh
 ZSH_THEME="sampaul"
+SYNTAX_DIR="$ZSH/custom/plugins/zsh-syntax-highlighting"
+
+#clone zsh-syntax-highlighting if its not there
+[[ ! -d "$SYNTAX_DIR" ]] && git clone git://github.com/zsh-users/zsh-syntax-highlighting.git $SYNTAX_DIR
+
 plugins=(brew command-not-found history jira gem osx python web-search mvn pip zsh-syntax-highlighting)
-[[ -f $ZSH/oh-my-zsh.sh ]] && source $ZSH/oh-my-zsh.sh
+[[ -f "$ZSH/oh-my-zsh.sh" ]] && source $ZSH/oh-my-zsh.sh
 
 # ===== SHELL GIT-STATUS =====
 [[ -f "$SOURCES/gitstatus.sh" ]] && source $SOURCES/gitstatus.sh
