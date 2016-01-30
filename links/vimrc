@@ -88,9 +88,9 @@ nnoremap # #zz
 nnoremap g* g*zz
 nnoremap g# g#zz
 
-"clear searches
-" THIS WAS MESSING UP VIM STARTUP (pressing D would delete first line)
-" nnoremap <Esc> :noh<Return><Esc>
+"clear searches with ESC
+nnoremap <esc> :noh<return><esc>
+nnoremap <esc>^[ <esc>^[
 
 syntax on "turn on syntax highlighting
 
