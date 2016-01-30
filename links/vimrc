@@ -1,9 +1,8 @@
-set nocompatible    "use vim defaults
+" =============================  GENERAL CONFIG  ==============================
+let mapleader=","               "Change leader to a comma
 
-
-" ================ General Config ====================
-
-"win 120 80                      "Diplay - make window 80 wide x 45 tall
+"win 120 80                     "Make window 80 wide x 45 tall
+set nocompatible                "Use vim defaults
 set ru                          "Turn on ruler
 set number                      "Line numbers are good
 set backspace=indent,eol,start  "Allow backspace in insert mode
@@ -13,13 +12,67 @@ set showmode                    "Show current mode down the bottom
 set gcr=a:blinkon0              "Disable cursor blink
 set visualbell                  "No sounds
 set autoread                    "Reload files changed outside vim
+set hidden                      "Buffers exist in the background
+set ignorecase                  "Ignore case when searching
+set wrapscan                    "Search wrap around the EOF
+set smartcase                   "Override 'ignorecase' if search has uppercase
+set incsearch                   "Do incremental searching
+set hlsearch                    "Highlight searches
+set nowrap                      "Don't wrap lines
+set linebreak                   "Wrap lines at convenient points
+set scrolloff=8                 "Start scrolling 8 lines away from margins
+set sidescrolloff=15
+set sidescroll=1
+set shiftwidth=4
+set softtabstop=4
+set tabstop=4
+set expandtab
+"set cin             "c indent
+"set autoindent
+"set smartindent
+"set smarttab
 
-if $TMUX == ''
-  set clipboard+=unnamed
-endif
+set foldnestmax=5               "deepest fold is 5 levels
+set foldmethod=syntax           "fold by syntax
+"set foldmethod=indent          "fold based on indent
+"set nofoldenable               "dont fold by default
 
-" Mappings
+" Display tabs and trailing spaces visually
+set list listchars=tab:\ \ ,trail:·
+
+autocmd FileType ruby set sw=4 sts=4 et
+autocmd FileType haml set sw=4 sts=4 et
+autocmd FileType coffee set sw=4 sts=4 et
+autocmd FileType scss set sw=4 sts=4 et
+autocmd FileType erb set sw=4 sts=4 et
+
+" Keep undo history across sessions, by storing in file.
+silent !mkdir ~/.vim/backups > /dev/null 2>&1
+set undodir=~/.vim/backups
+set undofile
+
+" Auto complete stuff
+set wildmode=list:longest,full     "first list:longest then full
+set wildmenu                       "enable ctrl-n and ctrl-p to scroll thru matches
+set wildignore=*.o,*.obj,*~        "stuff to ignore when tab completing
+set wildignore+=*vim/backups*
+set wildignore+=*sass-cache*
+set wildignore+=*DS_Store*
+set wildignore+=vendor/rails/**
+set wildignore+=vendor/cache/**
+set wildignore+=*.gem
+set wildignore+=log/**
+set wildignore+=tmp/**
+set wildignore+=*.png,*.jpg,*.gif
+
+
+" ================================  MAPPINGS  ==================================
+
+" jj to exit insert mode
 imap jj <Esc>
+
+" toggle fold open/closed with <S-Space> if over a fold
+nnoremap <silent> <S-Space> @=(foldlevel('.')?'za':'l')<CR>
 
 " Move between split windows with Ctrl + arrow keys
 nnoremap <silent> <C-h> <C-w>h
@@ -27,28 +80,34 @@ nnoremap <silent> <C-l> <C-w>l
 nnoremap <silent> <C-k> <C-w>k
 nnoremap <silent> <C-j> <C-w>j
 
-" 5x the up/down scrolling of the window
-" nmap <C-y> 5<C-y>
-" nmap <C-e> 5<C-e>
+"make search results appear in middle of screen
+nnoremap n nzz
+nnoremap N Nzz
+nnoremap * *zz
+nnoremap # #zz
+nnoremap g* g*zz
+nnoremap g# g#zz
 
-" This makes vim act like all other editors, buffers can
-" exist in the background without being in a window.
-" http://items.sjbach.com/319/configuring-vim-right
-set hidden
+"clear searches
+" THIS WAS MESSING UP VIM STARTUP (pressing D would delete first line)
+" nnoremap <Esc> :noh<Return><Esc>
 
-"turn on syntax highlighting
-syntax on
+syntax on "turn on syntax highlighting
 
+"global find of word under cursor
+"map <leader>g :execute "vimgrep /" . expand("<cword>") . "/j **" <Bar> cw<CR>
 
-" =============== Vundle Initialization ===============
-" This loads all the plugins specified in ~/.vim/vundles.vim
-" Use Vundle plugin to manage all other plugins
+if $TMUX == ''
+  set clipboard+=unnamed
+endif
+
+" =============================  INIT VUNDLES  ==============================
 if filereadable(expand("~/.vim/vundles.vim"))
   source ~/.vim/vundles.vim
 endif
 
-" Change leader to a comma because the backslash is too far away
-let mapleader=","
+
+" ========================  VUNDLE/PLUGIN MAPPINGS  =========================
 
 " Set some shortcuts for Tabularize
 "if exists(":Tabularize")
@@ -57,11 +116,6 @@ let mapleader=","
   nmap <Leader>a: :Tabularize /:\zs<CR>
   vmap <Leader>a: :Tabularize /:\zs<CR>
 "endif
-
-" leader + f to startup an ack search
-nmap <Leader>f :Ack<Space>
-let g:ack_default_options =
-      \ " -s -H --nocolor --nogroup --nocolumn --smart-case --follow"
 
 "NERDTree toggle set to capital T
 map T :NERDTreeToggle<CR>
@@ -94,8 +148,14 @@ map <leader>u :GundoToggle<CR>
 let g:yankring_replace_n_pkey = '<m-p>'
 let g:yankring_replace_n_nkey = '<m-n>'
 
+"Mappings for git blame
 map <leader>gb :Gblame<CR>
 map <leader>gh :Gbrowse<CR>
+
+" leader + f to startup an ack search
+" nmap <Leader>f :Ack<Space>
+" let g:ack_default_options =
+"       \ " -s -H --nocolor --nogroup --nocolumn --smart-case --follow"
 
 "let g:UltiSnipsExpandTrigger=""
 "let g:UltiSnipsJumpForwardTrigger=""
@@ -111,11 +171,6 @@ map <leader>gh :Gbrowse<CR>
 "sunmap b
 "sunmap e
 
-"Mappings for Rails.vim
-map <leader><leader>m :Emodel<CR>
-map <leader><leader>c :Econtroller<CR>
-map <leader><leader>v :Eview<CR>
-
 "<leader>ig is default for vim indentation guide
 
 "Need to set coloscheme after vundles are loaded
@@ -125,89 +180,4 @@ colorscheme molokai
 "set background=light             "Options are 'dark' or 'light'
 "Set F5 to toggle background color
 "call togglebg#map("<F5>")
-
-
-" ================ Persistent Undo ==================
-" Keep undo history across sessions, by storing in file.
-" Only works all the time.
-silent !mkdir ~/.vim/backups > /dev/null 2>&1
-set undodir=~/.vim/backups
-set undofile
-
-" ================ Indentation ======================
-
-"filetype on
-
-"set cin             "c indent
-"set autoindent
-"set smartindent
-"set smarttab
-set shiftwidth=4
-set softtabstop=4
-set tabstop=4
-set expandtab
-
-" Filetype Settings
-"filetype indent on
-"filetype plugin on
-
-autocmd FileType ruby set sw=4 sts=4 et
-autocmd FileType haml set sw=4 sts=4 et
-autocmd FileType coffee set sw=4 sts=4 et
-autocmd FileType scss set sw=4 sts=4 et
-autocmd FileType erb set sw=4 sts=4 et
-
-" Display tabs and trailing spaces visually
-set list listchars=tab:\ \ ,trail:·
-set nowrap       "Don't wrap lines
-set linebreak    "Wrap lines at convenient points
-
-
-" ================ Folds ============================
-"set foldmethod=indent   "fold based on indent
-set foldmethod=syntax   "fold by syntax
-set foldnestmax=5       "deepest fold is 3 levels
-"set nofoldenable        "dont fold by default
-" toggle hold with <S-Space> if over a fold
-nnoremap <silent> <S-Space> @=(foldlevel('.')?'za':'l')<CR>
-
-
-" ================ Completion =======================
-set wildmode=list:longest,full     "first list:longest then full
-set wildmenu                       "enable ctrl-n and ctrl-p to scroll thru matches
-set wildignore=*.o,*.obj,*~        "stuff to ignore when tab completing
-set wildignore+=*vim/backups*
-set wildignore+=*sass-cache*
-set wildignore+=*DS_Store*
-set wildignore+=vendor/rails/**
-set wildignore+=vendor/cache/**
-set wildignore+=*.gem
-set wildignore+=log/**
-set wildignore+=tmp/**
-set wildignore+=*.png,*.jpg,*.gif
-
-" Search
-set ignorecase      "ignore case when searching
-set wrapscan        "search wrap around the EOF
-set smartcase       "override 'ignorecase' if search has uppercase
-set incsearch       "do incremental searching
-set hlsearch        "highlight searches
-
-"make search results appear in middle of screen
-nnoremap n nzz
-nnoremap N Nzz
-nnoremap * *zz
-nnoremap # #zz
-nnoremap g* g*zz
-nnoremap g# g#zz    
-"clear searches
-nnoremap <Esc> :noh<Return><Esc> 
-
-"global find of word under cursor
-"map <leader>g :execute "vimgrep /" . expand("<cword>") . "/j **" <Bar> cw<CR>
-
-" ================ Scrolling ========================
-set scrolloff=8         "Start scrolling when we're 8 lines away from margins
-set sidescrolloff=15
-set sidescroll=1
 
