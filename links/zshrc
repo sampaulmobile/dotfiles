@@ -30,11 +30,12 @@ export DOCKER_TLS_VERIFY=1
 # ===== ALIASES =====
 [[ -f "$SOURCES/aliases" ]] && source $SOURCES/aliases
 
+# ===== DOCURATED ALIASES =====
+[[ -f "$SOURCES/docurated_aliases" ]] && source $SOURCES/docurated_aliases
+
 # ===== $PATH ========
 export PATH=/usr/local/bin:/usr/local/sbin:/bin:/usr/sbin:/sbin:/usr/bin:/opt/X11/bin:$PATH
-#Python
 export PATH=$PATH:/Users/sampaul/Library/Python/2.7/bin
-### Added by the Heroku Toolbelt
 export PATH="/usr/local/heroku/bin:$PATH"
 
 # Use vi-mode in the shell

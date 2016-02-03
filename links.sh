@@ -36,8 +36,11 @@ mv ~/.oh-my-zsh/custom/sampaul.zsh-theme $deldir
 ln -s $dir/sampaul.zsh-theme ~/.oh-my-zsh/custom/sampaul.zsh-theme
 echo "Done"
 
-echo "Cloning/setting up zsh syntax highlighting"
-git clone git://github.com/zsh-users/zsh-syntax-highlighting.git ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting
+echo "Linking SSH config"
+mkdir -p ~/.ssh
+mv ~/.ssh/config $deldir
+ln -s $dir/ssh_config ~/.ssh/config
+echo "Done"
 
 echo "ALL FINISHED LINKING RCs"
 echo "DELETING old dotfiles"

@@ -1,0 +1,24 @@
+
+Host gate.mini
+  HostName ec2-54-87-203-240.compute-1.amazonaws.com
+  User Docurated
+  Port 8022
+  HostKeyAlias macmini
+Host windowsbuild
+  HostName windowsbuild
+  User Administrator
+Host docurated.nfs
+  HostName ec2-50-17-45-211.compute-1.amazonaws.com
+  User ubuntu
+
+Host *.service
+  HostName %h.us-east-1-production.consul
+Host production*
+  HostName %h.node.us-east-1-production.consul
+Host demo*
+  HostName %h.node.us-east-1-demo.consul
+Host operations*
+  HostName %h.node.us-east-1-operations.consul
+Host *.service production* demo* operations*
+  User sampaulmobile
+  ProxyCommand ssh -A sampaulmobile@bastion.production.docurated.com nc %h %p
