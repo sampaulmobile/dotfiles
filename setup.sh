@@ -20,6 +20,9 @@ echo "Installing VIm + MacVIm (Make sure XCode is installed/run)"
 brew install vim
 brew install macvim
 
+echo "Installing the Silver Searcher"
+brew install the_silver_searcher
+
 echo "Installing Chrome..."
 brew cask install google-chrome
 

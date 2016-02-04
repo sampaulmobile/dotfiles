@@ -24,8 +24,9 @@ alias egrep='egrep --colour=auto'
 #alias rcp='rsync -v --progress'
 #alias rmv='rsync -v --progress --remove-source-files'
 
-alias g='grep -rn '
-alias gi='grep -rni '
+alias g='ag'
+alias gi='ag -i'
+
 alias hist='history'
 alias histg='history | grep'
 
@@ -40,15 +41,6 @@ grepfindi() { find . -name "*.$1" | xargs grep --color=auto -ni "$2" }
 alias gfi=grepfindi
 
 
-# ============ VIM (cleanup) =============
-alias rmswp='find . -name "*.sw*" | xargs rm'
-rmpython() {
-    find . -name "*.pyc*" | xargs rm
-    find . -name "*.pyo*" | xargs rm
-}
-alias rmpy=rmpython
-
-
 # ============ GIT =============
 # alias g='git'
 alias gs='git status'
@@ -60,6 +52,13 @@ alias gcam='git commit -a -m '
 alias gpull='git pull origin '
 alias gpush='git push origin '
 alias gmm='git merge master'
+
+
+# ============ RVM =============
+alias rvml='rvm list'
+alias rvmgl='rvm gemset list'
+alias rvmg='rvm gemset use'
+alias rvmrc="echo 'rvm --create use$1' >> .rvmrc"
 
 
 # ============ RAILS =============
@@ -85,11 +84,13 @@ alias plist='plunchy -v ls '
 alias pstarts='pstart redis && pstart post && pstart mongo && pstart fluxdb88 && pstart cass && pstart zoo && pstart kafka && pstart elastic && pstart kibana'
 
 
-# ============ RVM =============
-alias rvml='rvm list'
-alias rvmgl='rvm gemset list'
-alias rvmg='rvm gemset use'
-alias rvmrc="echo 'rvm --create use$1' >> .rvmrc"
+# ============ VIM (cleanup) =============
+alias rmswp='find . -name "*.sw*" | xargs rm'
+rmpython() {
+    find . -name "*.pyc*" | xargs rm
+    find . -name "*.pyo*" | xargs rm
+}
+alias rmpy=rmpython
 
 
 # ============ NODE.JS =============
