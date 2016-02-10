@@ -1,12 +1,17 @@
+
+USERNAME=sampaul
+DOCURATED_DIR=~/Docurated
+
+
 install Xcode FIRST (not just command line tools), download takes forever
 
 INSTALL CHROME
 
 INSTALL HOME-BREW
-ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)”
+ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
 
 INSTALL GIT
-ssh-keygen -t rsa -b 4096 -C "sampaulmobile@gmail.com”
+ssh-keygen -t rsa -b 4096 -C "sampaulmobile@gmail.com"
 pbcopy < ~/.ssh/id_rsa.pub
 paste into https://github.com/settings/ssh
 
@@ -15,7 +20,7 @@ brew install zsh
 sudo chsh -s /bin/zsh
 
 INSTALL OH-MY-ZSH
-sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh)”
+sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh)"
 
 INSTALL VIM / MACVIM (REQUIRES XCODE TO BE INSTALLED/RUN)
 brew install vim
@@ -29,14 +34,15 @@ brew install mongo
 ln -sfv /usr/local/opt/mongodb/*.plist ~/Library/LaunchAgents
 launchctl load ~/Library/LaunchAgents/homebrew.mxcl.mongodb.plist
 mongo
-db.createUser({user: "sampaul", pwd: "password", roles: ["readWrite"]})
+# db.createUser({user: "sampaul", pwd: "password", roles: ["readWrite"]})
 
+# CHECK FOR ALREADY INSTALLED
 brew install postgresql
 ln -sfv /usr/local/opt/postgresql/*.plist ~/Library/LaunchAgents
 launchctl load ~/Library/LaunchAgents/homebrew.mxcl.postgresql.plist
 createuser sampaul -P -s
-createdb -h localhost -p 5432 -U sampaul docurated
-createdb -h localhost -p 5432 -U sampaul docurated_test
+createdb -h localhost -p 5432 -U $USERNAME docurated
+createdb -h localhost -p 5432 -U $USERNAME docurated_test
 
 INSTALL DOT FILES
 cd ~ && git clone git@github.com:sampaulmobile/dotfiles.git
@@ -64,6 +70,8 @@ SETUP CONFIGS
 copy siteconfig.yml from email
 copy database.yml from email
 
+rake db:migrate 
+
 RAILS CONSOLE
 DO THIS FIRST because migrations create the UNKNOWN ORGANIZATION
 o = Organization.create(name: "Docurated", domain: "docurated.com")
@@ -73,8 +81,8 @@ u.confirm!
 os = OrganizationsSolrCluster.first
 os.update_attribute(:cluster_url, 'http://localhost:8983/solr')
 os.update_attribute(:in_zookeeper, false)
-
-rake db:migrate 
+OrganizationsSolrCluster.delete_all
+OrganizationsSolrCluster.create(organization_id: 1, is_primary: true, cluster_url: "http://localhost:8983/solr", in_zookeeper: false, transformation: "SpacesTileDocCreator")
 
 git clone git@github.com:Docurated/utilities.git
 rvm use 1.9.3@docurated_util —create
@@ -93,7 +101,7 @@ copy over newest config.groovy from email
 copy over newest hibernate.properties
 copy over newest log4j.properties
 sudo mkdir -p /var/run/jworker/pids
-sudo chmod 777 /var/run/jworker/pids
+sudo chmod 777 /var/run/jworker
 
 ./gradlew -Denv=development master:run
 
@@ -101,40 +109,35 @@ sudo chmod 777 /var/run/jworker/pids
 git clone git@github.com:Docurated/events.git
 
 SETUP SOLR
-download - http://archive.apache.org/dist/lucene/solr/4.10.4/solr-4.10.4.tgz
-sudo mkdir -p /opt/solr
-sudo mv ~/Downloads/solr-4.10.4 /opt/solr
-sudo mkdir -p /opt/solr/cores /opt/solr/plugins
-sudo mkdir -p /opt/cores/default/conf /opt/cores/space/conf /opt/cores/spacestile/conf
-sudo cp -r /opt/solr/solr-4.10.4/example/solr/collection1/conf /opt/solr/cores/default
-sudo cp -r /opt/solr/solr-4.10.4/example/solr/collection1/conf /opt/solr/cores/space
-sudo cp -r /opt/solr/solr-4.10.4/example/solr/collection1/conf /opt/solr/cores/spacestile
-cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/*_synonyms.txt /opt/solr/cores/default/conf
-cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/*_synonyms.txt /opt/solr/cores/space/conf
-cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/*_synonyms.txt /opt/solr/cores/spacestile/conf
-cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/schema.xml /opt/solr/cores/default/conf
-cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/schema.xml /opt/solr/cores/space/conf
-cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/schema.xml /opt/solr/cores/spacestile/conf
-cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/solrconfig.xml /opt/solr/cores/default/conf
-cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/solrconfig.xml /opt/solr/cores/space/conf
-cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/solrconfig.xml /opt/solr/cores/spacestile/conf
-cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/wdfftypes.txt /opt/solr/cores/default/conf
-cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/wdfftypes.txt /opt/solr/cores/space/conf
-cp ~/Development/Docurated/utilities/chef-server/cookbooks/solr/templates/default/wdfftypes.txt /opt/solr/cores/spacestile/conf
-sudo mkdir -p /opt/cores/default/data /opt/cores/space/data /opt/cores/spacestile/data
+sudo mkdir -p /opt/solr/cores/default/data /opt/solr/cores/space/data /opt/solr/cores/spacestile/data
+sudo mkdir -p /opt/solr/plugins
+sudo chown -R $USERNAME /opt/solr
+tar -xzf ~/downloads/solr-4.10.*.tgz -C /opt/solr
+sudo chown -R $USERNAME /opt/solr
+cp -r /opt/solr/solr-4.10.*/example/solr/collection1/conf /opt/solr/cores/default
+cp -r /opt/solr/solr-4.10.*/example/solr/collection1/conf /opt/solr/cores/space
+cp -r /opt/solr/solr-4.10.*/example/solr/collection1/conf /opt/solr/cores/spacestile
+cp $DOCURATED_DIR/utilities/chef-server/cookbooks/solr/templates/default/*_synonyms.txt /opt/solr/cores/default/conf
+cp $DOCURATED_DIR/utilities/chef-server/cookbooks/solr/templates/default/*_synonyms.txt /opt/solr/cores/space/conf
+cp $DOCURATED_DIR/utilities/chef-server/cookbooks/solr/templates/default/*_synonyms.txt /opt/solr/cores/spacestile/conf
+cp $DOCURATED_DIR/utilities/chef-server/cookbooks/solr/templates/default/schema.xml /opt/solr/cores/default/conf
+cp $DOCURATED_DIR/utilities/chef-server/cookbooks/solr/templates/default/schema.xml /opt/solr/cores/space/conf
+cp $DOCURATED_DIR/utilities/chef-server/cookbooks/solr/templates/default/schema.xml /opt/solr/cores/spacestile/conf
+cp $DOCURATED_DIR/utilities/chef-server/cookbooks/solr/templates/default/solrconfig.xml /opt/solr/cores/default/conf
+cp $DOCURATED_DIR/utilities/chef-server/cookbooks/solr/templates/default/solrconfig.xml /opt/solr/cores/space/conf
+cp $DOCURATED_DIR/utilities/chef-server/cookbooks/solr/templates/default/solrconfig.xml /opt/solr/cores/spacestile/conf
+cp $DOCURATED_DIR/utilities/chef-server/cookbooks/solr/templates/default/wdfftypes.txt /opt/solr/cores/default/conf
+cp $DOCURATED_DIR/utilities/chef-server/cookbooks/solr/templates/default/wdfftypes.txt /opt/solr/cores/space/conf
+cp $DOCURATED_DIR/utilities/chef-server/cookbooks/solr/templates/default/wdfftypes.txt /opt/solr/cores/spacestile/conf
+sudo chown -R $USERNAME /opt/solr
 echo "name=default" >> /opt/solr/cores/default/core.properties
-echo “name=space" >> /opt/solr/cores/space/core.properties
-echo “name=spacestile" >> /opt/solr/cores/spacestile/core.properties
-
-con copy demo-solr-2.solr.2b:/opt/solr/cores/solr.xml /opt/solr/cores/
-con copy demo-solr-2.solr.2b:/opt/solr/plugins/hon-lucene-synonyms-1.3.4-solr-4.3.0.jar /opt/solr/plugins
-con copy demo-solr-2.solr.2b:/opt/solr/plugins/solr-profile-score-0.1.4.jar /opt/solr/plugins
-sudo chown -R sampaul /opt/solr
+echo "name=space" >> /opt/solr/cores/space/core.properties
+echo "name=spacestile" >> /opt/solr/cores/spacestile/core.properties
+$DOCURATED_DIR/utilities/docformation/docconnection.rb copy demo-solr-2.solr.2b:/opt/solr/cores/solr.xml /opt/solr/cores/
+$DOCURATED_DIR/utilities/docformation/docconnection.rb copy demo-solr-2.solr.2b:/opt/solr/plugins/hon-lucene-synonyms-1.3.4-solr-4.3.0.jar /opt/solr/plugins
+$DOCURATED_DIR/utilities/docformation/docconnection.rb copy demo-solr-2.solr.2b:/opt/solr/plugins/solr-profile-score-0.1.4.jar /opt/solr/plugins
+sudo chown -R $USERNAME /opt/solr
 
 INSTALL JDK
 http://www.oracle.com/technetwork/java/javase/downloads/jdk8-downloads-2133151.html
-
-
-
-
 

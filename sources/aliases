@@ -25,7 +25,7 @@ alias egrep='egrep --colour=auto'
 #alias rmv='rsync -v --progress --remove-source-files'
 
 alias g='ag'
-alias gi='ag -i'
+# alias gi='ag -i' ag is smartcase
 
 alias hist='history'
 alias histg='history | grep'
