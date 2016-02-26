@@ -79,6 +79,8 @@ alias cchef='docutil && $DOC_HOME/utilities/docformation/docconnection.rb chef.w
 alias dcql='cdcass 0 && cqlsh'
 alias pcql='cqlsh production.cassandra.0'
 
+# postgres
+alias pql='psql -d docurated -p 5432'
 
 # ===== CLIENT APP ========
 setDemoVersion() {

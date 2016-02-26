@@ -58,7 +58,7 @@ rvm install ruby-1.9.3
 
 CLONE REPOS
 git clone git@github.com:Docurated/website.git
-rvm use 1.9.3@docurated —create
+rvm use 1.9.3@docurated --create
 brew install imagemagick
 (brew uninstall v8) - if v8 is already installed
 gem install therubyracer -v ‘0.12.1'
@@ -85,7 +85,7 @@ OrganizationsSolrCluster.delete_all
 OrganizationsSolrCluster.create(organization_id: 1, is_primary: true, cluster_url: "http://localhost:8983/solr", in_zookeeper: false, transformation: "SpacesTileDocCreator")
 
 git clone git@github.com:Docurated/utilities.git
-rvm use 1.9.3@docurated_util —create
+rvm use 1.9.3@docurated_util --create
 bundle install gemfile in utilities folder and in chef-server
 
 git clone git@github.com:Docurated/services.git
