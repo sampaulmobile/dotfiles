@@ -12,12 +12,14 @@ alias docutil='cd $DOC_HOME/utilities && rvmgdu'
 alias doccli='cd $DOC_HOME/clients && rvmgdu'
 alias docserv='cd $DOC_HOME/services'
 alias docevents='cd $DOC_HOME/events'
+alias docact='cd $DOC_HOME/activity'
 
 alias hubc='open https://github.com/Docurated/clients'
 alias hubw='open https://github.com/Docurated/website'
 alias hubu='open https://github.com/Docurated/utilities'
 alias hubs='open https://github.com/Docurated/services'
 alias hube='open https://github.com/Docurated/events'
+alias huba='open https://github.com/Docurated/activity'
 
 searchgit() { open "https://github.com/Docurated/$1/search?utf8=✓&q=$2" }
 alias hubcs='searchgit clients'
@@ -25,6 +27,7 @@ alias hubws='searchgit website'
 alias hubus='searchgit utilities'
 alias hubss='searchgit services'
 alias hubes='searchgit events'
+alias hubas='searchgit activity'
 
 
 # ===== JENKINS ========
@@ -33,6 +36,7 @@ alias jenkc='open https://jenkins.docurated.com/job/Client%20Build/'
 alias jenks='open https://jenkins.docurated.com/job/BuildTestDeployWebStage/'
 alias jenkw='open https://jenkins.docurated.com/job/BuildTestDeployWebMaster/'
 alias jenke='open https://jenkins.docurated.com/job/Events%20Build/'
+alias jenka='open https://jenkins.docurated.com/job/Activity/'
 
 
 # ===== DOCFORMATION/DOCCONNECTION (soon to be deprecated) ========
@@ -69,9 +73,10 @@ alias cdcass='sshconnect demo cassandra'
 
 alias cpweb='sshconnect production web'
 alias cpapi='sshconnect production api'
-alias cprapp='sshconnect production railsapp'
+alias cprapp_old='sshconnect production railsapp'
 alias cpev='sshconnect production events'
 alias cpcass='sshconnect production cassandra'
+alias cprapp='con first production.railsapp'
 
 alias cadmin='sshconnect production admin'
 alias cchef='docutil && $DOC_HOME/utilities/docformation/docconnection.rb chef.workstation'

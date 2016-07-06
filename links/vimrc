@@ -177,6 +177,8 @@ map <leader>gh :Gbrowse<CR>
 "colorscheme desert
 "colorscheme solarized
 colorscheme molokai
+hi Folded guibg=#3e3e3e
+hi Folded guifg=#b0b0b0
 "set background=light             "Options are 'dark' or 'light'
 "Set F5 to toggle background color
 "call togglebg#map("<F5>")

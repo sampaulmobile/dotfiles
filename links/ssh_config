@@ -17,6 +17,11 @@ Host production*
   HostName %h.node.us-east-1-production.consul
 Host demo*
   HostName %h.node.us-east-1-demo.consul
+Host biomarin*
+  HostName %h.node.us-west-2-biomarin.consul
+  User sampaulmobile
+  ProxyCommand ssh -A sampaulmobile@salt-biomarin.docurated.com nc %h %p
+  StrictHostKeyChecking no
 Host operations*
   HostName %h.node.us-east-1-operations.consul
 Host *.service production* demo* operations*
