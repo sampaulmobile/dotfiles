@@ -1,4 +1,22 @@
 
+Host classpass
+    HostName 52.91.80.212
+    User ubuntu
+    Port 22
+    IdentityFile ~/.ssh/sampaul.pem
+
+Host buzz
+    HostName 52.90.78.192
+    User ubuntu
+    Port 22
+    IdentityFile ~/.ssh/sampaul.pem
+
+Host citibikes
+    HostName 52.23.163.107
+    User ubuntu
+    Port 22
+    IdentityFile ~/.ssh/sampaul.pem
+
 Host gate.mini
   HostName ec2-54-87-203-240.compute-1.amazonaws.com
   User Docurated
