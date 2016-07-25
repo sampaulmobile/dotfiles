@@ -74,7 +74,7 @@ alias sl='open http://www.seamless.com/food-delivery/vendors.m'
 alias slmmg='open http://www.seamless.com/food-delivery/muscle-maker-grill-chelsea-new-york-city.29481.r'
 alias sltoast='open http://www.seamless.com/food-delivery/toasties-delicatessen-new-york-city.1898.r'
 alias slzumi='open http://www.seamless.com/food-delivery/izumi-sushi-new-york-city.1688.r'
-alias weather='open http://www.weather.com/weather/hourbyhour/l/10012:4:US'
+alias weather='open http://www.weather.com/weather/hourbyhour/l/10003:4:US'
 
 
 # ============ PLUNCHY (soon to be deprecated) =============
@@ -92,6 +92,8 @@ rmpython() {
 }
 alias rmpy=rmpython
 
+alias devesp='cd ~/Development/SBP/ESP8266'
+alias start_esp='java -jar ~/Development/SBP/ESPlorer/ESPlorer.jar &'
 
 # ============ NODE.JS =============
 alias nw='~/Downloads/nwjs-v0.12.3-osx-x64/nwjs.app/Contents/MacOS/nwjs'
