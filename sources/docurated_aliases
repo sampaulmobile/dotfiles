@@ -70,8 +70,8 @@ alias cdapi='sshconnect demo api'
 alias cdrapp='sshconnect demo railsapp'
 alias cdev='sshconnect demo events'
 alias cdcass='sshconnect demo cassandra'
-alias cdact='sshconnect demo activity'
-alias cdact='ssh demo.activity.0 -L 5438:activity-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
+# alias cdact='sshconnect demo activity'
+alias cdact='ssh demo.activity.0 -L 8282:localhost:8282 -L 5438:activity-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
 
 alias cpweb='sshconnect production web'
 alias cpapi='sshconnect production api'
@@ -79,13 +79,16 @@ alias cprapp_old='sshconnect production railsapp'
 alias cpev='sshconnect production events'
 alias cpcass='sshconnect production cassandra'
 alias cprapp='con first production.railsapp'
+# alias cpact='sshconnect production activity'
+alias cpact='ssh production.activity.0 -L 8282:localhost:8282 -L 5438:activity-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
 
 alias cadmin='sshconnect production admin'
 alias cchef='docutil && $DOC_HOME/utilities/docformation/docconnection.rb chef.workstation'
 
 alias dcql='cdcass 0 && cqlsh'
-alias dcqlact='echo "Du%2aGeWkL" && psql -h localhost -p 5438 -U activitydemo activity'
+alias dpqlact='echo "Du%2aGeWkL" && psql -h localhost -p 5438 -U activitydemo activity'
 alias pcql='cqlsh production.cassandra.0'
+alias ppqlact='echo "K6nLwtFsNu7iJ6" && psql -h localhost -p 5438 -U activityproduction activity'
 
 # postgres
 alias pql='psql -d docurated -p 5432'

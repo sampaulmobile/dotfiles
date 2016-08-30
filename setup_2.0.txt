@@ -66,6 +66,13 @@ brew install v8
 gem install libv8 -v '3.16.14.7' -- --with-system-v8
 bundle install
 
+gem install bundler
+remove debugger from gemfile
+bundle update eventmachine
+gem 'test-unit', '~> 3.0'
+gem 'webmock', '~> 1.0'
+
+
 SETUP CONFIGS
 copy siteconfig.yml from email
 copy database.yml from email
