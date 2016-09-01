@@ -31,12 +31,12 @@ alias hubas='searchgit activity'
 
 
 # ===== JENKINS ========
-alias jenk='open https://jenkins.docurated.com/'
-alias jenkc='open https://jenkins.docurated.com/job/Client%20Build/'
-alias jenks='open https://jenkins.docurated.com/job/BuildTestDeployWebStage/'
-alias jenkw='open https://jenkins.docurated.com/job/BuildTestDeployWebMaster/'
-alias jenke='open https://jenkins.docurated.com/job/Events%20Build/'
-alias jenka='open https://jenkins.docurated.com/job/Activity/'
+alias jenk='open https://jenkins.docurated.rocks/'
+alias jenkc='open https://jenkins.docurated.rocks/job/Client%20Build/'
+alias jenks='open https://jenkins.docurated.rocks/job/BuildTestDeployWebStage/'
+alias jenkw='open https://jenkins.docurated.rocks/job/BuildTestDeployWebMaster/'
+alias jenke='open https://jenkins.docurated.rocks/job/Events%20Build/'
+alias jenka='open https://jenkins.docurated.rocks/job/Activity/'
 
 
 # ===== DOCFORMATION/DOCCONNECTION (soon to be deprecated) ========
@@ -78,7 +78,7 @@ alias cpapi='sshconnect production api'
 alias cprapp_old='sshconnect production railsapp'
 alias cpev='sshconnect production events'
 alias cpcass='sshconnect production cassandra'
-alias cprapp='con first production.railsapp'
+alias cprapp='docutil && $DOC_HOME/utilities/bin/ssh-first production resque'
 # alias cpact='sshconnect production activity'
 alias cpact='ssh production.activity.0 -L 8282:localhost:8282 -L 5438:activity-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
 
