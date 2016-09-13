@@ -5,7 +5,7 @@ DOC_HOME='/Users/sampaul/Development/Docurated'
 # ===== JIRA ZSH Plugin ========
 JIRA_URL='https://docurated.atlassian.net'
 GITHUB_URL='https://github.com/Docurated'
-JENKINS_URL='https://jenkins.docurated.rocks'
+JENKINS_URL='https://jenkins.service.consul'
 
 
 # ===== GIT REPOS ========
