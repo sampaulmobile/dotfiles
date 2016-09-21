@@ -75,6 +75,7 @@ alias slmmg='open http://www.seamless.com/food-delivery/muscle-maker-grill-chels
 alias sltoast='open http://www.seamless.com/food-delivery/toasties-delicatessen-new-york-city.1898.r'
 alias slzumi='open http://www.seamless.com/food-delivery/izumi-sushi-new-york-city.1688.r'
 alias weather='open http://www.weather.com/weather/hourbyhour/l/10003:4:US'
+alias ff='open https://football.fantasysports.yahoo.com/f1/219880'
 
 
 # ============ PLUNCHY (soon to be deprecated) =============
