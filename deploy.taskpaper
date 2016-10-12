@@ -1,0 +1,116 @@
+
+SETUP PROCESS:
+	- sudo apt-get update && sudo apt-get -y upgrade
+	- sudo useradd -d /home/deploy -m deploy
+		- -d = home dir, -m = create dir
+	- sudo passwd deploy => <enter password>
+	- sudo update-alternatives --config editor
+		- select vim.basic
+	- sudo visudo
+		- underneath root "user privilege specification" (or anywhere)
+		- add "deploy ALL=(ALL:ALL) ALL"
+	- su - deploy
+		- <enter password>
+	- ssh-keygen
+		- <enter>, <enter>, <enter> (default name, no password)
+	- more .ssh/id_rsa.pub
+		- copy to clipboard
+		- create github deploy key
+		- https://github.com/sampaulmobile/classpass/settings/keys
+	- vim .ssh/authorized_keys
+		- paste LOCAL (laptop) sshkey (~/.ssh/id_rsa.pub)
+	- sudo apt-get install git -y
+	- sudo apt-get install nginx -y
+	- sudo vim /etc/nginx/sites-available/default
+		- replace with:
+			upstream app {
+			  # Path to Puma SOCK file, as defined previously
+			  server unix:/home/deploy/classpass/shared/tmp/sockets/puma.sock fail_timeout=0;
+			}
+
+			server {
+			  listen 80;
+			  server_name localhost;
+
+			  root /home/deploy/classpass/current/public;
+
+			  try_files $uri/index.html $uri @app;
+
+			  location / {
+				proxy_set_header X-Forwarded-Proto $scheme;
+				proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+				proxy_set_header X-Real-IP $remote_addr;
+				proxy_set_header Host $host;
+				proxy_redirect off;
+				proxy_http_version 1.1;
+				proxy_set_header Connection '';
+				proxy_pass http://app;
+			  }
+
+			  location ~ ^/(assets|fonts|system)/|favicon.ico|robots.txt {
+				gzip_static on;
+				expires max;
+				add_header Cache-Control public;
+			  }
+
+			  error_page 500 502 503 504 /500.html;
+			  client_max_body_size 4G;
+			  keepalive_timeout 10;
+			}
+	- sudo apt-get install postgresql postgresql-contrib libpq-dev -y
+	- sudo -u postgres createuser -s classpass
+	- sudo -u postgres psql
+		- \password classpass
+		- "password", "password"
+	- sudo -u postgres createdb -O classpass classpass_production
+	- gpg --keyserver hkp://keys.gnupg.net --recv-keys 409B6B1796C275462A1703113804BB82D39DC0E3
+	- \curl -sSL https://get.rvm.io | bash -s stable
+	- exit / su - deploy
+	- rvm install ruby
+	- rvm use ruby
+	- gem install bundler --no-ri --no-rdoc
+	- mkdir -p classpass/shared/config
+	- vim classpass/shared/config/database.yml
+		- add:
+		- production:
+			adapter: postgresql
+			encoding: unicode
+			database: classpass_production
+			username: classpass
+			password: password
+			host: localhost
+			port: 5432
+	- vim classpass/shared/config/application.yml
+		- add:
+		- SECRET_KEY_BASE: asldgjasdgasdg
+		- SIDEKIQ_USERNAME: asldgjasdgasdg
+		- SIDEKIQ_PASSWORD: asldgjasdgasdg
+		- GMAIL_USERNAME: asldgjasdgasdg
+		- GMAIL_PASSWORD: asldgjasdgasdg
+	- edit config/deploy/production.rb
+		- update IP to match ec2 IP
+		- server '52.2.139.74', user: 'deploy', roles: %w{web app db}
+	- (from laptop) cap production deploy
+	
+	- "should" just work, but gems are a btch
+	- if nokogiri doesnt install:
+		- sudo apt-get install build-essential patch
+		- sudo apt-get install ruby-dev zlib1g-dev liblzma-dev -y
+		- sudo apt-get install libxml2-dev
+	- sudo apt-get install nodejs -y
+	- sudo apt-get install redis-server -y
+	- logout/login - sudo service nginx restart
+	- DONE!!
+	
+	- installing phantomjs:
+		sudo apt-get install build-essential chrpath libssl-dev libxft-dev -y
+		sudo apt-get install libfreetype6 libfreetype6-dev -y
+		sudo apt-get install libfontconfig1 libfontconfig1-dev -y
+		cd ~
+		export PHANTOM_JS="phantomjs-2.1.1-linux-x86_64"
+		wget https://github.com/Medium/phantomjs/releases/download/v2.1.1/$PHANTOM_JS.tar.bz2
+		sudo tar xvjf $PHANTOM_JS.tar.bz2
+		sudo mv $PHANTOM_JS /usr/local/share
+		sudo ln -sf /usr/local/share/$PHANTOM_JS/bin/phantomjs /usr/local/bin
+		phantomjs --version
+

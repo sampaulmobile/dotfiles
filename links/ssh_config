@@ -1,5 +1,11 @@
 
 Host classpass
+    HostName 54.89.21.167
+    User ubuntu
+    Port 22
+    IdentityFile ~/.ssh/sampaul.pem
+
+Host classpass_old
     HostName 52.91.80.212
     User ubuntu
     Port 22
