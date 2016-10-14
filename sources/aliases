@@ -6,6 +6,7 @@ NOT_PUBLIC='/Users/sampaul/dropbox/!public'
 alias todo='vim $NOT_PUBLIC/TODO.taskpaper'
 alias dotz='vim $LINKS/zshrc'
 alias dotv='vim $LINKS/vimrc'
+alias cdot='cd ~/dotfiles'
 alias dev='cd ~/Development/SBP'
 
 alias bci='cd $DOC_HOME/time && rmswp && vim bci.txt'
@@ -52,6 +53,11 @@ alias gcam='git commit -a -m '
 alias gpull='git pull origin '
 alias gpush='git push origin '
 alias gmm='git merge master'
+
+
+# ============ CAPISTRANO =============
+alias cpd='cap production deploy'
+alias cpr='cap production rails:console'
 
 
 # ============ RVM =============
