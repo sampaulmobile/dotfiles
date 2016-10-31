@@ -1,17 +1,29 @@
 
 Host classpass
-    HostName 54.89.21.167
+    HostName 52.205.179.64
     User ubuntu
     Port 22
     IdentityFile ~/.ssh/sampaul.pem
 
 Host classpass_old
+    HostName 54.89.21.167
+    User ubuntu
+    Port 22
+    IdentityFile ~/.ssh/sampaul.pem
+
+Host classpass_older
     HostName 52.91.80.212
     User ubuntu
     Port 22
     IdentityFile ~/.ssh/sampaul.pem
 
 Host buzz
+    HostName buzz.linktothecode.com
+    User ubuntu
+    Port 22
+    IdentityFile ~/.ssh/sampaul.pem
+
+Host buzz_old
     HostName 52.90.78.192
     User ubuntu
     Port 22
@@ -35,17 +47,17 @@ Host docurated.nfs
   HostName ec2-50-17-45-211.compute-1.amazonaws.com
   User ubuntu
 
-Host *.service
-  HostName %h.us-east-1-production.consul
+Host production* demo* stage* operations* biomarin*
+  UseRoaming no
+  User sampaulmobile
+
 Host production*
   HostName %h.node.us-east-1-production.consul
 Host demo*
   HostName %h.node.us-east-1-demo.consul
-Host biomarin*
-  HostName %h.node.us-west-2-biomarin.consul
-  User sampaulmobile
-  StrictHostKeyChecking no
+Host stage*
+  HostName %h.node.us-east-1-stage.consul
 Host operations*
   HostName %h.node.us-east-1-operations.consul
-Host *.service production* demo* operations*
-  User sampaulmobile
+Host biomarin*
+  HostName %h.node.us-west-2-biomarin.consul
