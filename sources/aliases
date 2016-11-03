@@ -1,6 +1,4 @@
 # ============ Aliases =============
-NOT_PUBLIC='/Users/sampaul/dropbox/!public'
-
 
 # ============ FILES =============
 alias todo='vim $NOT_PUBLIC/TODO.taskpaper'
@@ -11,7 +9,7 @@ alias dev='cd ~/Development/SBP'
 
 alias bci='cd $DOC_HOME/time && rmswp && vim bci.txt'
 alias notes='cd ~/Development/SBP/notes && rmswp && vim notes.txt'
-
+alias creds='more $NOT_PUBLIC/creds | grep -i'
 
 # ============ UNIX =============
 alias c='clear'

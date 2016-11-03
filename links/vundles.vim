@@ -79,6 +79,8 @@ Bundle "skwp/vim-html-escape"
 
 Bundle 'hail2u/vim-css3-syntax'
 
+"Syntax highlighting for Scala
+Bundle 'derekwyatt/vim-scala'
 
 " ======================== Git Stuff =======================
 Bundle "gregsexton/gitv"
