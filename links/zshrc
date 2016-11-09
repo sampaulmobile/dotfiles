@@ -43,8 +43,8 @@ export PATH="/usr/local/heroku/bin:$PATH"
 bindkey -v
 bindkey -M viins 'jj' vi-cmd-mode #map jj to exit (mimic ESC)
 
-# initialize pyenv
-eval "$(pyenv init -)"
+# initialize pyenv (if it exists)
+[[ -f "~/.pyenv" ]] && eval "$(pyenv init -)"
 
 # Virtualenv/VirtualenvWrapper
 #export WORKON_HOME=$HOME/.virtualenvs
