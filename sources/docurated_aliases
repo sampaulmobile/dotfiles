@@ -107,6 +107,9 @@ alias cchef='docutil && $DOC_HOME/utilities/docformation/docconnection.rb chef.w
 # postgres
 alias pql='psql -d docurated -p 5432'
 
+# reset the stupid mac osx DNS for tunnelblick to work
+alias resetdns='sudo launchctl unload -w /System/Library/LaunchDaemons/com.apple.mDNSResponder.plist && sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.mDNSResponder.plist'
+
 # ===== CLIENT APP ========
 setDemoVersion() {
     cd $DOC_HOME/clients/deploy

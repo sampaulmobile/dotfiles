@@ -9,6 +9,7 @@
 dir=~/dotfiles/links        # dotfiles directory
 deldir=~/DELETE_dotfiles     # backup directory (deprecated)
 files="bashrc vimrc zshrc gemrc gitconfig gitignore ackrc"   # list of files/folders to symlink in homedir
+NOT_PUBLIC='/Users/sampaul/dropbox/!public'
 
 ##########
 
@@ -40,6 +41,18 @@ echo "Linking SSH config"
 mkdir -p ~/.ssh
 mv ~/.ssh/config $deldir
 ln -s $dir/ssh_config ~/.ssh/config
+echo "Done"
+
+echo "Linking AWS config"
+mkdir -p ~/.aws
+mv ~/.aws/config $deldir
+ln -s $NOT_PUBLIC/aws_config ~/.aws/config
+echo "Done"
+
+echo "Linking AWS (shared) credentials"
+mkdir -p ~/.aws
+mv ~/.aws/credentials $deldir
+ln -s $NOT_PUBLIC/aws_credentials ~/.aws/credentials
 echo "Done"
 
 echo "ALL FINISHED LINKING RCs"

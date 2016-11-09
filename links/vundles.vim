@@ -82,6 +82,15 @@ Bundle 'hail2u/vim-css3-syntax'
 "Syntax highlighting for Scala
 Bundle 'derekwyatt/vim-scala'
 
+"Syntax highlighting for typescript
+Bundle 'leafgarland/typescript-vim'
+
+"Zencoding for html
+Bundle 'mattn/emmet-vim'
+
+" auto formatting of popular languages
+Plugin 'Chiel92/vim-autoformat'
+
 " ======================== Git Stuff =======================
 Bundle "gregsexton/gitv"
 
@@ -189,7 +198,7 @@ Bundle 'mileszs/ack.vim'
 Bundle "scrooloose/nerdtree.git"
 
 "syntax checking
-Bundle "scrooloose/syntastic.git"
+" Bundle "scrooloose/syntastic.git"
 
 "visualize vim undo tree
 Bundle "sjl/gundo.vim"
