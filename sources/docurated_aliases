@@ -91,13 +91,16 @@ alias ppql='echo "d00b1est3p" && psql -h localhost -p 5435 -U rails docurated'
 alias bpql='echo "d00b1est3p" && psql -h localhost -p 5436 -U rails docurated'
 
 alias cdact='ssh demo.activity.0 -L 8286:localhost:8282 -L 5436:activity-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432 -L 5439:analytics-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
-alias cpact='ssh production.activity.0 -L 8287:localhost:8282 -L 5437:activity-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
-alias cbact='ssh biomarin.activity.0 -L 8288:localhost:8282 -L 5438:activity-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com:5432'
+alias cpact='ssh production.activity.0 -L 8287:localhost:8282 -L 5437:activity-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432 -L 5441:analytics-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
+alias cbact='ssh biomarin.activity.0 -L 8288:localhost:8282 -L 5438:activity-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com:5432 -L 5440:analytics-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com:5432'
 
 alias dpqlact='creds demo.activity && psql -h localhost -p 5436 -U activitydemo activity'
 alias ppqlact='creds production.activity && psql -h localhost -p 5437 -U activityproduction activity'
 alias bpqlact='creds biomarin.activity && psql -h localhost -p 5438 -U activitybiomarin activity'
+
 alias dpqlana='creds demo.analytics && psql -h localhost -p 5439 -U analyticsdemo analytics'
+alias ppqlana='creds production.analytics && psql -h localhost -p 5441 -U analyticsproduction analytics'
+alias bpqlana='creds biomarin.analytics && psql -h localhost -p 5440 -U analyticsbiomarin analytics'
 
 alias dcql='cdcass 0 && cqlsh'
 alias pcql='cqlsh production.cassandra.0'
