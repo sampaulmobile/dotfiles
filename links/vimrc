@@ -120,7 +120,7 @@ endif
 "NERDTree toggle set to capital T
 map T :NERDTreeToggle<CR>
 let g:NERDTreeWinSize = 20
-let NERDTreeIgnore = ['\.pyc$','\.pyo$', '\.db$', '\.js\.map$']
+let NERDTreeIgnore = ['\.pyc$','\.pyo$', '\.db$', '\.js\.map$', 'node_modules']
 
 "TagBar toggle set to leader + b
 let g:tagbar_usearrows = 1
