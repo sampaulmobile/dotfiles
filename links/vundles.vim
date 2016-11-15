@@ -195,7 +195,11 @@ Bundle "mattn/webapi-vim.git"
 "enable ack in vim
 Bundle 'mileszs/ack.vim'
 
+" NERDTree BRO!
 Bundle "scrooloose/nerdtree.git"
+
+" hopefully adds (removes files of) .gitignore for NERDtree
+Bundle 'Xuyuanp/nerdtree-git-plugin'
 
 "syntax checking
 " Bundle "scrooloose/syntastic.git"
