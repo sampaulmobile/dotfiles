@@ -24,6 +24,9 @@ Bundle "davidoc/taskpaper.vim"
 " syntax highlighting for salt
 Bundle "saltstack/salt-vim.git"
 
+" Load local lvimrc files (currently for per-project indenting)
+Bundle "embear/vim-localvimrc.git"
+
 " ======================== Ruby, Rails, Rake =======================
 "Bundle "astashov/vim-ruby-debugger"
 "Bundle "ecomba/vim-ruby-refactoring"

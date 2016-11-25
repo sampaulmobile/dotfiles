@@ -27,7 +27,7 @@ set shiftwidth=4
 set softtabstop=4
 set tabstop=4
 set expandtab
-"set cin             "c indent
+"set cin
 "set autoindent
 "set smartindent
 "set smarttab
@@ -174,7 +174,7 @@ map <leader>gh :Gbrowse<CR>
 "<leader>ig is default for vim indentation guide
 
 " assign autoformat key to leader + '='
-noremap <leader>= :Autoformat<CR>
+" noremap <leader>= :Autoformat<CR>
 
 "Need to set coloscheme after vundles are loaded
 "colorscheme desert
