@@ -2,11 +2,15 @@
 DOC_HOME='/Users/sampaul/Development/Docurated'
 
 
-# ===== JIRA ZSH Plugin ========
+# ===== JIRA ZSH Plugin / URLs ========
 JIRA_URL='https://docurated.atlassian.net'
 GITHUB_URL='https://github.com/Docurated'
 JENKINS_URL='https://jenkins.service.consul'
+HANGOUTS_URL='https://hangouts.google.com/hangouts'
 
+# ===== GOOGLE HANGOUTS ========
+openHangout() { open "$HANGOUTS_URL/_/docurated.com/$1?authuser=$2/" }
+alias relho='openHangout relevance sam@docurated.com'
 
 # ===== GIT REPOS ========
 alias docweb='cd $DOC_HOME/website/rails && rvmgd'
