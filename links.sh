@@ -55,6 +55,11 @@ mv ~/.aws/credentials $deldir
 ln -s $NOT_PUBLIC/aws_credentials ~/.aws/credentials
 echo "Done"
 
+echo "Linking pgpass"
+mv ~/.pgpass $deldir
+ln -s $NOT_PUBLIC/pgpass ~/.pgpass
+echo "Done"
+
 echo "ALL FINISHED LINKING RCs"
 echo "DELETING old dotfiles"
 rm -rf $deldir

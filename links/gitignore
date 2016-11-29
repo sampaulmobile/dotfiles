@@ -55,38 +55,15 @@ Session.vim
 
 # Rails Files #
 ###############
-*.rbc
-*.sassc
-.sass-cache
-capybara-*.html
-.rspec
-/log
-/tmp
 /db/*.sqlite3
-/public/system
-/coverage/
-/spec/tmp
-**.orig
-rerun.txt
-pickle-email-*.html
-# config/initializers/secret_token.rb
 
 ## Environment normalisation:
 # /.bundle
-/vendor/bundle
+# /vendor/bundle
 
 # Ruby Files #
 ##############
 *.gem
-# *.rbc
-/.config
-# /coverage/
-/InstalledFiles
-/pkg/
-/spec/reports/
-/test/tmp/
-/test/version_tmp/
-# /tmp/
 
 ## Documentation cache and generated files:
 /.yardoc/
