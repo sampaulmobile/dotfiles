@@ -9,7 +9,7 @@ JENKINS_URL='https://jenkins.service.consul'
 HANGOUTS_URL='https://hangouts.google.com/hangouts'
 
 # ===== GOOGLE HANGOUTS ========
-openHangout() { open "$HANGOUTS_URL/_/docurated.com/$1?authuser=$2/" }
+openHangout() { open "$HANGOUTS_URL/_/docurated.com/$1?authuser=$2" }
 alias relho='openHangout relevance sam@docurated.com'
 
 # ===== GIT REPOS ========
