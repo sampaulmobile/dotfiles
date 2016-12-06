@@ -11,6 +11,10 @@ alias bci='cd $DOC_HOME/time && rmswp && vim bci.txt'
 alias notes='cd ~/Development/SBP/notes && rmswp && vim notes.txt'
 alias creds='more $NOT_PUBLIC/creds | grep -i'
 
+# ============ PERSONAL DEV =============
+alias sless='~/Development/SBP/cpreserver/doer.py'
+
+
 # ============ UNIX =============
 alias c='clear'
 alias cp='cp -iv'
@@ -81,6 +85,10 @@ alias slzumi='open http://www.seamless.com/food-delivery/izumi-sushi-new-york-ci
 alias weather='open http://www.weather.com/weather/hourbyhour/l/10003:4:US'
 alias ff='open https://football.fantasysports.yahoo.com/f1/219880'
 
+# ============ BUZZER / PUSHFOROPEN =============
+BUZZER_URL='http://buzz.linktothecode.com'
+hit_buzzer() { curl "$BUZZER_URL/open/$1" }
+alias buzz='hit_buzzer'
 
 # ============ PLUNCHY (soon to be deprecated) =============
 alias pstart='plunchy start '

@@ -8,9 +8,12 @@ GITHUB_URL='https://github.com/Docurated'
 JENKINS_URL='https://jenkins.service.consul'
 HANGOUTS_URL='https://hangouts.google.com/hangouts'
 
+
 # ===== GOOGLE HANGOUTS ========
 openHangout() { open "$HANGOUTS_URL/_/docurated.com/$1?authuser=$2/" }
 alias relho='openHangout relevance sam@docurated.com'
+alias relno='open "https://docs.google.com/a/docurated.com/document/d/1ktuCdngDhUZxfd5-uND9jC23_l9SzQiCkLMC2RU0zzg/edit?usp=sharing"'
+
 
 # ===== GIT REPOS ========
 alias docweb='cd $DOC_HOME/website/rails && rvmgd'
