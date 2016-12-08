@@ -64,6 +64,7 @@ Session.vim
 # Ruby Files #
 ##############
 *.gem
+.ruby-*
 
 ## Documentation cache and generated files:
 /.yardoc/
