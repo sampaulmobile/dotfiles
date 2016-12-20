@@ -21,7 +21,7 @@ alias docutil='cd $DOC_HOME/utilities && rvmgdu'
 alias doccli='cd $DOC_HOME/clients && rvmgdu'
 alias docserv='cd $DOC_HOME/services'
 alias docevents='cd $DOC_HOME/events'
-alias docact='cd $DOC_HOME/activity'
+alias docact='cd $DOC_HOME/activity && rvm use gemset 2.2.5@activity'
 
 alias hubc='open $GITHUB_URL/clients'
 alias hubw='open $GITHUB_URL/website'
