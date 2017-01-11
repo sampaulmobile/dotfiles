@@ -48,6 +48,21 @@ alias jenke='open $JENKINS_URL/job/Events%20Build/'
 alias jenka='open $JENKINS_URL/job/Activity/'
 
 
+# ===== SPARK ========
+KEY_PAIR='$HOME/.ssh/sams-key-pair.pem'
+PROD_CLUSTER_DNS='ec2-54-167-9-173.compute-1.amazonaws.com'
+ssh_spark() {
+    ssh -i $1 -L 8087:$2:18080 -L 8086:$2:8088 hadoop@$2
+}
+alias cpspark='ssh_spark ~/.ssh/sams-key-pair.pem $PROD_CLUSTER_DNS'
+
+CLUSTER_ID='j-3KJ17A1RYNKHB'
+add_spark_step() {
+    #check for CLUSTER_ID env variable
+    aws emr add-steps --cluster-id $1 --steps "Type=spark,Name='$3',Args=[--deploy-mode,cluster,--master,yarn,$2]"
+}
+alias sparksp='add_spark_step $CLUSTER_ID s3://docurated-production-activity/main.py'
+
 # ===== DOCFORMATION/DOCCONNECTION (soon to be deprecated) ========
 alias con='docutil && $DOC_HOME/utilities/docformation/docconnection.rb'
 alias cupdate='docutil && $DOC_HOME/utilities/docformation/docconnection.rb update'
