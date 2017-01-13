@@ -49,17 +49,17 @@ alias jenka='open $JENKINS_URL/job/Activity/'
 
 
 # ===== SPARK ========
-KEY_PAIR='$HOME/.ssh/sams-key-pair.pem'
+KEY_PAIR='$HOME/.ssh/sams-other-key-pair.pem'
 # PROD_CLUSTER_DNS='ec2-54-167-9-173.compute-1.amazonaws.com'
 ssh_spark() {
     ssh -i $1 -L 8087:$2:18080 -L 8086:$2:8088 hadoop@$2
 }
-alias cpspark='ssh_spark ~/.ssh/sams-key-pair.pem $PROD_CLUSTER_DNS'
+alias cpspark='ssh_spark ~/.ssh/sams-other-key-pair.pem $PROD_CLUSTER_DNS'
 
 # PROD_CLUSTER_ID='j-3KJ17A1RYNKHB'
 add_spark_step() {
     #check for CLUSTER_ID env variable
-    aws emr add-steps --cluster-id $1 --steps "Type=spark,Name='$3',Args=[--deploy-mode,cluster,--master,yarn,--conf,spark.speculation=true,$2]"
+    aws emr add-steps --cluster-id $1 --steps "Type=spark,Name='$3',Args=[--deploy-mode,cluster,--master,yarn,--conf,spark.sql.shuffle.partitions=$4,--conf,spark.speculation=true,$2]"
 }
 alias spspark='add_spark_step $PROD_CLUSTER_ID s3://docurated-production-activity/main.py'
 
