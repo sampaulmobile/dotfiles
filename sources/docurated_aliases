@@ -49,19 +49,31 @@ alias jenka='open $JENKINS_URL/job/Activity/'
 
 
 # ===== SPARK ========
-KEY_PAIR='$HOME/.ssh/sams-other-key-pair.pem'
-# PROD_CLUSTER_DNS='ec2-54-167-9-173.compute-1.amazonaws.com'
+SPARK_KEY_PAIR='$HOME/.ssh/sams-other-key-pair.pem'
 ssh_spark() {
+    printf "Using cluster DNS: %s\n" "${SPARK_PROD_CLUSTER_DNS:?You must set SPARK_PROD_CLUSTER_DNS}"
     ssh -i $1 -L 8087:$2:18080 -L 8086:$2:8088 hadoop@$2
 }
-alias cpspark='ssh_spark ~/.ssh/sams-other-key-pair.pem $PROD_CLUSTER_DNS'
+alias cpspark='ssh_spark ~/.ssh/sams-other-key-pair.pem $SPARK_PROD_CLUSTER_DNS'
 
-# PROD_CLUSTER_ID='j-3KJ17A1RYNKHB'
 add_spark_step() {
-    #check for CLUSTER_ID env variable
-    aws emr add-steps --cluster-id $1 --steps "Type=spark,Name='$3',Args=[--deploy-mode,cluster,--master,yarn,--conf,spark.sql.shuffle.partitions=$4,--conf,spark.speculation=true,$2]"
+    printf "Using cluster ID: %s\n" "${SPARK_PROD_CLUSTER_ID:?You must set SPARK_PROD_CLUSTER_ID}"
+    aws emr add-steps --cluster-id $1 --steps "Type=spark,Name='$3',Args=[--deploy-mode,cluster,--master,yarn,--conf,spark.executorEnv.ENV=production,--conf,spark.yarn.appMasterEnv.ENV=production,--conf,spark.speculation=true,$2]"
 }
-alias spspark='add_spark_step $PROD_CLUSTER_ID s3://docurated-production-activity/main.py'
+alias spspark='add_spark_step $SPARK_PROD_CLUSTER_ID s3://docurated-production-activity/main.py'
+set_spark_env_var() {
+    export $1=$2
+}
+alias sparkpc='set_spark_env_var SPARK_PROD_CLUSTER_ID'
+alias sparkdc='set_spark_env_var SPARK_DEMO_CLUSTER_ID'
+alias sparkpd='set_spark_env_var SPARK_PROD_CLUSTER_DNS'
+alias sparkdd='set_spark_env_var SPARK_DEMO_CLUSTER_DNS'
+
+cp_to_spark_s3() {
+    aws s3 cp $2 s3://docurated-$1-activity/$2
+}
+alias s3sparkpcp='cp_to_spark_s3 production'
+alias s3sparkdcp='cp_to_spark_s3 demo'
 
 # ===== DOCFORMATION/DOCCONNECTION (soon to be deprecated) ========
 alias con='docutil && $DOC_HOME/utilities/docformation/docconnection.rb'
