@@ -59,6 +59,8 @@ alias aircb='air_cb'
 alias airl='airflow list_dags'
 
 # ===== SPARK ========
+alias emr='aws emr list-clusters --active --query "Clusters[*].{Name:Name,ID:Id,State:Status.State,Info:Status.StateChangeReason.Message}"'
+
 SPARK_KEY_PAIR='$HOME/.ssh/sams-other-key-pair.pem'
 ssh_spark() {
     # printf "Using cluster DNS: %s\n" "${SPARK_PROD_CLUSTER_DNS:?You must set SPARK_PROD_CLUSTER_DNS}"
@@ -127,6 +129,10 @@ alias cpev='sshconnect production events'
 alias cpcass='sshconnect production cassandra'
 alias cprapp='docutil && $DOC_HOME/utilities/bin/ssh-first production resque'
 
+ENVS=('DEMO' 'PROD' 'BIO')
+HOST_TYPES=('MAIN' 'ACT' 'ANA' 'AIR')
+SERVICES=('PG' 'RESQ')
+
 MAIN_PG_PORT_DEMO=5433
 MAIN_PG_PORT_PROD=5434
 MAIN_PG_PORT_BIO=5435
@@ -139,15 +145,41 @@ ACT_RESQ_PORT_DEMO=8286
 ACT_RESQ_PORT_PROD=8287
 ACT_RESQ_PORT_BIO=8288
 
+ACT_PG_HOST_DEMO='activity-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
+ACT_PG_HOST_PROD='activity-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
+ACT_PG_HOST_BIO='activity-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com'
+
 ANA_PG_PORT_DEMO=5439
 ANA_PG_PORT_PROD=5440
 ANA_PG_PORT_BIO=5441
 
+ANA_PG_HOST_DEMO='analytics-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
+ANA_PG_HOST_PROD='analytics-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
+ANA_PG_HOST_BIO='analytics-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com'
+
 AIR_PG_PORT_DEMO=5442
 
-connect_ssh() {
-    ssh $1 -L ${2}:${3}:5432
+AIR_PG_HOST_DEMO='airflow-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
+
+tunnel_ssh() {
+    ssh -nNT -L $1 ${2}:${3}:5432
 }
+tunnel_ports() {
+    str=""
+    for e in $ENVS; do
+        for h in $HOST_TYPES; do
+            port="${h}_PG_PORT_${e}"
+            post="${h}_PG_HOST_${e}"
+            echo port: ${(P)port}
+            echo host: ${(P)host}
+            str+=${(P)port}
+            # echo port: ${!port}
+        done
+    done
+    echo $str
+}
+
+
 alias cdpost='connect_ssh demo.postgres.0 $MAIN_PG_PORT_DEMO localhost'
 alias cppost='connect_ssh production.postgres.0 $MAIN_PG_PORT_PROD localhost'
 alias cbpost='connect_ssh biomarin.postgres.0 $MAIN_PG_PORT_BIO localhost'
