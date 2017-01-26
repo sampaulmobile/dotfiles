@@ -158,8 +158,10 @@ ANA_PG_HOST_PROD='analytics-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
 ANA_PG_HOST_BIO='analytics-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com'
 
 AIR_PG_PORT_DEMO=5442
+AIR_PG_PORT_PROD=5443
 
 AIR_PG_HOST_DEMO='airflow-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
+AIR_PG_HOST_PROD='airflow-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
 
 tunnel_ssh() {
     ssh -nNT -L $1 ${2}:${3}:5432
@@ -189,7 +191,7 @@ alias cpact='ssh production.activity.0 -L 8287:localhost:8282 -L 5437:activity-p
 alias cbact='ssh biomarin.activity.0 -L 8288:localhost:8282 -L 5438:activity-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com:5432'
 
 alias cdana='ssh demo.analytics.0 -L 5439:analytics-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432 -L 5442:airflow-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
-alias cpana='ssh production.analytics.0 -L 5440:analytics-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
+alias cpana='ssh production.analytics.0 -L 5440:analytics-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432 -L 5443:airflow-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
 alias cbana='ssh biomarin.analytics.0 -L 5441:analytics-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com:5432'
 
 connect_pql() {
@@ -208,6 +210,7 @@ alias ppqlana='connect_pql $ANA_PG_PORT_PROD analyticsproduction analytics'
 alias bpqlana='connect_pql $ANA_PG_PORT_BIO analyticsbiomarin analytics'
 
 alias dpqlair='connect_pql $AIR_PG_PORT_DEMO airflowdemo airflow'
+alias ppqlair='connect_pql $AIR_PG_PORT_PROD airflowproduction airflow'
 
 alias dcql='cdcass 0 && cqlsh'
 alias pcql='cqlsh production.cassandra.0'
