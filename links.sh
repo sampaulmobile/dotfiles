@@ -45,22 +45,27 @@ if [ -d ~/.oh-my-zsh ]; then
     echo "Done"
 fi
 
-if [ -d $NOT_PUBLIC ]; then
+if [ -d $NOT_PUBLIC/links ]; then
     echo "Linking AWS config"
     mkdir -p ~/.aws
     mv ~/.aws/config $deldir
-    ln -s $NOT_PUBLIC/aws_config ~/.aws/config
+    ln -s $NOT_PUBLIC/links/aws_config ~/.aws/config
     echo "Done"
 
     echo "Linking AWS (shared) credentials"
     mkdir -p ~/.aws
     mv ~/.aws/credentials $deldir
-    ln -s $NOT_PUBLIC/aws_credentials ~/.aws/credentials
+    ln -s $NOT_PUBLIC/links/aws_credentials ~/.aws/credentials
+    echo "Done"
+
+    echo "Linking ssh known_hosts"
+    mv ~/.ssh/known_hosts $deldir
+    ln -s $NOT_PUBLIC/links/ssh_known_hosts ~/.ssh/known_hosts
     echo "Done"
 
     echo "Linking pgpass"
     mv ~/.pgpass $deldir
-    ln -s $NOT_PUBLIC/pgpass ~/.pgpass
+    ln -s $NOT_PUBLIC/links/pgpass ~/.pgpass
     echo "Done"
 fi
 

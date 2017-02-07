@@ -19,7 +19,7 @@ plugins=(brew command-not-found history jira gem osx python web-search mvn pip z
 [[ -f "$SOURCES/gitstatus.sh" ]] && source $SOURCES/gitstatus.sh
 
 # ===== ENV VARIABLES =====
-[[ -f "$NOT_PUBLIC/envvars" ]] && source $NOT_PUBLIC/envvars
+[[ -f "$NOT_PUBLIC/links/envvars" ]] && source $NOT_PUBLIC/links/envvars
 
 # export DOCKER_HOST=tcp://192.168.59.103:2376
 # export DOCKER_CERT_PATH=/Users/sampaul/.boot2docker/certs/boot2docker-vm

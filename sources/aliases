@@ -10,7 +10,9 @@ alias cdown='cd ~/Downloads'
 
 alias bci='cd $DOC_HOME/time && rmswp && vim bci.txt'
 alias notes='cd ~/Development/SBP/notes && rmswp && vim notes.txt'
-alias creds='more $NOT_PUBLIC/creds | grep -i'
+creds() {
+    grep -i $1 --exclude=ssh_known_hosts $NOT_PUBLIC/links/*
+}
 
 alias soz='source ~/.zshrc'
 

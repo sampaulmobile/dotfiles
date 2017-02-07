@@ -2,6 +2,9 @@
 
 DOTFILES=~/dotfiles
 
+echo "Linking up (available) dotfiles..."
+$DOTFILES/links.sh
+
 echo "Installing homebrew..."
 ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
 
@@ -36,6 +39,12 @@ brew cask install slack
 echo "Installing 1password..."
 brew cask install 1password
 
+echo "Installing Witch..."
+brew cask install witch
+
+echo "Installing VLC..."
+brew cask install vlc
+
 echo "Installing RVM... (+Ruby 2.2.5)"
 \curl -sSL https://get.rvm.io | bash
 source /Users/sampaul/.rvm/scripts/rvm
@@ -43,8 +52,7 @@ rvm install ruby-2.2.5
 
 # echo "Installing uTorrent..."
 # brew cask install utorrent
-# echo "Installing VLC..."
-# brew cask install vlc
+# echo "Installing Skype..."
 # brew cask install skype
 # echo "Installing HipChat..."
 # brew cask install hipchat
@@ -53,10 +61,6 @@ rvm install ruby-2.2.5
 # ssh-keygen -t rsa -b 4096 -C "sampaulmobile@gmail.com"
 # pbcopy < ~/.ssh/id_rsa.pub
 # echo "key copied to clipboard, paste into https://github.com/settings/ssh"
-
-echo "Setting up dotfiles..."
-git clone git@github.com:sampaulmobile/dotfiles.git $DOTFILES
-$DOTFILES/links.sh
 
 git clone https://github.com/VundleVim/Vundle.vim.git ~/.vim/bundle/Vundle.vim
 cd ~ && vim +PluginInstall +qall
