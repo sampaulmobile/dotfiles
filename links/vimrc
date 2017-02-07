@@ -138,15 +138,18 @@ let g:ctrlp_custom_ignore = {
 "TComment remap to c key
 map <leader>/ <c-_><c-_>
 
-"Yankring map display to leader y
-nnoremap <silent> <leader>y :YRShow<CR>
-
 "Gundo - GUI Undo Tree (visualized)
 map <leader>u :GundoToggle<CR>
+
+"Yankring map display to leader y
+nnoremap <silent> <leader>y :YRShow<CR>
 
 "Remapping yankring n/p to meta key
 let g:yankring_replace_n_pkey = '<m-p>'
 let g:yankring_replace_n_nkey = '<m-n>'
+
+"change yankring directory
+"let g:yankring_history_dir = '/Users/sampaul/dropbox/!public'
 
 "Mappings for git blame
 map <leader>gb :Gblame<CR>

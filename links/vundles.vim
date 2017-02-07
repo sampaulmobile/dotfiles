@@ -208,7 +208,7 @@ Bundle 'Xuyuanp/nerdtree-git-plugin'
 Bundle "sjl/gundo.vim"
 
 "Maintains a history of previous yanks, changes and deletes
-Bundle "vim-scripts/YankRing.vim"
+"Bundle "vim-scripts/YankRing.vim"
 
 "Replace a pattern across multiple files interactively
 "Bundle "skwp/greplace.vim"
