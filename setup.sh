@@ -5,8 +5,8 @@ DOTFILES=~/dotfiles
 echo "Installing homebrew..."
 ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)”
 
-echo "Installing caskroom..."
-brew install caskroom/cask/brew-cask
+echo "Tapping caskroom..."
+brew tap caskroom/cask
 
 echo "Installing ZSH..."
 brew install zsh
@@ -26,8 +26,8 @@ brew install the_silver_searcher
 echo "Installing Chrome..."
 brew cask install google-chrome
 
-echo "Installing HipChat..."
-brew cask install hipchat
+# echo "Installing HipChat..."
+# brew cask install hipchat
 
 echo "Installing iTerm2..."
 brew cask install iterm2
@@ -35,8 +35,8 @@ brew cask install iterm2
 echo "Installing Dropbox..."
 brew cask install dropbox
 
-echo "Installing VLC..."
-brew cask install vlc
+# echo "Installing VLC..."
+# brew cask install vlc
 
 echo "Installing iStat-Menus..."
 brew cask install istat-menus
@@ -44,9 +44,13 @@ brew cask install istat-menus
 echo "Installing uTorrent..."
 brew cask install utorrent
 
-# brew cask install dash
+echo "Installing Dash..."
+brew cask install dash
+
 # brew cask install skype
-# brew cask install 1password
+
+echo "Installing 1password..."
+brew cask install 1password
 
 echo "Setting up dotfiles..."
 git clone git@github.com:sampaulmobile/dotfiles.git $DOTFILES

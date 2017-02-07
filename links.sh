@@ -8,7 +8,7 @@
 
 dir=~/dotfiles/links        # dotfiles directory
 deldir=~/DELETE_dotfiles     # backup directory (deprecated)
-files="bashrc vimrc zshrc gemrc gitconfig gitignore ackrc"   # list of files/folders to symlink in homedir
+files="vimrc zshrc gemrc gitconfig gitignore ackrc"   # list of files/folders to symlink in homedir
 NOT_PUBLIC='/Users/sampaul/dropbox/!public'
 
 ##########

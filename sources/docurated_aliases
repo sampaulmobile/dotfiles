@@ -202,9 +202,12 @@ alias cdact='ssh demo.activity.0 -L 8286:localhost:8282 -L 5436:activity-demo.cp
 alias cpact='ssh production.activity.0 -L 8287:localhost:8282 -L 5437:activity-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
 alias cbact='ssh biomarin.activity.0 -L 8288:localhost:8282 -L 5438:activity-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com:5432'
 
-alias cdana='ssh demo.analytics.0 -L 5439:analytics-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432 -L 5442:airflow-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
-alias cpana='ssh production.analytics.0 -L 5440:analytics-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432 -L 5443:airflow-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
-alias cbana='ssh biomarin.analytics.0 -L 5441:analytics-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com:5432'
+# alias cdana='ssh demo.analytics.0 -L 5439:analytics-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432 -L 5442:airflow-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
+# alias cpana='ssh production.analytics.0 -L 5440:analytics-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432 -L 5443:airflow-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
+# alias cbana='ssh biomarin.analytics.0 -L 5441:analytics-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com:5432'
+alias cdana='ssh demo.analytics.0'
+alias cpana='ssh production.analytics.0'
+alias cbana='ssh biomarin.analytics.0'
 
 connect_pql() {
     psql -w -h localhost -p ${1} -U ${2} ${3}

@@ -1,4 +1,8 @@
 
+defaults write com.apple.dock static-only -bool TRUE; killall Dock
+defaults write -g com.apple.swipescrolldirection -bool FALSE
+
+
 USERNAME=sampaul
 DOCURATED_DIR=~/Docurated
 

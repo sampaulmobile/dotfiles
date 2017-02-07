@@ -97,9 +97,9 @@ syntax on "turn on syntax highlighting
 "global find of word under cursor
 "map <leader>g :execute "vimgrep /" . expand("<cword>") . "/j **" <Bar> cw<CR>
 
-if $TMUX == ''
-  set clipboard+=unnamed
-endif
+" if $TMUX == ''
+"   set clipboard+=unnamed
+" endif
 
 " =============================  INIT VUNDLES  ==============================
 if filereadable(expand("~/.vim/vundles.vim"))
@@ -123,8 +123,8 @@ let g:NERDTreeWinSize = 20
 let NERDTreeIgnore = ['\.pyc$','\.pyo$', '\.db$']
 
 "TagBar toggle set to leader + b
-let g:tagbar_usearrows = 1
-nnoremap <leader>b :TagbarToggle<CR>
+" let g:tagbar_usearrows = 1
+" nnoremap <leader>b :TagbarToggle<CR>
 
 "CtrlP toggle set to leader + t
 map <leader>t :CtrlP<CR>
