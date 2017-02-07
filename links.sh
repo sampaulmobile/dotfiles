@@ -6,10 +6,10 @@
 
 ########## Variables
 
-dir=~/dotfiles/links        # dotfiles directory
-deldir=~/DELETE_dotfiles     # backup directory (deprecated)
+dir=$HOME/dotfiles/links        # dotfiles directory
+deldir=$HOME/DELETE_dotfiles     # backup directory (deprecated)
 files="vimrc zshrc gemrc gitconfig gitignore ackrc"   # list of files/folders to symlink in homedir
-NOT_PUBLIC='/Users/sampaul/dropbox/!public'
+NOT_PUBLIC=$HOME/dropbox/!public
 
 ##########
 

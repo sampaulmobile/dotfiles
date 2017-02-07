@@ -21,33 +21,35 @@ Bundle "gmarik/vundle"
 " Taskpaper (todo list) helpers/syntax
 Bundle "davidoc/taskpaper.vim"
 
-" syntax highlighting for salt
-Bundle "saltstack/salt-vim.git"
-
 " Load local lvimrc files (currently for per-project indenting)
 Bundle "embear/vim-localvimrc.git"
+
 
 " ======================== Ruby, Rails, Rake =======================
 "Bundle "astashov/vim-ruby-debugger"
 "Bundle "ecomba/vim-ruby-refactoring"
 "Bundle "skwp/vim-ruby-conque"
-Bundle "tpope/vim-rails.git"
-Bundle "tpope/vim-rake.git"
-Bundle "tpope/vim-rvm.git"
-Bundle "vim-ruby/vim-ruby.git"
-"Bundle "vim-scripts/Specky.git" Used for testing
+"Bundle "tpope/vim-rails.git"
+"Bundle "tpope/vim-rake.git"
 
-"Changes ruby hash syntax
-Bundle "ck3g/vim-change-hash-syntax"
+"this is for switching versions of ruby in vim
+"Bundle "tpope/vim-rvm.git"
+
+"This is for compiling ruby in vim
+"Bundle "vim-ruby/vim-ruby.git"
+"Bundle "vim-scripts/Specky.git" Used for testing
 
 
 " ======================== Other languages =======================
-Bundle "briancollins/vim-jst"
-Bundle "pangloss/vim-javascript"
+"Bundle "briancollins/vim-jst"
+"Bundle "pangloss/vim-javascript"
 "Bundle "rodjek/vim-puppet"
 
 
 " ======================== HTML, XML, CSS, Markdown =======================
+"coffeescript support (MIGHT WANT THIS?)
+"Bundle "kchmck/vim-coffee-script"
+
 "jasmine javascript testing
 "Bundle "claco/jasmine.vim"
 
@@ -57,16 +59,11 @@ Bundle "pangloss/vim-javascript"
 "syntax highlighting for LESS
 "Bundle "groenewege/vim-less.git"
 
-Bundle "itspriddle/vim-jquery.git"
-Bundle "jtratner/vim-flavored-markdown.git"
-
-"coffeescript highlighting
-Bundle "kchmck/vim-coffee-script"
-
 "preview markdown documents in browser
 "Bundle "nelstrom/vim-markdown-preview"
 
-Bundle "skwp/vim-html-escape"
+"escape html
+"Bundle "skwp/vim-html-escape"
 
 "syntax highlighting for slim
 "Bundle "slim-template/vim-slim.git"
@@ -80,10 +77,13 @@ Bundle "skwp/vim-html-escape"
 "Syntax highlighting for Stylus
 "Bundle "wavded/vim-stylus"
 
-Bundle 'hail2u/vim-css3-syntax'
+"Bundle 'hail2u/vim-css3-syntax'
 
 "Syntax highlighting for Scala
-Bundle 'derekwyatt/vim-scala'
+"Bundle 'derekwyatt/vim-scala'
+
+"Syntax highlighting for salt
+Bundle "saltstack/salt-vim.git"
 
 "Syntax highlighting for typescript
 Bundle 'leafgarland/typescript-vim'
@@ -92,7 +92,8 @@ Bundle 'leafgarland/typescript-vim'
 Bundle 'mattn/emmet-vim'
 
 " auto formatting of popular languages
-Plugin 'Chiel92/vim-autoformat'
+"Plugin 'Chiel92/vim-autoformat'
+
 
 " ======================== Git Stuff =======================
 Bundle "gregsexton/gitv"
@@ -100,26 +101,22 @@ Bundle "gregsexton/gitv"
 "vimscript for creating gists
 "Bundle "mattn/gist-vim"
 
-"Find (git grep) references to the rails view partial you're viewing
-Bundle "skwp/vim-git-grep-rails-partial"
-
-Bundle "tjennings/git-grep-vim"
-
 "Git wrapper so awesome, it should be illegal
 Bundle "tpope/vim-fugitive"
 
 "Git syntax, indent, and filetype plugin files
-Bundle "tpope/vim-git"
+"Bundle "tpope/vim-git"
 
 "show Git diffs in gutter
 "Bundle 'airblade/vim-gitgutter'
 
+
 " ======================== General Text Editing =======================
 "switching between single-line and multiline code
-Bundle "AndrewRadev/splitjoin.vim"
+"Bundle "AndrewRadev/splitjoin.vim"
 
 "insert mode auto-completion for quotes, parens, brackets, etc
-Bundle "Raimondi/delimitMate"
+"Bundle "Raimondi/delimitMate"
 
 "YouCompleteMe all around autocomplete
 "Bundle "Valloric/YouCompleteMe"
@@ -141,22 +138,22 @@ Bundle "Raimondi/delimitMate"
 "Bundle "honza/vim-snippets"
 
 "change the contents of the innermost 'surrounding'
-Bundle "briandoll/change-inside-surroundings.vim.git"
+"Bundle "briandoll/change-inside-surroundings.vim.git"
 
 "text filtering and alignment
 Bundle "godlygeek/tabular"
 
 "Start a * or # search from a visual block
-Bundle "nelstrom/vim-visual-star-search"
+"Bundle "nelstrom/vim-visual-star-search"
 
 "vim motions on speeds
-Bundle "Lokaltog/vim-easymotion"
+"Bundle "Lokaltog/vim-easymotion"
 
-"extensible & universal comments
+"hotkey for adding comments to blocks of code
 Bundle "tomtom/tcomment_vim.git"
 
 "vim goodies for Bundler
-Bundle "tpope/vim-bundler"
+"Bundle "tpope/vim-bundler"
 
 "shows 'Nth match out of M' at every search
 Bundle "vim-scripts/IndexedSearch"
@@ -168,13 +165,13 @@ Bundle "vim-scripts/IndexedSearch"
 Bundle "vim-scripts/matchit.zip.git"
 
 "True Sublime Text style multiple selections
-Bundle "terryma/vim-multiple-cursors"
+"Bundle "terryma/vim-multiple-cursors"
 
 
 " ======================== General VIM =======================
 
 "open file @ a given line
-Bundle "bogado/file-line.git"
+"Bundle "bogado/file-line.git"
 
 "NERDTree and tabs together in Vim
 Bundle "jistr/vim-nerdtree-tabs.git"
@@ -184,19 +181,19 @@ Bundle "kien/ctrlp.vim"
 
 "LustyJuggler -> puts open windows on home row keys
 "Bundle "sjbach/lusty/master/plugin/lusty-juggler.vim"
-Bundle "vim-scripts/LustyJuggler"
+"Bundle "vim-scripts/LustyJuggler"
 
 "Vim plugin that displays tags in a window, ordered by class
-Bundle "majutsushi/tagbar.git"
+"Bundle "majutsushi/tagbar.git"
 
 "vim interface to Web API
-Bundle "mattn/webapi-vim.git"
+"Bundle "mattn/webapi-vim.git"
 
 "siver searcher, similar to ack
 "Bundle "rking/ag.vim"
 
 "enable ack in vim
-Bundle 'mileszs/ack.vim'
+"Bundle 'mileszs/ack.vim'
 
 " NERDTree BRO!
 Bundle "scrooloose/nerdtree.git"
@@ -214,22 +211,22 @@ Bundle "sjl/gundo.vim"
 Bundle "vim-scripts/YankRing.vim"
 
 "Replace a pattern across multiple files interactively
-Bundle "skwp/greplace.vim"
+"Bundle "skwp/greplace.vim"
 
 "terminal emulator which uses a Vim buffer to display the program output
 "Bundle "skwp/vim-conque"
 
 "easily search for, substitute, and abbreviate multiple variants of a word
-Bundle "tpope/vim-abolish"
+"Bundle "tpope/vim-abolish"
 
 "add 'end' for ruby
 Bundle "tpope/vim-endwise.git"
 
 "ghetto HTML/XML mappings
-Bundle "tpope/vim-ragtag"
+"Bundle "tpope/vim-ragtag"
 
 "enable repeating supported plugin maps with '.'
-Bundle "tpope/vim-repeat.git"
+"Bundle "tpope/vim-repeat.git"
 
 "quoting/parenthesizing made simple
 Bundle "tpope/vim-surround.git"
@@ -241,12 +238,12 @@ Bundle "tpope/vim-unimpaired"
 "Bundle "vim-scripts/AnsiEsc.vim.git"
 
 "Updates entries in a tags file automatically when saving
-Bundle "vim-scripts/AutoTag.git"
+"Bundle "vim-scripts/AutoTag.git"
 
 "Bundle "vim-scripts/lastpos.vim"
 
 "edit a file with priviledges from an unprivledged session
-Bundle "vim-scripts/sudo.vim"
+"Bundle "vim-scripts/sudo.vim"
 
 "Visually shows the location of marks
 "Bundle "xsunsmile/showmarks.git"
@@ -258,43 +255,43 @@ Bundle "vim-scripts/sudo.vim"
 
 " ======================== Text Objects =======================
 "Text Objects based on Indentation Level
-Bundle "austintaylor/vim-indentobject"
+"Bundle "austintaylor/vim-indentobject"
 
 "Text object for manipulation of ruby symbol variables
 "Bundle "bootleq/vim-textobj-rubysymbol"
 
 "Adds text-objects for word-based columns
-Bundle "coderifous/textobj-word-column.vim"
+"Bundle "coderifous/textobj-word-column.vim"
 
 "Bundle "kana/vim-textobj-datetime"
 "Bundle "kana/vim-textobj-entire"
 "Bundle "kana/vim-textobj-function"
 
 "installed for textobj-underscore
-Bundle "kana/vim-textobj-user"
+"Bundle "kana/vim-textobj-user"
 
 "Underscore text-object for Vim
-Bundle "lucapette/vim-textobj-underscore"
+"Bundle "lucapette/vim-textobj-underscore"
 
 "visually display indent levels in code
 Bundle "nathanaelkane/vim-indent-guides"
 
 "custom text object for selecting ruby blocks
-Bundle "nelstrom/vim-textobj-rubyblock"
+"Bundle "nelstrom/vim-textobj-rubyblock"
 
 "Text objects for functions in javascript.
-Bundle "thinca/vim-textobj-function-javascript"
+"Bundle "thinca/vim-textobj-function-javascript"
 
 "Text-object like motion for arguments
-Bundle "vim-scripts/argtextobj.vim"
+"Bundle "vim-scripts/argtextobj.vim"
 
 
 " ======================== Cosmetics, Colors, Powerline =======================
 "color hex codes and color names
-Bundle "chrisbra/color_highlight.git"
+"Bundle "chrisbra/color_highlight.git"
 
 "Bundle "skwp/vim-colors-solarized"
-Bundle "altercation/vim-colors-solarized"
+"Bundle "altercation/vim-colors-solarized"
 Bundle "tomasr/molokai"
 
 "lean & mean status/tabline
