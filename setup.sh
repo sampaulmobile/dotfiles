@@ -16,6 +16,7 @@ if [ ! -f /usr/local/bin/mvim ]; then
     echo "Installing VIm + MacVIm (Make sure XCode is installed/run)"
     brew install vim
     brew install macvim
+    brew install gpg
 fi
 
 if [ ! -d '/usr/local/Cellar/the_silver_searcher' ]; then
