@@ -48,7 +48,7 @@ Host docurated.nfs
   User ubuntu
 
 Host production* demo* stage* operations* biomarin*
-  UseRoaming no
+  # UseRoaming no
   User sampaulmobile
 
 Host production*

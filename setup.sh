@@ -71,13 +71,6 @@ if [ ! -d "/Applications/VLC.app" ]; then
     brew cask install vlc
 fi
 
-if [ ! -d $HOME/.rvm ]; then
-    echo "Installing RVM... (+Ruby 2.2.5)"
-    \curl -sSL https://get.rvm.io | bash
-    source $HOME/.rvm/scripts/rvm
-    rvm install ruby-2.2.5
-fi
-
 if [ ! -d $HOME/.pyenv ]; then
     echo "Installing pyenv... (+Python 3.5.2)"
     brew install pyenv
@@ -103,6 +96,20 @@ if [ ! -d $HOME/.oh-my-zsh ]; then
     echo "Installing Oh-My-ZSH..."
     sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh)"
 fi
+
+# restart to install rvm
+
+if [ ! -d $HOME/.rvm ]; then
+    echo "Installing RVM... (+Ruby 2.2.5)"
+    \curl -sSL https://get.rvm.io | bash
+    source $HOME/.rvm/scripts/rvm
+    rvm install ruby-2.2.5
+fi
+
+brew install postgresql
+brew services start postgresql
+
+# install java
 
 # echo "Installing uTorrent..."
 # brew cask install utorrent
