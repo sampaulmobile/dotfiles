@@ -2,6 +2,15 @@
 
 DOTFILES=$HOME/dotfiles
 
+# xcode-select --install
+
+echo "Making dock static-only..."
+# defaults write com.apple.dock static-only -bool TRUE; killall Dock
+echo "Enabling key repeat..."
+# defaults write -g ApplePressAndHoldEnabled -bool false
+# defaults write -g InitialKeyRepeat -int 15
+# defaults write -g KeyRepeat -int 2
+
 echo "Linking up (available) dotfiles..."
 $DOTFILES/links.sh
 
@@ -17,6 +26,11 @@ if [ ! -f /usr/local/bin/mvim ]; then
     brew install vim
     brew install macvim
     brew install gpg
+fi
+
+if [ ! -f /usr/local/bin/psql ]; then
+    brew install postgresql
+    brew services start postgresql
 fi
 
 if [ ! -d '/usr/local/Cellar/the_silver_searcher' ]; then
@@ -72,6 +86,11 @@ if [ ! -d "/Applications/VLC.app" ]; then
     brew cask install vlc
 fi
 
+if [ ! -d "/Applications/Tunnelblick.app" ]; then
+    echo "Installing Tunnelblick..."
+    brew cask install tunnelblick
+fi
+
 if [ ! -d $HOME/.pyenv ]; then
     echo "Installing pyenv... (+Python 3.5.2)"
     brew install pyenv
@@ -106,9 +125,6 @@ if [ ! -d $HOME/.rvm ]; then
     source $HOME/.rvm/scripts/rvm
     rvm install ruby-2.2.5
 fi
-
-brew install postgresql
-brew services start postgresql
 
 # install java
 

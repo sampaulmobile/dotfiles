@@ -1,5 +1,6 @@
 # ============ Docurated Aliases =============
 DOC_HOME='/Users/sampaul/Development/Docurated'
+alias doc="cd $DOC_HOME"
 
 
 # ===== JIRA ZSH Plugin / URLs ========
@@ -16,12 +17,12 @@ alias relno='open "https://docs.google.com/a/docurated.com/document/d/1ktuCdngDh
 
 
 # ===== GIT REPOS ========
-alias docweb='cd $DOC_HOME/website/rails && rvmgd'
-alias docutil='cd $DOC_HOME/utilities && rvmgdu'
-alias doccli='cd $DOC_HOME/clients && rvmgdu'
-alias docserv='cd $DOC_HOME/services'
-alias docevents='cd $DOC_HOME/events'
-alias docact='cd $DOC_HOME/activity && rvm use gemset 2.2.5@activity'
+alias docweb="cd $DOC_HOME/website/rails"
+alias docutil="cd $DOC_HOME/utilities"
+alias doccli="cd $DOC_HOME/clients"
+alias docserv="cd $DOC_HOME/services"
+alias docevents="cd $DOC_HOME/events"
+alias docact="cd $DOC_HOME/activity"
 
 alias hubc='open $GITHUB_URL/clients'
 alias hubw='open $GITHUB_URL/website'
@@ -88,28 +89,6 @@ cp_to_spark_s3() {
 }
 alias s3sparkpcp='cp_to_spark_s3 production'
 alias s3sparkdcp='cp_to_spark_s3 demo'
-
-# ===== DOCFORMATION/DOCCONNECTION (soon to be deprecated) ========
-alias con='docutil && $DOC_HOME/utilities/docformation/docconnection.rb'
-alias cupdate='docutil && $DOC_HOME/utilities/docformation/docconnection.rb update'
-
-docconnect() {
-    cd $DOC_HOME/utilities/docformation
-    rvm gemset use docurated_util
-    $DOC_HOME/utilities/docformation/docconnection.rb $1.$2.$3
-}
-
-alias tag='$DOC_HOME/utilities/docformation/docformation.rb tag_release --repo='
-
-taillog() {
-    cd $DOC_HOME/utilities/docformation
-    rvm gemset use docurated_util
-    lines=100
-    N=${2:-$lines}
-    ./docconnection.rb $1.web "tail -n $N /mnt/app/website/rails/log/$1.log"
-}
-alias taild='taillog demo'
-alias tailp='taillog production'
 
 
 # ===== SSH ========
@@ -267,8 +246,6 @@ alias msd='sudo mount -t smbfs //Guest@50.17.45.211/vol /private/nfs'
 
 
 # ===== RAILS ========
-alias rvmgd='rvm use 2.2.5@docurated'
-alias rvmgdu='rvm gemset use docurated_util'
 alias rs='rails s'
 alias rc='rails c'
 alias rsp='rails s -p '
