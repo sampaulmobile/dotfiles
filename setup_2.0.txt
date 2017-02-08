@@ -87,8 +87,8 @@ RAILS CONSOLE
 DO THIS FIRST because migrations create the UNKNOWN ORGANIZATION
 o = Organization.create(name: "Docurated", domain: "docurated.com")
 u = User.new(first_name: "Sam", last_name: "Paul", organization_id: 1, password: 'asdfasdf', email: "sam@docurated.com", confirmed: true)
-u.save validate:false
 u.confirm!
+u.save validate:false
 os = OrganizationsSolrCluster.first
 os.update_attribute(:cluster_url, 'http://localhost:8983/solr')
 os.update_attribute(:in_zookeeper, false)

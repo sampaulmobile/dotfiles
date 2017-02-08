@@ -31,7 +31,21 @@ fi
 if [ ! -f /usr/local/bin/psql ]; then
     brew install postgresql
     brew services start postgresql
+    # createuser sampaul -P -s
 fi
+
+if [ ! -f /usr/local/bin/redis-server ]; then
+    brew install redis
+    brew services start redis
+fi
+
+if [ ! -f /usr/local/bin/mongo ]; then
+    brew install mongo
+    brew services start mongodb
+    # db.createUser({user: "sampaul", pwd: "password", roles: ["readWrite"]})
+    # mongo admin -u admin -p admin --eval "db.getSiblingDB('docurated').addUser('sampaul', 'password')"
+fi
+
 
 if [ ! -d '/usr/local/Cellar/the_silver_searcher' ]; then
     echo "Installing the Silver Searcher"
