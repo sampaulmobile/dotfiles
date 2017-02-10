@@ -28,6 +28,14 @@ if [ ! -f /usr/local/bin/mvim ]; then
     brew install gpg
 fi
 
+if [ ! -f /usr/local/bin/consul ]; then
+    brew install consul
+fi
+
+if [ ! -f /usr/local/bin/jq ]; then
+    brew install jq
+fi
+
 if [ ! -f /usr/local/bin/psql ]; then
     brew install postgresql
     brew services start postgresql
