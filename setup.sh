@@ -1,6 +1,7 @@
 #!/bin/bash
 
 DOTFILES=$HOME/dotfiles
+USERNAME=sampaul
 
 # xcode-select --install
 
@@ -29,19 +30,24 @@ if [ ! -f /usr/local/bin/mvim ]; then
 fi
 
 if [ ! -f /usr/local/bin/psql ]; then
+    echo "Installing postgres..."
     brew install postgresql
     brew services start postgresql
-    # createuser sampaul -P -s
+    echo "creating postgres user..."
+    createuser $1 -P -s
 fi
 
 if [ ! -f /usr/local/bin/redis-server ]; then
+    echo "Installing redis..."
     brew install redis
     brew services start redis
 fi
 
 if [ ! -f /usr/local/bin/mongo ]; then
+    echo "Installing mongo..."
     brew install mongo
     brew services start mongodb
+    # use docurated
     # db.createUser({user: "sampaul", pwd: "password", roles: ["readWrite"]})
     # mongo admin -u admin -p admin --eval "db.getSiblingDB('docurated').addUser('sampaul', 'password')"
 fi
