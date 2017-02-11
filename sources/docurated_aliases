@@ -48,6 +48,17 @@ alias jenkw='open $JENKINS_URL/job/BuildTestDeployWebMaster/'
 alias jenke='open $JENKINS_URL/job/Events%20Build/'
 alias jenka='open $JENKINS_URL/job/Activity/'
 
+
+# ===== CONSUL ========
+alias conpget='consul kv get -http-addr=consul.service.consul:8500 -datacenter=us-east-1-production'
+alias conpput='consul kv put -http-addr=consul.service.consul:8500 -datacenter=us-east-1-production'
+alias condget='consul kv get -http-addr=consul.service.consul:8500 -datacenter=us-east-1-demo'
+alias condput='consul kv put -http-addr=consul.service.consul:8500 -datacenter=us-east-1-demo'
+alias conpactget='conpget repos/activity/current_etl_release'
+# alias conpactput='conpput repos/activity/current_etl_release'
+# alias conpactput='conpput repos/activity/current_etlair_release'
+
+
 # ===== AIRFLOW ========
 TODAY_DATE=`date +%Y-%m-%d`
 alias airc='airflow clear'
