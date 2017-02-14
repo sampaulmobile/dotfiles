@@ -60,9 +60,12 @@ alias conpactget='conpget repos/activity/current_etl_release'
 
 
 # ===== AIRFLOW ========
-TODAY_DATE=`date +%Y-%m-%d`
+export AIRFLOW_HOME=/usr/local/opt/airflow
+alias airw='airflow webserver -D &'
+alias airwq='pkill -f "airflow webserver"'
+alias airwr='airwq && airw'
 alias airc='airflow clear'
-alias airb='airflow backfill -s $TODAY_DATE'
+alias airb='airflow backfill -s `date +%Y-%m-%d`'
 air_cb() {
     airc $1
     airb $1
