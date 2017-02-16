@@ -156,6 +156,8 @@ AIR_PG_PORT_PROD=5443
 AIR_PG_HOST_DEMO='airflow-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
 AIR_PG_HOST_PROD='airflow-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
 
+REDIS_PORT_DEMO=6380
+
 tunnel_ssh() {
     ssh -nNT -L $1 ${2}:${3}:5432
 }
@@ -184,6 +186,7 @@ tunnel_demo() {
     tunnel_port demo.activity.0 $ACT_RESQ_PORT_DEMO localhost 8282 &
     tunnel_port demo.analytics.0 $ANA_PG_PORT_DEMO $ANA_PG_HOST_DEMO 5432 &
     tunnel_port demo.analytics.0 $AIR_PG_PORT_DEMO $AIR_PG_HOST_DEMO 5432 &
+    tunnel_port demo.analytics.0 $REDIS_PORT_DEMO main.redis.service.consul 6379 &
 }
 alias kill_tunnel_demo="pkill -f 'nNT demo'"
 tunnel_prod() {

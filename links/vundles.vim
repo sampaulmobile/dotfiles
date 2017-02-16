@@ -202,7 +202,7 @@ Bundle "scrooloose/nerdtree.git"
 Bundle 'Xuyuanp/nerdtree-git-plugin'
 
 "syntax checking
-" Bundle "scrooloose/syntastic.git"
+Bundle "scrooloose/syntastic.git"
 
 "visualize vim undo tree
 Bundle "sjl/gundo.vim"
