@@ -2,6 +2,7 @@
 
 DOTFILES=$HOME/dotfiles
 USERNAME=sampaul
+OPT_DIR=/usr/local/opt
 
 # xcode-select --install
 
@@ -144,6 +145,14 @@ if [ ! -d $HOME/.oh-my-zsh ]; then
     echo "Installing Oh-My-ZSH..."
     sh -c "$(curl -fsSL https://raw.github.com/robbyrussell/oh-my-zsh/master/tools/install.sh)"
 fi
+
+echo "Updating git-prompt..."
+mkdir -p $OPT_DIR/git_prompt
+git clone https://github.com/olivierverdier/zsh-git-prompt.git $HOME/git_prompt_temp
+mv $HOME/git_prompt_temp/gitstatus.py $OPT_DIR/git_prompt
+mv $HOME/git_prompt_temp/zshrc.sh $OPT_DIR/git_prompt/gitstatus.sh
+rm -rf $HOME/git_prompt_temp
+
 
 # restart to install rvm
 
