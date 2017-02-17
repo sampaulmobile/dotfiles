@@ -7,17 +7,11 @@ alias dotv='vim $LINKS/vimrc'
 alias cdot='cd ~/dotfiles'
 alias dev='cd ~/Development/SBP'
 alias cdown='cd ~/Downloads'
+alias soz='source ~/.zshrc'
 
-alias bci='cd $DOC_HOME/time && rmswp && vim bci.txt'
-alias notes='cd ~/Development/SBP/notes && rmswp && vim notes.txt'
 creds() {
     grep -i $1 --exclude=ssh_known_hosts $NOT_PUBLIC/links/*
 }
-
-alias soz='source ~/.zshrc'
-
-# ============ PERSONAL DEV =============
-alias sless='~/Development/SBP/cpreserver/doer.py'
 
 
 # ============ UNIX =============
@@ -33,8 +27,6 @@ alias egrep='egrep --colour=auto'
 #alias rmv='rsync -v --progress --remove-source-files'
 
 alias g='ag'
-# alias gi='ag -i' ag is smartcase
-
 alias hist='history'
 alias histg='history | grep'
 
@@ -42,11 +34,6 @@ psgrep() { ps aux | grep $1 | grep -v grep }
 alias psg=psgrep
 psgrepi() { ps aux | grep -i $1 | grep -v grep }
 alias psgi=psgrepi
-
-grepfind() { find . -name "*.$1" | xargs grep --color=auto -n "$2" }
-alias gf=grepfind
-grepfindi() { find . -name "*.$1" | xargs grep --color=auto -ni "$2" }
-alias gfi=grepfindi
 
 
 # ============ GIT =============
@@ -90,16 +77,11 @@ alias slzumi='open http://www.seamless.com/food-delivery/izumi-sushi-new-york-ci
 alias weather='open http://www.weather.com/weather/hourbyhour/l/10003:4:US'
 alias ff='open https://football.fantasysports.yahoo.com/f1/219880'
 
+
 # ============ BUZZER / PUSHFOROPEN =============
 BUZZER_URL='http://buzz.linktothecode.com'
 hit_buzzer() { curl "$BUZZER_URL/open/$1" }
 alias buzz='hit_buzzer'
-
-# ============ PLUNCHY (soon to be deprecated) =============
-alias pstart='plunchy start '
-alias pstop='plunchy stop '
-alias plist='plunchy -v ls '
-alias pstarts='pstart redis && pstart post && pstart mongo && pstart fluxdb88 && pstart cass && pstart zoo && pstart kafka && pstart elastic && pstart kibana'
 
 
 # ============ VIM (cleanup) =============
@@ -109,10 +91,4 @@ rmpython() {
     find . -name "*.pyo*" | xargs rm
 }
 alias rmpy=rmpython
-
-alias devesp='cd ~/Development/SBP/ESP8266'
-alias start_esp='java -jar ~/Development/SBP/ESPlorer/ESPlorer.jar &'
-
-# ============ NODE.JS =============
-alias nw='~/Downloads/nwjs-v0.12.3-osx-x64/nwjs.app/Contents/MacOS/nwjs'
 
