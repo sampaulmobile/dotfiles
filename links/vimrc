@@ -94,13 +94,6 @@ nnoremap <esc>^[ <esc>^[
 
 syntax on "turn on syntax highlighting
 
-"global find of word under cursor
-"map <leader>g :execute "vimgrep /" . expand("<cword>") . "/j **" <Bar> cw<CR>
-
-" if $TMUX == ''
-"   set clipboard+=unnamed
-" endif
-
 " =============================  INIT VUNDLES  ==============================
 if filereadable(expand("~/.vim/vundles.vim"))
   source ~/.vim/vundles.vim
@@ -110,17 +103,15 @@ endif
 " ========================  VUNDLE/PLUGIN MAPPINGS  =========================
 
 " Set some shortcuts for Tabularize
-"if exists(":Tabularize")
-  nmap <Leader>a= :Tabularize /=<CR>
-  vmap <Leader>a= :Tabularize /=<CR>
-  nmap <Leader>a: :Tabularize /:\zs<CR>
-  vmap <Leader>a: :Tabularize /:\zs<CR>
-"endif
+nmap <Leader>a= :Tabularize /=<CR>
+vmap <Leader>a= :Tabularize /=<CR>
+nmap <Leader>a: :Tabularize /:\zs<CR>
+vmap <Leader>a: :Tabularize /:\zs<CR>
 
 "NERDTree toggle set to capital T
 map T :NERDTreeToggle<CR>
 let g:NERDTreeWinSize = 20
-let NERDTreeIgnore = ['\.pyc$','\.pyo$', '\.db$']
+let NERDTreeIgnore = ['\.pyc$','\.pyo$', '\.db$', '__pycache__']
 
 "TagBar toggle set to leader + b
 " let g:tagbar_usearrows = 1
@@ -144,9 +135,12 @@ map <leader>u :GundoToggle<CR>
 "Yankring map display to leader y
 nnoremap <silent> <leader>y :YRShow<CR>
 
+" python folding - preview docstring in fold text
+let g:SimpylFold_docstring_preview = 1
+
 "Remapping yankring n/p to meta key
-let g:yankring_replace_n_pkey = '<m-p>'
-let g:yankring_replace_n_nkey = '<m-n>'
+" let g:yankring_replace_n_pkey = '<m-p>'
+" let g:yankring_replace_n_nkey = '<m-n>'
 
 "change yankring directory
 "let g:yankring_history_dir = '/Users/sampaul/dropbox/!public'
@@ -155,29 +149,6 @@ let g:yankring_replace_n_nkey = '<m-n>'
 map <leader>gb :Gblame<CR>
 map <leader>gh :Gbrowse<CR>
 
-" leader + f to startup an ack search
-" nmap <Leader>f :Ack<Space>
-" let g:ack_default_options =
-"       \ " -s -H --nocolor --nogroup --nocolumn --smart-case --follow"
-
-"let g:UltiSnipsExpandTrigger=""
-"let g:UltiSnipsJumpForwardTrigger=""
-"let g:UltiSnipsJumpBackwardTrigger=""
-
-"<leader><leader>w is default for vim motion plugin
-
-"Use CamelCaseMotion for normal w, b, e
-"map <silent> w <Plug>CamelCaseMotion_w 
-"map <silent> b <Plug>CamelCaseMotion_b 
-"map <silent> e <Plug>CamelCaseMotion_e 
-"sunmap w
-"sunmap b
-"sunmap e
-
-"<leader>ig is default for vim indentation guide
-
-" assign autoformat key to leader + '='
-" noremap <leader>= :Autoformat<CR>
 
 "Need to set coloscheme after vundles are loaded
 "colorscheme desert
@@ -186,6 +157,4 @@ colorscheme molokai
 hi Folded guibg=#3e3e3e
 hi Folded guifg=#b0b0b0
 "set background=light             "Options are 'dark' or 'light'
-"Set F5 to toggle background color
-"call togglebg#map("<F5>")
 

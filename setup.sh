@@ -132,7 +132,7 @@ if [ ! -d $HOME/.vim/bundle/Vundle.vim ]; then
 fi
 
 echo "Updating vundle plugins..."
-cd $HOME && vim +PluginUpdate +qall
+# cd $HOME && vim +PluginUpdate +qall
 
 if [ ! -f /bin/zsh ]; then
     echo "Installing ZSH..."
@@ -147,11 +147,13 @@ if [ ! -d $HOME/.oh-my-zsh ]; then
 fi
 
 echo "Updating git-prompt..."
-mkdir -p $OPT_DIR/git_prompt
-git clone https://github.com/olivierverdier/zsh-git-prompt.git $HOME/git_prompt_temp
-mv $HOME/git_prompt_temp/gitstatus.py $OPT_DIR/git_prompt
-mv $HOME/git_prompt_temp/zshrc.sh $OPT_DIR/git_prompt/gitstatus.sh
-rm -rf $HOME/git_prompt_temp
+rm -rf $OPT_DIR/zsh-git-prompt
+git clone https://github.com/olivierverdier/zsh-git-prompt.git $OPT_DIR/zsh-git-prompt
+# setup prompt to use haskell for 4x+ speed
+# curl -sSL https://get.haskellstack.org/ | sh
+# cd $OPT_DIR/zsh-git-prompt
+# stack setup
+# stack build && stack install
 
 
 # restart to install rvm

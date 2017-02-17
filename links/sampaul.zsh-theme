@@ -7,33 +7,6 @@ else
   fi
 fi
 
-# calculate space between prompt and rprompt
-function put_spacing() {
-  local git=$(git_super_status)
-  if [ ${#git} != 0 ]; then
-    ((git=${#git} - 90))
-  else
-    git=0
-  fi
-
-  local rubylen=${#RUBY_PROMPT_}
-  (( rubylen = rubylen - 1))
-
-  local dirpath=${#PWD}
-  if [ dirpath > 30 ]; then
-    ((dirpath=30))
-  fi
-
-  local termwidth
-  (( termwidth = ${COLUMNS} - ${#USERNAME} - ${#HOST} - ${#PWD} - ${rubylen} - ${git} ))
-
-  local spacing=""
-  for i in {1..$termwidth}; do
-    spacing="${spacing} " 
-  done
-  echo $spacing
-}
-
 # if superuser make the username red
 if [ $UID -eq 0 ]; then NCOLOR="red"; else NCOLOR="white"; fi
 
@@ -58,9 +31,4 @@ PROMPT=$HOST$DIR$RUBY_PROMPT_$GIT
 
 # Display time in rprompt
 RPROMPT='%{$FG[045]%}%*%{$reset_color%}'
-
-
-
-
-
 
