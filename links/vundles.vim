@@ -48,6 +48,9 @@ Plugin 'tpope/vim-unimpaired'
 "python folding
 Plugin 'tmhedberg/SimpylFold'
 
+"autocomplete
+Plugin 'Valloric/YouCompleteMe'
+
 " ======================== VIM Tools =======================
 "NERDTree and tabs together in Vim
 Plugin 'jistr/vim-nerdtree-tabs.git'
