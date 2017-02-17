@@ -42,8 +42,8 @@ Plugin 'tpope/vim-endwise.git'
 "quoting/parenthesizing made simple
 Plugin 'tpope/vim-surround.git'
 
-"pairs of handy bracket mappings
-Plugin 'tpope/vim-unimpaired'
+"auto close parens/brackets/etc. 
+Plugin 'raimondi/delimitmate'
 
 "python folding
 Plugin 'tmhedberg/SimpylFold'
@@ -82,7 +82,16 @@ Plugin 'vim-airline/vim-airline'
 " Load local lvimrc files (currently for per-project indenting)
 Plugin 'embear/vim-localvimrc.git'
 
+" easy motion for EASY movement
+Plugin 'easymotion/vim-easymotion'
+
+" 'distraction free writing in vim'
+Plugin 'junegunn/goyo.vim'
+
+" colorschemes
+Plugin 'sjl/badwolf'
 Plugin 'tomasr/molokai'
+Plugin 'reedes/vim-colors-pencil'
 
 
 call vundle#end() " required now for new vundle

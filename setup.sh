@@ -124,6 +124,7 @@ if [ ! -d $HOME/.pyenv ]; then
     echo "Installing pyenv... (+Python 3.5.2)"
     brew install pyenv
     pyenv install 3.5.2
+    # PYTHON_CONFIGURE_OPTS="--enable-framework" pyenv install 3.5.2
     pyenv global 3.5.2
 fi
 
@@ -132,7 +133,7 @@ if [ ! -d $HOME/.vim/bundle/Vundle.vim ]; then
 fi
 
 echo "Updating vundle plugins..."
-cd $HOME && vim +PluginUpdate +qall
+cd $HOME && vim +PluginClean! +PluginUpdate +qall
 
 if [ ! -f /usr/local/bin/cmake ]; then
     echo "Installing cmake..."
@@ -142,7 +143,6 @@ fi
 if [ ! -f $HOME/.vim/bundle/YouCompleteMe/third_party/ycmd/ycm_core.so ]; then
     echo "Building/installing YouCompleteMe..."
     cd $HOME/.vim/bundle/YouCompleteMe
-    pyenv local system
     ./install.py
     cd
 fi

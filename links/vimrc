@@ -143,12 +143,16 @@ nnoremap <silent> <leader>y :YRShow<CR>
 
 " python folding - preview docstring in fold text
 let g:SimpylFold_docstring_preview = 1
-
-" set YouCompleteMe python to path python
-let g:ycm_python_binary_path = 'python'
+" let g:ycm_autoclose_preview_window_after_completion = 1
+let g:ycm_autoclose_preview_window_after_insertion = 1
 
 " set YouCompleteMe goto definition
 map <leader>g  :YcmCompleter GoToDefinitionElseDeclaration<CR>
+
+" indent guide - minimum width, subtle highlighting
+let g:indent_guides_guide_size = 1
+let g:indent_guides_color_change_percent = 3
+let g:indent_guides_enable_on_vim_startup = 1
 
 "Remapping yankring n/p to meta key
 " let g:yankring_replace_n_pkey = '<m-p>'
@@ -163,10 +167,21 @@ map <leader>gh :Gbrowse<CR>
 
 
 "Need to set coloscheme after vundles are loaded
-"colorscheme desert
-"colorscheme solarized
+" colorscheme badwolf
 colorscheme molokai
 hi Folded guibg=#3e3e3e
 hi Folded guifg=#b0b0b0
 "set background=light             "Options are 'dark' or 'light'
+
+function! s:goyo_enter()
+    colorscheme pencil
+endfunction
+
+function! s:goyo_leave()
+    colorscheme molokai
+endfunction
+
+autocmd! User GoyoEnter nested call <SID>goyo_enter()
+autocmd! User GoyoLeave nested call <SID>goyo_leave()
+
 
