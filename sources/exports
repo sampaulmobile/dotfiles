@@ -1,6 +1,12 @@
 
 
-export AIRFLOW_HOME=/usr/local/opt/airflow
+if [ -d /usr/local/opt/airflow ]; then
+    export AIRFLOW_HOME=/usr/local/opt/airflow
+fi
+
+if [ -d /opt/airflow ]; then
+    export AIRFLOW_HOME=/opt/airflow
+fi
 
 # export DOCKER_HOST=tcp://192.168.59.103:2376
 # export DOCKER_CERT_PATH=/Users/sampaul/.boot2docker/certs/boot2docker-vm

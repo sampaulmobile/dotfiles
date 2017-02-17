@@ -123,8 +123,8 @@ fi
 if [ ! -d $HOME/.pyenv ]; then
     echo "Installing pyenv... (+Python 3.5.2)"
     brew install pyenv
-    pyenv install 3.5.2
-    # PYTHON_CONFIGURE_OPTS="--enable-framework" pyenv install 3.5.2
+    # pyenv install 3.5.2
+    PYTHON_CONFIGURE_OPTS="--enable-framework" pyenv install 3.5.2
     pyenv global 3.5.2
 fi
 
@@ -160,16 +160,16 @@ if [ ! -d $HOME/.oh-my-zsh ]; then
 fi
 
 # echo "Updating git-prompt..."
-# rm -rf $OPT_DIR/zsh-git-prompt
+rm -rf $OPT_DIR/zsh-git-prompt
 if [ ! -d $OPT_DIR/zsh-git-prompt ]; then
     echo "Installing git-prompt..."
     git clone https://github.com/olivierverdier/zsh-git-prompt.git $OPT_DIR/zsh-git-prompt
 
     # setup prompt to use haskell for 4x+ speed
-    # curl -sSL https://get.haskellstack.org/ | sh
-    # cd $OPT_DIR/zsh-git-prompt
-    # stack setup
-    # stack build && stack install
+    curl -sSL https://get.haskellstack.org/ | sh
+    cd $OPT_DIR/zsh-git-prompt
+    stack setup
+    stack build && stack install
 fi
 
 

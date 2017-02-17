@@ -25,6 +25,7 @@ alias grep='grep --colour=auto'
 alias egrep='egrep --colour=auto'
 #alias rcp='rsync -v --progress'
 #alias rmv='rsync -v --progress --remove-source-files'
+alias which='which -a'
 
 alias g='ag'
 alias hist='history'
