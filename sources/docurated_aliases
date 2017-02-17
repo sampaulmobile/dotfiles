@@ -54,10 +54,10 @@ alias conpget='consul kv get -http-addr=consul.service.consul:8500 -datacenter=u
 alias conpput='consul kv put -token=$CONSUL_TOKEN -http-addr=consul.service.consul:8500 -datacenter=us-east-1-production'
 alias condget='consul kv get -http-addr=consul.service.consul:8500 -datacenter=us-east-1-demo'
 alias condput='consul kv put -token=$CONSUL_TOKEN -http-addr=consul.service.consul:8500 -datacenter=us-east-1-demo'
-alias conpgetact='conpget repos/activity/current_etlair_release'
-alias condgetact='condget repos/activity/current_etlair_release'
-alias conpputact='conpput repos/activity/current_etlair_release'
-alias condputact='condput repos/activity/current_etlair_release'
+alias conpgetana='conpget repos/analytics/current_release'
+alias condgetana='condget repos/analytics/current_release'
+alias conpputana='conpput repos/analytics/current_release'
+alias condputana='condput repos/analytics/current_release'
 
 
 # ===== AIRFLOW ========
