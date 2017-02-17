@@ -39,13 +39,13 @@ alias psgi=psgrepi
 # ============ GIT =============
 # alias g='git'
 alias gs='git status'
-alias ga='git add '
-alias gco='git checkout '
-alias gci='git commit '
-alias gb='git branch '
-alias gcam='git commit -a -m '
-alias gpull='git pull origin '
-alias gpush='git push origin '
+alias ga='git add'
+alias gco='git checkout'
+alias gci='git commit'
+alias gb='git branch'
+alias gcam='git commit -a -m'
+alias gpull='git pull'
+alias gpush='git push'
 alias gmm='git merge master'
 
 
