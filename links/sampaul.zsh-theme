@@ -1,10 +1,22 @@
 # Get the current ruby version in use with RVM:
 if [ -e ~/.rvm/bin/rvm-prompt ]; then
-    RUBY_PROMPT_="%{$fg_bold[blue]%}(%{$FG[124]%}\$(~/.rvm/bin/rvm-prompt s i v g)%{$fg_bold[blue]%})%{$reset_color%} "
-else
-  if which rbenv &> /dev/null; then
-    RUBY_PROMPT_="%{$fg_bold[blue]%}rbenv:(%{$fg[green]%}\$(rbenv version | sed -e 's/ (set.*$//')%{$fg_bold[blue]%})%{$reset_color%} "
-  fi
+    RUBY_PROMPT_="%{$FG[124]%}\$(~/.rvm/bin/rvm-prompt v g)%{$reset_color%}"
+fi
+
+# get the current python version with pyenv
+if [ -d ~/.pyenv ]; then
+    PYTHON_PROMPT_="%{$FG[136]%}\$(pyenv version-name)%{$reset_color%}"
+fi
+
+if [ -e ~/.rvm/bin/rvm-prompt ] || [ -d ~/.pyenv ]; then
+    VERS_PROMPT_="%{$fg_bold[blue]%}("
+    if [ -e ~/.rvm/bin/rvm-prompt ]; then
+        VERS_PROMPT_=$VERS_PROMPT_$RUBY_PROMPT_
+    fi
+    if [ -d ~/.pyenv ]; then
+        VERS_PROMPT_=$VERS_PROMPT_"%{$fg_bold[blue]%}|"$PYTHON_PROMPT_
+    fi
+    VERS_PROMPT_=$VERS_PROMPT_"%{$fg_bold[blue]%})%{$reset_color%} "
 fi
 
 # if superuser make the username red
@@ -20,13 +32,13 @@ fi
 # prompt
 HOST="%{$fg[$NCOLOR]%}%B%n%b"$SSH
 
-#DIR="%{$reset_color%}:%{$FG[208]%}%30<...<%~%<<%{$reset_color%}|"
-DIR="%{$reset_color%}:%{$FG[208]%}%~%{$reset_color%}|"
+DIR="%{$reset_color%}:%{$FG[208]%}%40<...<%~%<<%{$reset_color%}|"
+# DIR="%{$reset_color%}:%{$FG[208]%}%~%{$reset_color%}|"
 
 GIT=$'$(git_super_status)
 %(!.#.$) ' 
 
-PROMPT=$HOST$DIR$RUBY_PROMPT_$GIT
+PROMPT=$HOST$DIR$VERS_PROMPT_$GIT
 #RPROMPT='!%{%B%F{cyan}%}%!%{%f%k%b%}'
 
 # Display time in rprompt
