@@ -77,7 +77,7 @@ Plugin 'sjl/gundo.vim'
 Plugin 'nathanaelkane/vim-indent-guides'
 
 "lean & mean status/tabline
-Plugin 'bling/vim-airline.git'
+Plugin 'vim-airline/vim-airline'
 
 " Load local lvimrc files (currently for per-project indenting)
 Plugin 'embear/vim-localvimrc.git'

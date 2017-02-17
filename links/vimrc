@@ -32,6 +32,12 @@ set expandtab
 "set smartindent
 "set smarttab
 
+"highlight characters past 80 columns
+augroup vimrc_autocmds
+  autocmd BufEnter * highlight OverLength ctermbg=darkgrey guibg=#592929
+  autocmd BufEnter * match OverLength /\%80v.*/
+augroup END
+
 set foldnestmax=5               "deepest fold is 5 levels
 set foldmethod=syntax           "fold by syntax
 "set foldmethod=indent          "fold based on indent
@@ -137,6 +143,12 @@ nnoremap <silent> <leader>y :YRShow<CR>
 
 " python folding - preview docstring in fold text
 let g:SimpylFold_docstring_preview = 1
+
+" set YouCompleteMe python to path python
+let g:ycm_python_binary_path = 'python'
+
+" set YouCompleteMe goto definition
+map <leader>g  :YcmCompleter GoToDefinitionElseDeclaration<CR>
 
 "Remapping yankring n/p to meta key
 " let g:yankring_replace_n_pkey = '<m-p>'
