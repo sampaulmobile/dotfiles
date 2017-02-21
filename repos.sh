@@ -59,6 +59,11 @@ if [ ! -d $DOC_PATH/utilities ]; then
     git clone git@github.com:Docurated/utilities.git $DOC_PATH/utilities
     cd $DOC_PATH/utilities
     git remote set-url origin ssh://git@phabricator.docurated.rocks:2222/diffusion/UTL/utilities.git
+
+    brew install terraform
+    cd $DOC_PATH/utilities/terraform
+    terraform remote config -backend=s3 -backend-config="bucket=docurated-ops" -backend-config="key=terraform/terraform.tfstate"
+    terraform get
 fi
 
 # cd $HOME/Development/Docurated/utilities/docformation

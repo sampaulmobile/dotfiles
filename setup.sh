@@ -61,6 +61,15 @@ if [ ! -f /usr/local/bin/mongo ]; then
     # mongo admin -u admin -p admin --eval "db.getSiblingDB('docurated').addUser('sampaul', 'password')"
 fi
 
+if [ ! -f /usr/local/bin/scala ]; then
+    echo "Installing scala..."
+    brew install scala
+fi
+
+if [ ! -f /usr/local/bin/pyspark ]; then
+    echo "Installing spark..."
+    brew install apache-spark
+fi
 
 if [ ! -d '/usr/local/Cellar/the_silver_searcher' ]; then
     echo "Installing the Silver Searcher"
@@ -160,7 +169,7 @@ if [ ! -d $HOME/.oh-my-zsh ]; then
 fi
 
 # echo "Updating git-prompt..."
-rm -rf $OPT_DIR/zsh-git-prompt
+# rm -rf $OPT_DIR/zsh-git-prompt
 if [ ! -d $OPT_DIR/zsh-git-prompt ]; then
     echo "Installing git-prompt..."
     git clone https://github.com/olivierverdier/zsh-git-prompt.git $OPT_DIR/zsh-git-prompt

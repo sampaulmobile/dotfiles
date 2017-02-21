@@ -23,6 +23,12 @@ Plugin 'vim-scripts/TagHighlight.git'
 " Taskpaper (todo list) helpers/syntax
 Plugin 'davidoc/taskpaper.vim'
 
+" open URLs/PDFs/etc. from vim hyperlinks
+" Plugin 'vim-scripts/ult'
+
+" (emacs) narrow region feature
+" Plugin 'NrrwRgn'
+
 " ======================== Text Editing =======================
 "text filtering and alignment
 Plugin 'godlygeek/tabular'
@@ -87,6 +93,9 @@ Plugin 'easymotion/vim-easymotion'
 
 " 'distraction free writing in vim'
 Plugin 'junegunn/goyo.vim'
+
+" (emacs) org mode in vim
+Plugin 'jceb/vim-orgmode'
 
 " colorschemes
 Plugin 'sjl/badwolf'
