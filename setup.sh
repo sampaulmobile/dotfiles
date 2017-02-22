@@ -38,6 +38,10 @@ if [ ! -f /usr/local/bin/jq ]; then
     brew install jq
 fi
 
+if [ ! -f /usr/local/bin/aws ]; then
+    brew install awscli
+fi
+
 if [ ! -f /usr/local/bin/psql ]; then
     echo "Installing postgres..."
     brew install postgresql
@@ -78,6 +82,12 @@ fi
 
 echo "Tapping caskroom..."
 brew tap caskroom/cask
+
+
+if [ ! -f /usr/bin/java ]; then
+    echo "Installing Java..."
+    brew cask install java
+fi
 
 if [ ! -d "/Applications/Google Chrome.app" ]; then
     echo "Installing Chrome..."
