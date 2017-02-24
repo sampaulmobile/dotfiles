@@ -52,8 +52,8 @@ if [ ! -d $DOC_PATH/activity ]; then
     git remote set-url origin ssh://git@phabricator.docurated.rocks:2222/diffusion/ACT/activity.git
 fi
 
-if [ ! -d $DOC_PATH/flatutils ]; then
-    git clone git@github.com:Docurated/flatutils.git $DOC_PATH/flatutils
+if [ ! -d $DOC_PATH/services ]; then
+    git clone git@github.com:Docurated/services.git $DOC_PATH/services
 fi
 
 if [ ! -d $DOC_PATH/utilities ]; then
