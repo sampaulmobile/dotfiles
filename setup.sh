@@ -6,6 +6,8 @@ OPT_DIR=/usr/local/opt
 
 $HOME/dotfiles/links.sh
 
+# add SSH keys somewhere
+# ssh-add them too
 
 # INSTALLS
 
