@@ -39,12 +39,16 @@ if [ ! -d $DOC_PATH/website ]; then
     rake db:migrate
     rake db:migrate
     echo "Docurated::Application.config.secret_token = '`rake secret`'" > $RAILS/config/initializers/secret_token.rb
+
     # open rails console, execute
     # o = Organization.create(name: "Docurated", domain: "docurated.com")
     # u = User.new(first_name: "Sam", last_name: "Paul", organization_id: 1, password: 'asdfasdf', email: "sam@docurated.com", confirmed: true)
     # u.confirm!
     # u.save validate:false
     # u.toggle!(:admin)
+    # bundle exec rails runner "eval(File.read 'your_script.rb')"
+
+    git remote set-url origin ssh://git@phabricator.docurated.rocks:2222/diffusion/WEB/website.git
 fi
 
 if [ ! -d $DOC_PATH/activity ]; then
