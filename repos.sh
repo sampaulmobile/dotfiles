@@ -58,6 +58,7 @@ fi
 
 if [ ! -d $DOC_PATH/services ]; then
     git clone git@github.com:Docurated/services.git $DOC_PATH/services
+    git remote set-url origin ssh://git@phabricator.docurated.rocks:2222/diffusion/SVC/services.git
 fi
 
 if [ ! -d $DOC_PATH/utilities ]; then
