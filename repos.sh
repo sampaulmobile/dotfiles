@@ -42,13 +42,29 @@ if [ ! -d $DOC_PATH/website ]; then
 
     # open rails console, execute
     # o = Organization.create(name: "Docurated", domain: "docurated.com")
-    # u = User.new(first_name: "Sam", last_name: "Paul", organization_id: 1, password: 'asdfasdf', email: "sam@docurated.com", confirmed: true)
+    # u = User.new(first_name: "Sam", 
+    #             last_name: "Paul", 
+    #             organization_id: 1, 
+    #             password: 'asdfasdf', 
+    #             email: "sam@docurated.com", 
+    #             confirmed: true)
     # u.confirm!
     # u.save validate:false
     # u.toggle!(:admin)
+
+    # OrganizationsSolrCluster.delete_all
+    # OrganizationsSolrCluster.create(
+    #     organization_id: o.id,
+    #     is_primary: true,
+    #     cluster_url: "localhost:9983",
+    #     in_zookeeper: true,
+    #     transformation: "SchemaTwoSpacesTileDocCreator")
     # bundle exec rails runner "eval(File.read 'your_script.rb')"
 
     git remote set-url origin ssh://git@phabricator.docurated.rocks:2222/diffusion/WEB/website.git
+
+    # scp -r demo-solr-2.zookeeper.1:/opt/solr/zookeeper/default myconf
+    # http://archive.apache.org/dist/lucene/solr/5.5.3/solr-5.5.3.tgz
 fi
 
 if [ ! -d $DOC_PATH/activity ]; then

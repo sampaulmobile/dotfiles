@@ -27,6 +27,7 @@ set shiftwidth=4
 set softtabstop=4
 set tabstop=4
 set expandtab
+" set autochdir - always set pwd to path of current file
 "set cin
 "set autoindent
 "set smartindent

@@ -272,9 +272,8 @@ alias wlog='docweb && tail -f log/development.log'
 
 
 # ===== SOLR ========
-alias solrsold='cd $DOC_HOME/website/rails/opt/solr/jetty && java -Dsolr.solr.home=docu -jar start.jar'
-alias solrs='cd /opt/solr/solr-4.*/example && java -jar start.jar'
-alias solrsnew='/opt/solr/solr-4.*/bin/solr start -s /opt/solr/cores'
+alias solr_start='/usr/local/bin/solr/bin/solr start -c'
+alias solr_stop='/usr/local/bin/solr/bin/solr stop -all'
 alias testsolrs='docweb && bundle exec sunspot-solr start -p 8984'
 alias testsolrr='docweb && bundle exec sunspot-solr run -p 8984'
 
