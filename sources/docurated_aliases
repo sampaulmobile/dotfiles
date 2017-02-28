@@ -272,10 +272,15 @@ alias wlog='docweb && tail -f log/development.log'
 
 
 # ===== SOLR ========
-alias solr_start='/usr/local/bin/solr/bin/solr start -c'
-alias solr_stop='/usr/local/bin/solr/bin/solr stop -all'
+alias solr_start='/usr/local/opt/solr/bin/solr start -c'
+alias solr_stop='/usr/local/opt/solr/bin/solr stop -all'
 alias testsolrs='docweb && bundle exec sunspot-solr start -p 8984'
 alias testsolrr='docweb && bundle exec sunspot-solr run -p 8984'
+
+
+# ===== SERVICES ========
+alias serv_topo="cd $DOC_HOME/services/javaworker && sbt topology/run"
+alias serv_master="cd $DOC_HOME/services/javaworker && sbt master/run"
 
 
 # ===== WORKERS ========
@@ -294,7 +299,6 @@ alias start_workers='start_resqs; start_resqp; start_sidekiq'
 alias stop_workers='stop_resqs; stop_resqp; stop_sidekiq'
 
 alias start_dynamo='cd ~/dynamo && nohup java -Djava.library.path=./DynamoDBLocal_lib -jar DynamoDBLocal.jar -inMemory -port 8888 > ~/dynamoout.txt 2> ~/dynamoerr.text < /dev/null &'
-alias start_services='cd $DOC_HOME/services/javaworker && ./gradlew -Denv=development master:run'
 
 alias start_all='pstarts; testsolrs; start_dynamo; solrs &'
 alias start_cli='pyserv &; coffserv &; doccli; mount_vol'

@@ -38,6 +38,27 @@ brew install postgresql
 brew install redis
 brew install mongo
 
+brew install solr
+brew install sbt
+
+
+if [ ! -f /usr/local/opt/solr ]; then
+    SOLR_PATH=/usr/local/opt/solr
+    DOC_CONFIG_PATH=$SOLR_PATH/server/solr/configsets/doc_configs
+    mkdir -p $DOC_CONFIG_PATH
+    DEMO_SOLR_HOST=demo-solr-2.zookeeper.1
+    DEMO_SOLR_PATH=/opt/solr/zookeeper/default
+    scp -r $DEMO_SOLR_HOST:$DEMO_SOLR_PATH $DOC_CONFIG_PATH/conf
+    $SOLR_PATH/bin/solr start -c
+
+    $SOLR_PATH/server/scripts/cloud-scripts/zkcli.sh -z localhost:9983 -cmd upconfig -confdir $DOC_CONFIG_PATH/conf -confname docconf
+    curl 'http://localhost:8983/solr/admin/cores?action=CREATE&name=space&collection=space&collection.configName=docconf'
+    curl 'http://localhost:8983/solr/admin/cores?action=CREATE&name=spacestile&collection=spacestile&collection.configName=docconf'
+    curl 'http://localhost:8983/solr/admin/cores?action=CREATE&name=default&collection=default&collection.configName=docconf'
+    $SOLR_PATH/bin/solr stop -all
+    $SOLR_PATH/bin/solr start -c
+fi
+
 
 echo "Tapping caskroom..."
 brew tap caskroom/cask

@@ -1,8 +1,7 @@
 
 RUBY_VER=2.2.5
-USERNAME=sampaul
 DOC_PATH=$HOME/Development/Docurated
-NOT_PUBLIC=/Users/sampaul/dropbox/!public
+NOT_PUBLIC=$HOME/Dropbox/!public
 
 
 echo "Setting up repos..."
@@ -40,31 +39,31 @@ if [ ! -d $DOC_PATH/website ]; then
     rake db:migrate
     echo "Docurated::Application.config.secret_token = '`rake secret`'" > $RAILS/config/initializers/secret_token.rb
 
-    # open rails console, execute
-    # o = Organization.create(name: "Docurated", domain: "docurated.com")
-    # u = User.new(first_name: "Sam", 
-    #             last_name: "Paul", 
-    #             organization_id: 1, 
-    #             password: 'asdfasdf', 
-    #             email: "sam@docurated.com", 
-    #             confirmed: true)
-    # u.confirm!
-    # u.save validate:false
-    # u.toggle!(:admin)
+    cat > temp.rb <<EOL
+o = Organization.first
+# o = Organization.create(name: "Docurated", domain: "docurated.com")
+# u = User.new(first_name: "Sam", 
+#             last_name: "Paul", 
+#             organization_id: 1, 
+#             password: 'asdfasdf', 
+#             email: "sam@docurated.com", 
+#             confirmed: true)
+# u.confirm!
+# u.save validate:false
+# u.toggle!(:admin)
 
-    # OrganizationsSolrCluster.delete_all
-    # OrganizationsSolrCluster.create(
-    #     organization_id: o.id,
-    #     is_primary: true,
-    #     cluster_url: "localhost:9983",
-    #     in_zookeeper: true,
-    #     transformation: "SchemaTwoSpacesTileDocCreator")
-    # bundle exec rails runner "eval(File.read 'your_script.rb')"
+OrganizationsSolrCluster.delete_all
+OrganizationsSolrCluster.create(
+    organization_id: o.id,
+    is_primary: true,
+    cluster_url: "localhost:9983",
+    in_zookeeper: true,
+    transformation: "SchemaTwoSpacesTileDocCreator")
+EOL
+    bundle exec rails runner "eval(File.read 'temp.rb')"
+    rm temp.rb
 
     git remote set-url origin ssh://git@phabricator.docurated.rocks:2222/diffusion/WEB/website.git
-
-    # scp -r demo-solr-2.zookeeper.1:/opt/solr/zookeeper/default myconf
-    # http://archive.apache.org/dist/lucene/solr/5.5.3/solr-5.5.3.tgz
 fi
 
 if [ ! -d $DOC_PATH/activity ]; then
@@ -74,11 +73,41 @@ fi
 
 if [ ! -d $DOC_PATH/services ]; then
     git clone git@github.com:Docurated/services.git $DOC_PATH/services
+
+    git clone git@github.com:techblue/jmagick.git $HOME/Downloads/jmagick
+    sudo mkdir -p /usr/local/lib/jmagick/lib
+    cd $HOME/Downloads/jmagick
+    IMAGE_MAGICK=`brew list | grep image`
+    IMAGE_MAGICK_VER=`ls /usr/local/Cellar/$IMAGE_MAGICK`
+    IMAGE_MAGICK_PATH="/usr/local/Cellar/$IMAGE_MAGICK/$IMAGE_MAGICK_VER"
+
+    JAVA_FW_HOME=/System/Library/Frameworks/JavaVM.framework/Versions/Current
+    ./configure --with-java-home=$JAVA_FW_HOME --with-magick-home=$IMAGE_MAGICK_PATH --prefix=/usr/local/lib/jmagick
+    sudo make all
+    sudo make install
+    sudo ln -s /usr/local/lib/jmagick/lib/libJMagick-*.so /Library/Java/Extensions/libJMagick.jnilib
+    sudo ln -s /usr/local/lib/jmagick/lib/libJMagick-*.so /usr/local/lib/jmagick/lib/libJMagick.jnilib
+    sudo mkdir -p /var/run/jworker/pids
+    sudo mkdir -p /var/log/jworker
+    sudo chown -R $USERNAME:staff /var/run/jworker
+    sudo chown -R $USERNAME:staff /var/log/jworker
+
+    SERV_COMMON=$DOC_PATH/services/javaworker/common/src/main/resources
+    SERV_MASTER=$DOC_PATH/services/javaworker/master/src/main/resources
+
+    ln -s $NOT_PUBLIC/links/config.groovy $SERV_COMMON/config.groovy
+    ln -s $NOT_PUBLIC/links/hibernate.properties $SERV_COMMON/hibernate.properties
+    ln -s $NOT_PUBLIC/links/log4j.properties $SERV_COMMON/log4j.properties
+    ln -s $NOT_PUBLIC/links/application.conf $SERV_MASTER/application.conf
+
     git remote set-url origin ssh://git@phabricator.docurated.rocks:2222/diffusion/SVC/services.git
 fi
 
 if [ ! -d $DOC_PATH/utilities ]; then
     git clone git@github.com:Docurated/utilities.git $DOC_PATH/utilities
+# cd $HOME/Development/Docurated/utilities/docformation
+# echo $RUBY_VER@utilities > .ruby-version
+
     cd $DOC_PATH/utilities
     git remote set-url origin ssh://git@phabricator.docurated.rocks:2222/diffusion/UTL/utilities.git
 
@@ -87,7 +116,4 @@ if [ ! -d $DOC_PATH/utilities ]; then
     terraform remote config -backend=s3 -backend-config="bucket=docurated-ops" -backend-config="key=terraform/terraform.tfstate"
     terraform get
 fi
-
-# cd $HOME/Development/Docurated/utilities/docformation
-# echo $RUBY_VER@utilities > .ruby-version
 
