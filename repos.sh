@@ -11,7 +11,6 @@ if [ ! -d $DOC_PATH/website ]; then
     echo "Cloning website..."
 
     git clone git@github.com:Docurated/website.git $DOC_PATH/website
-
     RAILS=$DOC_PATH/website/rails
 
     echo $RUBY_VER@website > $RAILS/.ruby-version
@@ -101,6 +100,10 @@ if [ ! -d $DOC_PATH/services ]; then
     ln -s $NOT_PUBLIC/links/application.conf $SERV_MASTER/application.conf
 
     git remote set-url origin ssh://git@phabricator.docurated.rocks:2222/diffusion/SVC/services.git
+fi
+
+if [ ! -d $DOC_PATH/go ]; then
+    git clone git@github.com:Docurated/go.git
 fi
 
 if [ ! -d $DOC_PATH/utilities ]; then
