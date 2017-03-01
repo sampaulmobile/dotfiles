@@ -1,10 +1,12 @@
 
+if [ -d /usr/local/opt/arcanist ]; then
+    export PATH=$PATH:/usr/local/opt/arcanist/bin
+    source /usr/local/opt/arcanist/resources/shell/bash-completion
+fi
 
 if [ -d /usr/local/opt/airflow ]; then
     export AIRFLOW_HOME=/usr/local/opt/airflow
-fi
-
-if [ -d /opt/airflow ]; then
+elif [ -d /opt/airflow ]; then
     export AIRFLOW_HOME=/opt/airflow
 fi
 

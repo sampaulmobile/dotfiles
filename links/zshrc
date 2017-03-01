@@ -33,7 +33,7 @@ ZSH_THEME_GIT_PROMPT_CHANGED="%{$FG[009]%}%{✚%G%}"
 # ===== DOCURATED ALIASES =====
 [[ -f "$SOURCES/docurated_aliases" ]] && source $SOURCES/docurated_aliases
 
-# ===== EXPORTS =====
+# ===== EXPORTS (/PATH) =====
 [[ -f "$SOURCES/exports" ]] && source $SOURCES/exports
 
 # initialize pyenv (if it exists)

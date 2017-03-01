@@ -45,9 +45,10 @@ brew install sbt
 if [ ! -f /usr/local/opt/solr ]; then
     SOLR_PATH=/usr/local/opt/solr
     DOC_CONFIG_PATH=$SOLR_PATH/server/solr/configsets/doc_configs
-    mkdir -p $DOC_CONFIG_PATH
     DEMO_SOLR_HOST=demo-solr-2.zookeeper.1
     DEMO_SOLR_PATH=/opt/solr/zookeeper/default
+
+    mkdir -p $DOC_CONFIG_PATH
     scp -r $DEMO_SOLR_HOST:$DEMO_SOLR_PATH $DOC_CONFIG_PATH/conf
     $SOLR_PATH/bin/solr start -c
 
@@ -59,6 +60,10 @@ if [ ! -f /usr/local/opt/solr ]; then
     $SOLR_PATH/bin/solr start -c
 fi
 
+if [ ! -f /usr/local/opt/arcanist ]; then
+    git clone https://github.com/phacility/libphutil.git /usr/local/opt/libphutil
+    git clone https://github.com/phacility/arcanist.git /usr/local/opt/arcanist
+fi
 
 echo "Tapping caskroom..."
 brew tap caskroom/cask
