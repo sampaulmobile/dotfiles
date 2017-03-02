@@ -1,16 +1,18 @@
+#!/bin/bash
 
 RUBY_VER=2.2.5
 DOC_PATH=$HOME/Development/Docurated
 NOT_PUBLIC=$HOME/Dropbox/!public
 
-
-echo "Setting up repos..."
+sudo -v
 mkdir -p $DOC_PATH
 
-if [ ! -d $DOC_PATH/website ]; then
-    echo "Cloning website..."
 
+# WEBSITE
+echo "Setting up website..."
+if [ ! -d $DOC_PATH/website ]; then
     git clone git@github.com:Docurated/website.git $DOC_PATH/website
+
     RAILS=$DOC_PATH/website/rails
 
     echo $RUBY_VER@website > $RAILS/.ruby-version
@@ -25,11 +27,6 @@ if [ ! -d $DOC_PATH/website ]; then
     gem install bundler
     bundle install
 
-    # link up site_config/database.yml
-    rm $RAILS/config/database.yml
-    rm $RAILS/config/siteconfig.yml
-    ln -s $NOT_PUBLIC/links/database.yml $RAILS/config/database.yml
-    ln -s $NOT_PUBLIC/links/siteconfig.yml $RAILS/config/siteconfig.yml
     createdb -h localhost -p 5432 -U $USERNAME docurated
     createdb -h localhost -p 5432 -U $USERNAME docurated_test
 
@@ -39,17 +36,16 @@ if [ ! -d $DOC_PATH/website ]; then
     echo "Docurated::Application.config.secret_token = '`rake secret`'" > $RAILS/config/initializers/secret_token.rb
 
     cat > temp.rb <<EOL
-o = Organization.first
-# o = Organization.create(name: "Docurated", domain: "docurated.com")
-# u = User.new(first_name: "Sam", 
-#             last_name: "Paul", 
-#             organization_id: 1, 
-#             password: 'asdfasdf', 
-#             email: "sam@docurated.com", 
-#             confirmed: true)
-# u.confirm!
-# u.save validate:false
-# u.toggle!(:admin)
+o = Organization.create(name: "Docurated", domain: "docurated.com")
+u = User.new(first_name: "Sam", 
+            last_name: "Paul", 
+            organization_id: o.id, 
+            password: 'asdfasdf', 
+            email: "sam@docurated.com", 
+            confirmed: true)
+u.confirm!
+u.save validate:false
+u.toggle!(:admin)
 
 OrganizationsSolrCluster.delete_all
 OrganizationsSolrCluster.create(
@@ -61,19 +57,33 @@ OrganizationsSolrCluster.create(
 EOL
     bundle exec rails runner "eval(File.read 'temp.rb')"
     rm temp.rb
-
-    git remote set-url origin ssh://git@phabricator.docurated.rocks:2222/diffusion/WEB/website.git
 fi
+ln -Fs $NOT_PUBLIC/links/database.yml $DOC_PATH/website/rails/config/database.yml
+ln -Fs $NOT_PUBLIC/links/siteconfig.yml $DOC_PATH/website/rails/config/siteconfig.yml
+cd $DOC_PATH/website
+git remote set-url origin ssh://git@phabricator.docurated.rocks:2222/diffusion/WEB/website.git
 
+
+# ACTIVITY
+echo "Setting up activity..."
 if [ ! -d $DOC_PATH/activity ]; then
     git clone git@github.com:Docurated/activity.git $DOC_PATH/activity
-    git remote set-url origin ssh://git@phabricator.docurated.rocks:2222/diffusion/ACT/activity.git
 fi
+cd $DOC_PATH/activity
+git remote set-url origin ssh://git@phabricator.docurated.rocks:2222/diffusion/ACT/activity.git
 
+
+# SERVICES
+echo "Setting up services..."
 if [ ! -d $DOC_PATH/services ]; then
     git clone git@github.com:Docurated/services.git $DOC_PATH/services
+fi
+cd $DOC_PATH/services
+git remote set-url origin ssh://git@phabricator.docurated.rocks:2222/diffusion/SVC/services.git
 
+if [ ! -d /usr/local/lib/jmagick ]; then
     git clone git@github.com:techblue/jmagick.git $HOME/Downloads/jmagick
+
     sudo mkdir -p /usr/local/lib/jmagick/lib
     cd $HOME/Downloads/jmagick
     IMAGE_MAGICK=`brew list | grep image`
@@ -86,37 +96,34 @@ if [ ! -d $DOC_PATH/services ]; then
     sudo make install
     sudo ln -s /usr/local/lib/jmagick/lib/libJMagick-*.so /Library/Java/Extensions/libJMagick.jnilib
     sudo ln -s /usr/local/lib/jmagick/lib/libJMagick-*.so /usr/local/lib/jmagick/lib/libJMagick.jnilib
-    sudo mkdir -p /var/run/jworker/pids
-    sudo mkdir -p /var/log/jworker
-    sudo chown -R $USERNAME:staff /var/run/jworker
-    sudo chown -R $USERNAME:staff /var/log/jworker
 
-    SERV_COMMON=$DOC_PATH/services/javaworker/common/src/main/resources
-    SERV_MASTER=$DOC_PATH/services/javaworker/master/src/main/resources
-
-    ln -s $NOT_PUBLIC/links/config.groovy $SERV_COMMON/config.groovy
-    ln -s $NOT_PUBLIC/links/hibernate.properties $SERV_COMMON/hibernate.properties
-    ln -s $NOT_PUBLIC/links/log4j.properties $SERV_COMMON/log4j.properties
-    ln -s $NOT_PUBLIC/links/application.conf $SERV_MASTER/application.conf
-
-    git remote set-url origin ssh://git@phabricator.docurated.rocks:2222/diffusion/SVC/services.git
+    rm -rf $HOME/Downloads/jmagick
 fi
 
-if [ ! -d $DOC_PATH/go ]; then
-    git clone git@github.com:Docurated/go.git
-fi
+sudo mkdir -p /var/run/jworker/pids
+sudo mkdir -p /var/log/jworker
+touch /var/run/jworker/sqs.poll
+sudo chown -R $USERNAME:staff /var/run/jworker
+sudo chown -R $USERNAME:staff /var/log/jworker
 
+SERV_COMMON=$DOC_PATH/services/javaworker/common/src/main/resources
+SERV_MASTER=$DOC_PATH/services/javaworker/master/src/main/resources
+
+ln -Fs $NOT_PUBLIC/links/config.groovy $SERV_COMMON/config.groovy
+ln -Fs $NOT_PUBLIC/links/hibernate.properties $SERV_COMMON/hibernate.properties
+cp $SERV_COMMON/log4j.default.properties $SERV_COMMON/log4j.properties
+cp $SERV_MASTER/application.default.conf $SERV_MASTER/application.conf
+
+
+# UTILITIES
+echo "Setting up utilities..."
 if [ ! -d $DOC_PATH/utilities ]; then
     git clone git@github.com:Docurated/utilities.git $DOC_PATH/utilities
-# cd $HOME/Development/Docurated/utilities/docformation
-# echo $RUBY_VER@utilities > .ruby-version
 
-    cd $DOC_PATH/utilities
-    git remote set-url origin ssh://git@phabricator.docurated.rocks:2222/diffusion/UTL/utilities.git
-
-    brew install terraform
     cd $DOC_PATH/utilities/terraform
     terraform remote config -backend=s3 -backend-config="bucket=docurated-ops" -backend-config="key=terraform/terraform.tfstate"
     terraform get
 fi
+cd $DOC_PATH/utilities
+git remote set-url origin ssh://git@phabricator.docurated.rocks:2222/diffusion/UTL/utilities.git
 

@@ -40,9 +40,10 @@ brew install mongo
 
 brew install solr
 brew install sbt
+brew install terraform
 
 
-if [ ! -f /usr/local/opt/solr ]; then
+if [ ! -d /usr/local/opt/solr ]; then
     SOLR_PATH=/usr/local/opt/solr
     DOC_CONFIG_PATH=$SOLR_PATH/server/solr/configsets/doc_configs
     DEMO_SOLR_HOST=demo-solr-2.zookeeper.1
@@ -60,13 +61,14 @@ if [ ! -f /usr/local/opt/solr ]; then
     $SOLR_PATH/bin/solr start -c
 fi
 
-if [ ! -f /usr/local/opt/arcanist ]; then
+if [ ! -d /usr/local/opt/arcanist ]; then
     git clone https://github.com/phacility/libphutil.git /usr/local/opt/libphutil
     git clone https://github.com/phacility/arcanist.git /usr/local/opt/arcanist
 
     arc set-config default https://phabricator.docurated.rocks
     arc install-certificate https://phabricator.docurated.rocks/
 fi
+
 
 echo "Tapping caskroom..."
 brew tap caskroom/cask
@@ -127,9 +129,9 @@ if [ ! -d "/Applications/Tunnelblick.app" ]; then
     brew cask install tunnelblick
 fi
 
-if [ ! -d "/Applications/Docker.app" ]; then
-    brew cask install docker
-fi
+# if [ ! -d "/Applications/Docker.app" ]; then
+#     brew cask install docker
+# fi
 
 # CONFIGURATION
 
