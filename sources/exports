@@ -1,6 +1,7 @@
 
 if [ -d /usr/local/opt/arcanist ]; then
     export PATH=$PATH:/usr/local/opt/arcanist/bin
+    export EDITOR=vim
     source /usr/local/opt/arcanist/resources/shell/bash-completion
 fi
 

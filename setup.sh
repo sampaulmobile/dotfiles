@@ -63,6 +63,9 @@ fi
 if [ ! -f /usr/local/opt/arcanist ]; then
     git clone https://github.com/phacility/libphutil.git /usr/local/opt/libphutil
     git clone https://github.com/phacility/arcanist.git /usr/local/opt/arcanist
+
+    arc set-config default https://phabricator.docurated.rocks
+    arc install-certificate https://phabricator.docurated.rocks/
 fi
 
 echo "Tapping caskroom..."

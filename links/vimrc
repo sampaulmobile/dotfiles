@@ -27,7 +27,7 @@ set shiftwidth=4
 set softtabstop=4
 set tabstop=4
 set expandtab
-" set autochdir - always set pwd to path of current file
+set autochdir " always set pwd to path of current file
 "set cin
 "set autoindent
 "set smartindent
@@ -132,6 +132,8 @@ nnoremap <silent> <leader>T :ClearCtrlPCache<cr>\|:CtrlP<cr>
 let g:ctrlp_custom_ignore = {
   \ 'file': '\v\.(pyc|pyo)$',
   \ }
+"have CtrlP follow symlinks
+let g:ctrlp_follow_symlinks = 1
 
 "TComment remap to c key
 map <leader>/ <c-_><c-_>
