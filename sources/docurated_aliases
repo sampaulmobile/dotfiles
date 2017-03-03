@@ -269,6 +269,8 @@ alias rsp='rails s -p '
 alias rcd='docweb && rails c development'
 alias rsd='docweb && thin start --ssl --ssl-verify --ssl-key-file ~/Development/server.key --ssl-cert-file ~/Development/server.crt'
 alias wlog='docweb && tail -f log/development.log'
+alias kill_rails="pkill -f 'rails s'"
+alias restart_rails="kill_rails && docweb && rails s -d"
 
 
 # ===== SOLR ========
