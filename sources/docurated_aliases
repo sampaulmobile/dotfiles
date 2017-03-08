@@ -60,19 +60,6 @@ alias conpputana='conpput repos/analytics/current_release'
 alias condputana='condput repos/analytics/current_release'
 
 
-# ===== AIRFLOW ========
-alias airw='airflow webserver -D &'
-alias airwq='pkill -f "airflow webserver"'
-alias airwr='airwq && airw'
-alias airc='airflow clear'
-alias airb='airflow backfill -s `date +%Y-%m-%d`'
-air_cb() {
-    airc $1
-    airb $1
-}
-alias aircb='air_cb'
-alias airl='airflow list_dags'
-
 # ===== SPARK ========
 alias emr='aws emr list-clusters --active --query "Clusters[*].{Name:Name,ID:Id,State:Status.State,Info:Status.StateChangeReason.Message}"'
 
@@ -233,14 +220,48 @@ alias ppqlair='connect_pql $AIR_PG_PORT_PROD airflowproduction airflow'
 
 alias dcql='cdcass 0 && cqlsh'
 alias pcql='cqlsh production.cassandra.0'
-
 alias cadmin='sshconnect production admin'
-alias cchef='docutil && $DOC_HOME/utilities/docformation/docconnection.rb chef.workstation'
+
 # postgres
 alias pql='psql -d docurated -p 5432'
 
 # reset the stupid mac osx DNS for tunnelblick to work
 alias resetdns='sudo launchctl unload -w /System/Library/LaunchDaemons/com.apple.mDNSResponder.plist && sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.mDNSResponder.plist'
+
+
+# ===== AIRFLOW ========
+alias airw='airflow webserver -D &'
+alias airwq='pkill -f "airflow.webserver"'
+alias airwr='airwq && airw'
+alias airc='airflow clear'
+alias airb='airflow backfill -s `date +%Y-%m-%d`'
+air_cb() {
+    airc $1
+    airb $1
+}
+alias aircb='air_cb'
+alias airl='airflow list_dags'
+
+airflow_backfill() {
+sql="INSERT INTO dag_run
+(dag_id, execution_date, state, run_id, external_trigger, start_date) 
+VALUES 
+('$3', '$4', 'success', 'backfilling_$3', 'f', '`date +%Y-%m-%d:%H:%M:%S`')"
+    psql -c "$sql" -w -h localhost -p $1 -U $2 airflow
+}
+alias airdb='airflow_backfill $AIR_PG_PORT_DEMO airflowdemo'
+alias airpb='airflow_backfill $AIR_PG_PORT_PROD airflowproduction'
+
+airflow_full_clear() {
+sql="DELETE FROM dag_run WHERE dag_id = '$3';
+DELETE FROM task_instance WHERE dag_id = '$3';
+DELETE FROM task_fail WHERE dag_id = '$3';"
+    psql -c "$sql" -w -h localhost -p $1 -U $2 airflow
+}
+alias aircc='airflow_full_clear 5432 sampaul'
+alias airdcc='airflow_full_clear $AIR_PG_PORT_DEMO airflowdemo'
+alias airpcc='airflow_full_clear $AIR_PG_PORT_PROD airflowproduction'
+
 
 # ===== CLIENT APP ========
 setDemoVersion() {
