@@ -29,6 +29,9 @@ Plugin 'davidoc/taskpaper.vim'
 " (emacs) narrow region feature
 " Plugin 'NrrwRgn'
 
+" markdown syntax highlighting (required godlygeek/tabular)
+Plugin 'plasticboy/vim-markdown'
+
 " ======================== Text Editing =======================
 "text filtering and alignment
 Plugin 'godlygeek/tabular'
