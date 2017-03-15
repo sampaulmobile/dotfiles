@@ -263,6 +263,12 @@ alias airdcc='airflow_full_clear $AIR_PG_PORT_DEMO airflowdemo'
 alias airpcc='airflow_full_clear $AIR_PG_PORT_PROD airflowproduction'
 
 
+# ===== ARCANIST  ========
+alias arcl='arc list'
+alias arcb='arc browse'
+alias arcd='git pull && arc diff'
+
+
 # ===== CLIENT APP ========
 setDemoVersion() {
     cd $DOC_HOME/clients/deploy
