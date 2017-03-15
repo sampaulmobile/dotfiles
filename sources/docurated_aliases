@@ -167,7 +167,9 @@ tunnel_ports() {
 tunnel_port() {
     ssh -nNT $1 -L ${2}:${3}:${4}
 }
+alias kill_tunnel_demo="pkill -f 'nNT demo'"
 tunnel_demo() {
+    kill_tunnel_demo
     tunnel_port demo.postgres.0 $MAIN_PG_PORT_DEMO localhost 5432 &
     tunnel_port demo.activity.0 $ACT_PG_PORT_DEMO $ACT_PG_HOST_DEMO 5432 &
     tunnel_port demo.activity.0 $ACT_RESQ_PORT_DEMO localhost 8282 &
@@ -175,15 +177,15 @@ tunnel_demo() {
     tunnel_port demo.analytics.0 $AIR_PG_PORT_DEMO $AIR_PG_HOST_DEMO 5432 &
     tunnel_port demo.analytics.0 $REDIS_PORT_DEMO main.redis.service.consul 6379 &
 }
-alias kill_tunnel_demo="pkill -f 'nNT demo'"
+alias kill_tunnel_prod="pkill -f 'nNT prod'"
 tunnel_prod() {
+    kill_tunnel_prod
     tunnel_port production.postgres.0 $MAIN_PG_PORT_PROD localhost 5432 &
     tunnel_port production.activity.0 $ACT_PG_PORT_PROD $ACT_PG_HOST_PROD 5432 &
     tunnel_port production.activity.0 $ACT_RESQ_PORT_PROD localhost 8282 &
     tunnel_port production.analytics.0 $ANA_PG_PORT_PROD $ANA_PG_HOST_PROD 5432 &
     tunnel_port production.analytics.0 $AIR_PG_PORT_PROD $AIR_PG_HOST_PROD 5432 &
 }
-alias kill_tunnel_prod="pkill -f 'nNT prod'"
 
 alias cdpost='connect_ssh demo.postgres.0 $MAIN_PG_PORT_DEMO localhost'
 alias cppost='connect_ssh production.postgres.0 $MAIN_PG_PORT_PROD localhost'
