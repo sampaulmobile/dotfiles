@@ -42,6 +42,14 @@ brew install solr
 brew install sbt
 brew install terraform
 
+brew install rabbitmq
+
+brew services start postgresql
+brew services start mongodb
+brew services start redis
+
+brew services start rabbitmq
+
 
 if [ ! -d /usr/local/opt/solr ]; then
     SOLR_PATH=/usr/local/opt/solr
@@ -161,18 +169,11 @@ fi
 
 if [ ! -f /usr/local/bin/psql ]; then
     echo "Setting up postgres..."
-    brew services start postgresql
     createuser $USER -P -s
-fi
-
-if [ ! -f /usr/local/bin/redis-server ]; then
-    echo "Setting up redis..."
-    brew services start redis
 fi
 
 if [ ! -f /usr/local/bin/mongo ]; then
     echo "Setting up mongo..."
-    brew services start mongodb
     # use docurated
     # db.createUser({user: "sampaul", pwd: "password", roles: ["readWrite"]})
     # mongo admin -u admin -p admin --eval "db.getSiblingDB('docurated').addUser('sampaul', 'password')"
