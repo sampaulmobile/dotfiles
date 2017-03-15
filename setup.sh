@@ -48,7 +48,7 @@ brew services start postgresql
 brew services start mongodb
 brew services start redis
 
-brew services start rabbitmq
+# brew services start rabbitmq
 
 
 if [ ! -d /usr/local/opt/solr ]; then
@@ -178,6 +178,21 @@ if [ ! -f /usr/local/bin/mongo ]; then
     # db.createUser({user: "sampaul", pwd: "password", roles: ["readWrite"]})
     # mongo admin -u admin -p admin --eval "db.getSiblingDB('docurated').addUser('sampaul', 'password')"
 fi
+
+
+if [ ! -f /usr/local/bin/redis-server ]; then
+    echo "Setting up redis..."
+fi
+
+
+if [ ! -d /usr/local/opt/rabbitmq ]; then
+    sudo rabbitmq-server -detached
+    rabbitmqctl add_user sampaul password
+    rabbitmqctl add_vhost samvhost
+    rabbitmqctl set_user_tags sampaul samtag
+    rabbitmqctl set_permissions -p samvhost sampaul ".*" ".*" ".*"
+fi
+
 
 if [ ! -d $HOME/.oh-my-zsh ]; then
     echo "Installing Oh-My-ZSH..."
