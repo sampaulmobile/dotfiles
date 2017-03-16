@@ -270,6 +270,14 @@ alias arcl='arc list'
 alias arcb='arc browse'
 alias arcd='git pull && arc diff'
 
+arcPatchMerge() {
+    arc patch $1
+    gco master
+    arc land arcpatch-$1
+    git pull
+}
+alias arcpm='arcPatchMerge'
+
 
 # ===== CLIENT APP ========
 setDemoVersion() {

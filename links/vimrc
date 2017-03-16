@@ -164,7 +164,7 @@ let g:indent_guides_enable_on_vim_startup = 1
 "change yankring directory
 "let g:yankring_history_dir = '/Users/sampaul/dropbox/!public'
 
-"Mappings for git blame
+"Mappings for fugitive
 map <leader>gb :Gblame<CR>
 map <leader>gh :Gbrowse<CR>
 
