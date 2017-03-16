@@ -167,7 +167,9 @@ tunnel_ports() {
 tunnel_port() {
     ssh -nNT $1 -L ${2}:${3}:${4}
 }
+alias kill_tunnel_demo="pkill -f 'nNT demo'"
 tunnel_demo() {
+    kill_tunnel_demo
     tunnel_port demo.postgres.0 $MAIN_PG_PORT_DEMO localhost 5432 &
     tunnel_port demo.activity.0 $ACT_PG_PORT_DEMO $ACT_PG_HOST_DEMO 5432 &
     tunnel_port demo.activity.0 $ACT_RESQ_PORT_DEMO localhost 8282 &
@@ -175,15 +177,15 @@ tunnel_demo() {
     tunnel_port demo.analytics.0 $AIR_PG_PORT_DEMO $AIR_PG_HOST_DEMO 5432 &
     tunnel_port demo.analytics.0 $REDIS_PORT_DEMO main.redis.service.consul 6379 &
 }
-alias kill_tunnel_demo="pkill -f 'nNT demo'"
+alias kill_tunnel_prod="pkill -f 'nNT prod'"
 tunnel_prod() {
+    kill_tunnel_prod
     tunnel_port production.postgres.0 $MAIN_PG_PORT_PROD localhost 5432 &
     tunnel_port production.activity.0 $ACT_PG_PORT_PROD $ACT_PG_HOST_PROD 5432 &
     tunnel_port production.activity.0 $ACT_RESQ_PORT_PROD localhost 8282 &
     tunnel_port production.analytics.0 $ANA_PG_PORT_PROD $ANA_PG_HOST_PROD 5432 &
     tunnel_port production.analytics.0 $AIR_PG_PORT_PROD $AIR_PG_HOST_PROD 5432 &
 }
-alias kill_tunnel_prod="pkill -f 'nNT prod'"
 
 alias cdpost='connect_ssh demo.postgres.0 $MAIN_PG_PORT_DEMO localhost'
 alias cppost='connect_ssh production.postgres.0 $MAIN_PG_PORT_PROD localhost'
@@ -191,7 +193,7 @@ alias cbpost='connect_ssh biomarin.postgres.0 $MAIN_PG_PORT_BIO localhost'
 
 alias cdact='ssh demo.activity.0 -L 8286:localhost:8282 -L 5436:activity-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
 alias cpact='ssh production.activity.0 -L 8287:localhost:8282 -L 5437:activity-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
-alias cbact='ssh biomarin.activity.0 -L 8288:localhost:8282 -L 5438:activity-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com:5432'
+alias cbact='ssh biomarin.activity.0 -L 8288:localhost:8282 -L 5438:activity-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com:5432 -L 5441:analytics-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com:5432'
 
 # alias cdana='ssh demo.analytics.0 -L 5439:analytics-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432 -L 5442:airflow-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
 # alias cpana='ssh production.analytics.0 -L 5440:analytics-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432 -L 5443:airflow-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'

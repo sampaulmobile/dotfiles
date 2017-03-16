@@ -5,6 +5,10 @@ if [ -d /usr/local/opt/arcanist ]; then
     source /usr/local/opt/arcanist/resources/shell/bash-completion
 fi
 
+if [ -d /usr/local/opt/rabbitmq ]; then
+    export PATH=$PATH:/usr/local/sbin
+fi
+
 if [ -d /usr/local/opt/airflow ]; then
     export AIRFLOW_HOME=/usr/local/opt/airflow
 elif [ -d /opt/airflow ]; then
