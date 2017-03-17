@@ -264,6 +264,32 @@ alias aircc='airflow_full_clear 5432 sampaul'
 alias airdcc='airflow_full_clear $AIR_PG_PORT_DEMO airflowdemo'
 alias airpcc='airflow_full_clear $AIR_PG_PORT_PROD airflowproduction'
 
+airflow_status() {
+    # wc="AND $4"
+    wc=""
+read -r -d '' q <<- EOM
+    SELECT 
+        execution_date::timestamp(0), 
+        task_id, state, 
+        start_date::timestamp(0), 
+        end_date::timestamp(0), 
+        duration, pid
+    FROM task_instance
+    WHERE dag_id = '${3}'
+    AND execution_date >= (
+        SELECT MAX(execution_date) 
+        FROM dag_run 
+        WHERE dag_id = '${3}'
+    )
+    ${wc}
+    ORDER BY state
+EOM
+    psql -c "$q" -w -h localhost -p $1 -U $2 airflow
+}
+alias airstat='airflow_status 5432 sampaul'
+alias airdstat='airflow_status $AIR_PG_PORT_DEMO airflowdemo'
+alias airpstat='airflow_status $AIR_PG_PORT_PROD airflowproduction'
+
 
 # ===== ARCANIST  ========
 alias arcl='arc list'
