@@ -167,9 +167,9 @@ tunnel_ports() {
 tunnel_port() {
     ssh -nNT $1 -L ${2}:${3}:${4}
 }
-alias kill_tunnel_demo="pkill -f 'nNT demo'"
-tunnel_demo() {
-    kill_tunnel_demo
+alias killtunneldemo="pkill -f 'nNT demo'"
+tunneldemo() {
+    killtunneldemo
     tunnel_port demo.postgres.0 $MAIN_PG_PORT_DEMO localhost 5432 &
     tunnel_port demo.activity.0 $ACT_PG_PORT_DEMO $ACT_PG_HOST_DEMO 5432 &
     tunnel_port demo.activity.0 $ACT_RESQ_PORT_DEMO localhost 8282 &
@@ -177,9 +177,9 @@ tunnel_demo() {
     tunnel_port demo.analytics.0 $AIR_PG_PORT_DEMO $AIR_PG_HOST_DEMO 5432 &
     tunnel_port demo.analytics.0 $REDIS_PORT_DEMO main.redis.service.consul 6379 &
 }
-alias kill_tunnel_prod="pkill -f 'nNT prod'"
-tunnel_prod() {
-    kill_tunnel_prod
+alias killtunnelprod="pkill -f 'nNT prod'"
+tunnelprod() {
+    killtunnelprod
     tunnel_port production.postgres.0 $MAIN_PG_PORT_PROD localhost 5432 &
     tunnel_port production.activity.0 $ACT_PG_PORT_PROD $ACT_PG_HOST_PROD 5432 &
     tunnel_port production.activity.0 $ACT_RESQ_PORT_PROD localhost 8282 &
@@ -294,7 +294,7 @@ alias airpstat='airflow_status $AIR_PG_PORT_PROD airflowproduction'
 # ===== ARCANIST  ========
 alias arcl='arc list'
 alias arcb='arc browse'
-alias arcd='git pull && arc diff'
+alias arcd='git pull && arc diff --reviewers'
 
 arcPatchMerge() {
     arc patch $1
@@ -332,8 +332,8 @@ alias rsp='rails s -p '
 alias rcd='docweb && rails c development'
 alias rsd='docweb && thin start --ssl --ssl-verify --ssl-key-file ~/Development/server.key --ssl-cert-file ~/Development/server.crt'
 alias wlog='docweb && tail -f log/development.log'
-alias kill_rails="pkill -f 'rails s'"
-alias restart_rails="kill_rails && docweb && rails s -d"
+alias killrails="pkill -f 'rails s'"
+alias restartrails="killrails && docweb && rails s -d"
 
 
 # ===== SOLR ========
