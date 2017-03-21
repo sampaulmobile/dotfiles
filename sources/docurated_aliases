@@ -237,22 +237,7 @@ alias airwq='pkill -f "airflow.webserver"'
 alias airwr='airwq && airw'
 alias airc='airflow clear'
 alias airb='airflow backfill -s `date +%Y-%m-%d`'
-air_cb() {
-    airc $1
-    airb $1
-}
-alias aircb='air_cb'
 alias airl='airflow list_dags'
-
-airflow_backfill() {
-sql="INSERT INTO dag_run
-(dag_id, execution_date, state, run_id, external_trigger, start_date) 
-VALUES 
-('$3', '$4', 'success', 'backfilling_$3', 'f', '`date +%Y-%m-%d:%H:%M:%S`')"
-    psql -c "$sql" -w -h localhost -p $1 -U $2 airflow
-}
-alias airdb='airflow_backfill $AIR_PG_PORT_DEMO airflowdemo'
-alias airpb='airflow_backfill $AIR_PG_PORT_PROD airflowproduction'
 
 airflow_full_clear() {
 sql="DELETE FROM dag_run WHERE dag_id = '$3';
@@ -263,6 +248,17 @@ DELETE FROM task_fail WHERE dag_id = '$3';"
 alias aircc='airflow_full_clear 5432 sampaul'
 alias airdcc='airflow_full_clear $AIR_PG_PORT_DEMO airflowdemo'
 alias airpcc='airflow_full_clear $AIR_PG_PORT_PROD airflowproduction'
+
+airflow_backfill_catchup() {
+sql="INSERT INTO dag_run 
+(dag_id, execution_date, state, run_id, external_trigger)
+VALUES
+('$3', '${4:-`date +%Y-%m-%d`}', 'success', 'catching_up_$3', 'f');"
+    psql -c "$sql" -w -h localhost -p $1 -U $2 airflow
+}
+alias airbb='airflow_backfill_catchup 5432 sampaul'
+alias airdbb='airflow_backfill_catchup $AIR_PG_PORT_DEMO airflowdemo'
+alias airpbb='airflow_backfill_catchup $AIR_PG_PORT_PROD airflowproduction'
 
 airflow_status() {
     # wc="AND $4"
