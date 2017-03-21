@@ -32,6 +32,9 @@ Plugin 'davidoc/taskpaper.vim'
 " markdown syntax highlighting (required godlygeek/tabular)
 Plugin 'plasticboy/vim-markdown'
 
+" coffeescript syntax highlighting
+Plugin 'kchmck/vim-coffee-script'
+
 " ======================== Text Editing =======================
 "text filtering and alignment
 Plugin 'godlygeek/tabular'
