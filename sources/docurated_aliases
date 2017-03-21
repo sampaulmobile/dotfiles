@@ -31,14 +31,6 @@ alias hubs='open $GITHUB_URL/services'
 alias hube='open $GITHUB_URL/events'
 alias huba='open $GITHUB_URL/activity'
 
-searchgit() { open "https://github.com/Docurated/$1/search?utf8=✓&q=$2" }
-alias hubcs='searchgit clients'
-alias hubws='searchgit website'
-alias hubus='searchgit utilities'
-alias hubss='searchgit services'
-alias hubes='searchgit events'
-alias hubas='searchgit activity'
-
 
 # ===== JENKINS ========
 alias jenk='open $JENKINS_URL/'
@@ -60,59 +52,27 @@ alias conpputana='conpput repos/analytics/current_release'
 alias condputana='condput repos/analytics/current_release'
 
 
-# ===== SPARK ========
-alias emr='aws emr list-clusters --active --query "Clusters[*].{Name:Name,ID:Id,State:Status.State,Info:Status.StateChangeReason.Message}"'
-
-SPARK_KEY_PAIR='$HOME/.ssh/sams-other-key-pair.pem'
-ssh_spark() {
-    # printf "Using cluster DNS: %s\n" "${SPARK_PROD_CLUSTER_DNS:?You must set SPARK_PROD_CLUSTER_DNS}"
-    ssh -i $1 -L 8087:$2:18080 -L 8086:$2:8088 hadoop@$2
-}
-alias cpspark='ssh_spark ~/.ssh/sams-other-key-pair.pem $SPARK_PROD_CLUSTER_DNS'
-alias cdspark='ssh_spark ~/.ssh/sams-other-key-pair.pem $SPARK_DEMO_CLUSTER_DNS'
-
-add_spark_step() {
-    printf "Using cluster ID: %s\n" "${SPARK_PROD_CLUSTER_ID:?You must set SPARK_PROD_CLUSTER_ID}"
-    aws emr add-steps --cluster-id $1 --steps "Type=spark,Name='$3',Args=[--deploy-mode,cluster,--master,yarn,--conf,spark.executorEnv.ENV=production,--conf,spark.yarn.appMasterEnv.ENV=production,--conf,spark.speculation=true,$2]"
-}
-alias spspark='add_spark_step $SPARK_PROD_CLUSTER_ID s3://docurated-production-analytics/main.py'
-alias sdspark='add_spark_step $SPARK_DEMO_CLUSTER_ID s3://docurated-demo-analytics/main.py'
-set_spark_env_var() {
-    export $1=$2
-}
-alias sparkpc='set_spark_env_var SPARK_PROD_CLUSTER_ID'
-alias sparkdc='set_spark_env_var SPARK_DEMO_CLUSTER_ID'
-alias sparkpd='set_spark_env_var SPARK_PROD_CLUSTER_DNS'
-alias sparkdd='set_spark_env_var SPARK_DEMO_CLUSTER_DNS'
-
-cp_to_spark_s3() {
-    aws s3 cp $2 s3://docurated-$1-analytics/$2
-}
-alias s3sparkpcp='cp_to_spark_s3 production'
-alias s3sparkdcp='cp_to_spark_s3 demo'
-
-
 # ===== SSH ========
 sshconnect() { ssh $1.$2.$3 }
 
 alias cdweb='sshconnect demo web'
-alias cdapi='sshconnect demo api'
-alias cdrapp='sshconnect demo railsapp'
-alias cdev='sshconnect demo events'
-alias cdcass='sshconnect demo cassandra'
-# alias cdact='sshconnect demo activity'
-
 alias cpweb='sshconnect production web'
+
+alias cdapi='sshconnect demo api'
 alias cpapi='sshconnect production api'
-alias cprapp_old='sshconnect production railsapp'
-alias cpev='sshconnect production events'
-alias cpcass='sshconnect production cassandra'
+
+alias cdrapp='docutil && $DOC_HOME/utilities/bin/ssh-first demo resque'
 alias cprapp='docutil && $DOC_HOME/utilities/bin/ssh-first production resque'
 
-ENVS=('DEMO' 'PROD' 'BIO')
-HOST_TYPES=('MAIN' 'ACT' 'ANA' 'AIR')
-SERVICES=('PG' 'RESQ')
+alias cdact='ssh demo.activity.0'
+alias cpact='ssh production.activity.0'
+alias cbact='ssh biomarin.activity.0'
 
+alias cdana='ssh demo.analytics.0'
+alias cpana='ssh production.analytics.0'
+alias cbana='ssh biomarin.analytics.0'
+
+# tunneling ports
 MAIN_PG_PORT_DEMO=5433
 MAIN_PG_PORT_PROD=5434
 MAIN_PG_PORT_BIO=5435
@@ -121,52 +81,34 @@ ACT_PG_PORT_DEMO=5436
 ACT_PG_PORT_PROD=5437
 ACT_PG_PORT_BIO=5438
 
+ANA_PG_PORT_DEMO=5439
+ANA_PG_PORT_PROD=5440
+ANA_PG_PORT_BIO=5441
+
+AIR_PG_PORT_DEMO=5442
+AIR_PG_PORT_PROD=5443
+
 ACT_RESQ_PORT_DEMO=8286
 ACT_RESQ_PORT_PROD=8287
 ACT_RESQ_PORT_BIO=8288
+
+REDIS_PORT_DEMO=6380
 
 ACT_PG_HOST_DEMO='activity-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
 ACT_PG_HOST_PROD='activity-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
 ACT_PG_HOST_BIO='activity-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com'
 
-ANA_PG_PORT_DEMO=5439
-ANA_PG_PORT_PROD=5440
-ANA_PG_PORT_BIO=5441
-
 ANA_PG_HOST_DEMO='analytics-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
 ANA_PG_HOST_PROD='analytics-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
 ANA_PG_HOST_BIO='analytics-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com'
 
-AIR_PG_PORT_DEMO=5442
-AIR_PG_PORT_PROD=5443
-
 AIR_PG_HOST_DEMO='airflow-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
 AIR_PG_HOST_PROD='airflow-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
+AIR_PG_HOST_BIO='*** TODO: FILL IN ***'
 
-REDIS_PORT_DEMO=6380
-
-tunnel_ssh() {
-    ssh -nNT -L $1 ${2}:${3}:5432
-}
-tunnel_ports() {
-    str=""
-    for e in $ENVS; do
-        for h in $HOST_TYPES; do
-            port="${h}_PG_PORT_${e}"
-            post="${h}_PG_HOST_${e}"
-            echo port: ${(P)port}
-            echo host: ${(P)host}
-            str+=${(P)port}
-            # echo port: ${!port}
-        done
-    done
-    echo $str
-}
 
 # ssh remote <user@hostname> <local port>:<host>:<port>
-tunnel_port() {
-    ssh -nNT $1 -L ${2}:${3}:${4}
-}
+tunnel_port() { ssh -nNT $1 -L ${2}:${3}:${4} }
 alias killtunneldemo="pkill -f 'nNT demo'"
 tunneldemo() {
     killtunneldemo
@@ -186,21 +128,17 @@ tunnelprod() {
     tunnel_port production.analytics.0 $ANA_PG_PORT_PROD $ANA_PG_HOST_PROD 5432 &
     tunnel_port production.analytics.0 $AIR_PG_PORT_PROD $AIR_PG_HOST_PROD 5432 &
 }
+alias killtunnelbio="pkill -f 'nNT biomarin'"
+tunnelbio() {
+    killtunnelbio
+    tunnel_port biomarin.postgres.0 $MAIN_PG_PORT_BIO localhost 5432 &
+    tunnel_port biomarin.activity.0 $ACT_PG_PORT_PROD $ACT_PG_HOST_PROD 5432 &
+    tunnel_port biomarin.activity.0 $ACT_RESQ_PORT_PROD localhost 8282 &
+    tunnel_port biomarin.analytics.0 $ANA_PG_PORT_PROD $ANA_PG_HOST_PROD 5432 &
+    tunnel_port biomarin.analytics.0 $AIR_PG_PORT_PROD $AIR_PG_HOST_PROD 5432 &
+}
 
-alias cdpost='connect_ssh demo.postgres.0 $MAIN_PG_PORT_DEMO localhost'
-alias cppost='connect_ssh production.postgres.0 $MAIN_PG_PORT_PROD localhost'
-alias cbpost='connect_ssh biomarin.postgres.0 $MAIN_PG_PORT_BIO localhost'
-
-alias cdact='ssh demo.activity.0 -L 8286:localhost:8282 -L 5436:activity-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
-alias cpact='ssh production.activity.0 -L 8287:localhost:8282 -L 5437:activity-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
-alias cbact='ssh biomarin.activity.0 -L 8288:localhost:8282 -L 5438:activity-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com:5432 -L 5441:analytics-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com:5432'
-
-# alias cdana='ssh demo.analytics.0 -L 5439:analytics-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432 -L 5442:airflow-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
-# alias cpana='ssh production.analytics.0 -L 5440:analytics-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432 -L 5443:airflow-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com:5432'
-# alias cbana='ssh biomarin.analytics.0 -L 5441:analytics-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com:5432'
-alias cdana='ssh demo.analytics.0'
-alias cpana='ssh production.analytics.0'
-alias cbana='ssh biomarin.analytics.0'
+alias pql='psql -d docurated -p 5432'
 
 connect_pql() {
     psql -w -h localhost -p ${1} -U ${2} ${3}
@@ -220,12 +158,7 @@ alias bpqlana='connect_pql $ANA_PG_PORT_BIO analyticsbiomarin analytics'
 alias dpqlair='connect_pql $AIR_PG_PORT_DEMO airflowdemo airflow'
 alias ppqlair='connect_pql $AIR_PG_PORT_PROD airflowproduction airflow'
 
-alias dcql='cdcass 0 && cqlsh'
-alias pcql='cqlsh production.cassandra.0'
 alias cadmin='sshconnect production admin'
-
-# postgres
-alias pql='psql -d docurated -p 5432'
 
 # reset the stupid mac osx DNS for tunnelblick to work
 alias resetdns='sudo launchctl unload -w /System/Library/LaunchDaemons/com.apple.mDNSResponder.plist && sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.mDNSResponder.plist'
@@ -261,8 +194,7 @@ alias airdbb='airflow_backfill_catchup $AIR_PG_PORT_DEMO airflowdemo'
 alias airpbb='airflow_backfill_catchup $AIR_PG_PORT_PROD airflowproduction'
 
 airflow_status() {
-    # wc="AND $4"
-    wc=""
+    wc="AND ${4:-1=1}"
 read -r -d '' q <<- EOM
     SELECT 
         execution_date::timestamp(0), 
@@ -299,6 +231,35 @@ arcPatchMerge() {
     git pull
 }
 alias arcpm='arcPatchMerge'
+
+
+# ===== SPARK ========
+alias emr='aws emr list-clusters --active --query "Clusters[*].{Name:Name,ID:Id,State:Status.State,Info:Status.StateChangeReason.Message}"'
+
+SPARK_KEY_PAIR='$HOME/.ssh/sams-other-key-pair.pem'
+ssh_spark() {
+    # printf "Using cluster DNS: %s\n" "${SPARK_PROD_CLUSTER_DNS:?You must set SPARK_PROD_CLUSTER_DNS}"
+    ssh -i $1 -L 8087:$2:18080 -L 8086:$2:8088 hadoop@$2
+}
+alias cpspark='ssh_spark ~/.ssh/sams-other-key-pair.pem $SPARK_PROD_CLUSTER_DNS'
+alias cdspark='ssh_spark ~/.ssh/sams-other-key-pair.pem $SPARK_DEMO_CLUSTER_DNS'
+
+add_spark_step() {
+    printf "Using cluster ID: %s\n" "${SPARK_PROD_CLUSTER_ID:?You must set SPARK_PROD_CLUSTER_ID}"
+    aws emr add-steps --cluster-id $1 --steps "Type=spark,Name='$3',Args=[--deploy-mode,cluster,--master,yarn,--conf,spark.executorEnv.ENV=production,--conf,spark.yarn.appMasterEnv.ENV=production,--conf,spark.speculation=true,$2]"
+}
+alias spspark='add_spark_step $SPARK_PROD_CLUSTER_ID s3://docurated-production-analytics/main.py'
+alias sdspark='add_spark_step $SPARK_DEMO_CLUSTER_ID s3://docurated-demo-analytics/main.py'
+
+set_spark_env_var() { export $1=$2 }
+alias sparkpc='set_spark_env_var SPARK_PROD_CLUSTER_ID'
+alias sparkdc='set_spark_env_var SPARK_DEMO_CLUSTER_ID'
+alias sparkpd='set_spark_env_var SPARK_PROD_CLUSTER_DNS'
+alias sparkdd='set_spark_env_var SPARK_DEMO_CLUSTER_DNS'
+
+cp_to_spark_s3() { aws s3 cp $2 s3://docurated-$1-analytics/$2 }
+alias s3sparkpcp='cp_to_spark_s3 production'
+alias s3sparkdcp='cp_to_spark_s3 demo'
 
 
 # ===== CLIENT APP ========
@@ -367,4 +328,33 @@ alias start_cli='pyserv &; coffserv &; doccli; mount_vol'
 alias dresq='docutil && docformation/docconnection.rb demo.railsapp "ps -ef f | grep resque"'
 alias sresq='docutil && docformation/docconnection.rb stage.railsapp "ps -ef f | grep resque"'
 
+
+# ===== SCRATCH/UNUSED ========
+searchgit() { open "https://github.com/Docurated/$1/search?utf8=✓&q=$2" }
+alias hubcs='searchgit clients'
+alias hubws='searchgit website'
+alias hubus='searchgit utilities'
+alias hubss='searchgit services'
+alias hubes='searchgit events'
+alias hubas='searchgit activity'
+
+
+ENVS=('DEMO' 'PROD' 'BIO')
+HOST_TYPES=('MAIN' 'ACT' 'ANA' 'AIR')
+SERVICES=('PG' 'RESQ')
+
+tunnel_ports() {
+    str=""
+    for e in $ENVS; do
+        for h in $HOST_TYPES; do
+            port="${h}_PG_PORT_${e}"
+            post="${h}_PG_HOST_${e}"
+            echo port: ${(P)port}
+            echo host: ${(P)host}
+            str+=${(P)port}
+            # echo port: ${!port}
+        done
+    done
+    echo $str
+}
 
