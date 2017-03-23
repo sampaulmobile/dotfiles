@@ -43,6 +43,7 @@ brew install sbt
 brew install terraform
 
 brew install rabbitmq
+brew install kubernetes-cli
 
 brew services start postgresql
 brew services start mongodb
@@ -184,6 +185,14 @@ if [ ! -f /usr/local/bin/redis-server ]; then
     echo "Setting up redis..."
 fi
 
+if [ ! -f /usr/local/bin/kubectl ]; then
+    sudo cp /Library/Application\ Support/Tunnelblick/Users/`whoami`/AWS.tblk/Contents/Resources/{client.crt,client.key,ca.crt} .
+    sudo chown `whoami` client.crt client.key ca.crt
+    kubectl config set-cluster stage --certificate-authority=ca.crt --embed-certs=true --server=https://master.k8s.service.us-east-1-stage.consul:6443
+    kubectl config set-credentials `whoami` --client-certificate=client.crt --client-key=client.key --embed-certs=true
+    kubectl config set-context stage --cluster=stage --user=`whoami`
+    kubectl config use-context stage
+fi
 
 if [ ! -d /usr/local/opt/rabbitmq ]; then
     sudo rabbitmq-server -detached
