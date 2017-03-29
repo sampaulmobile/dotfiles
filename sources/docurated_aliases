@@ -296,6 +296,7 @@ alias restartrails="killrails && docweb && rails s -d"
 # ===== SOLR ========
 alias solr_start='/usr/local/opt/solr/bin/solr start -c'
 alias solr_stop='/usr/local/opt/solr/bin/solr stop -all'
+alias restartsolr='solr_stop && solr_start'
 alias testsolrs='docweb && bundle exec sunspot-solr start -p 8984'
 alias testsolrr='docweb && bundle exec sunspot-solr run -p 8984'
 
