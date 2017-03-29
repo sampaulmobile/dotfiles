@@ -193,6 +193,15 @@ alias airbb='airflow_backfill_catchup 5432 sampaul'
 alias airdbb='airflow_backfill_catchup $AIR_PG_PORT_DEMO airflowdemo'
 alias airpbb='airflow_backfill_catchup $AIR_PG_PORT_PROD airflowproduction'
 
+airflow_new_connection() {
+sql="INSERT INTO connection 
+(conn_id, conn_type, host, schema, login, password, port)
+VALUES
+('$3', 'postgres', 'localhost', '$4', '$5', '$6', ${7:-5432});"
+    psql -c "$sql" -w -h localhost -p $1 -U $2 airflow
+}
+alias airconn='airflow_new_connection 5432 sampaul'
+
 airflow_status() {
     wc="AND ${4:-1=1}"
 read -r -d '' q <<- EOM
