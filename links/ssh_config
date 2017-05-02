@@ -1,4 +1,6 @@
 
+UseKeychain yes
+
 Host classpass
     HostName 52.205.179.64
     User ubuntu

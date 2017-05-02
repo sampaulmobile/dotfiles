@@ -113,8 +113,6 @@ alias killtunneldemo="pkill -f 'nNT demo'"
 tunneldemo() {
     killtunneldemo
     tunnel_port demo.postgres.0 $MAIN_PG_PORT_DEMO localhost 5432 &
-    tunnel_port demo.activity.0 $ACT_PG_PORT_DEMO $ACT_PG_HOST_DEMO 5432 &
-    tunnel_port demo.activity.0 $ACT_RESQ_PORT_DEMO localhost 8282 &
     tunnel_port demo.analytics.0 $ANA_PG_PORT_DEMO $ANA_PG_HOST_DEMO 5432 &
     tunnel_port demo.analytics.0 $AIR_PG_PORT_DEMO $AIR_PG_HOST_DEMO 5432 &
     tunnel_port demo.analytics.0 $REDIS_PORT_DEMO main.redis.service.consul 6379 &
@@ -123,26 +121,20 @@ alias killtunnelprod="pkill -f 'nNT prod'"
 tunnelprod() {
     killtunnelprod
     tunnel_port production.postgres.0 $MAIN_PG_PORT_PROD localhost 5432 &
-    tunnel_port production.activity.0 $ACT_PG_PORT_PROD $ACT_PG_HOST_PROD 5432 &
-    tunnel_port production.activity.0 $ACT_RESQ_PORT_PROD localhost 8282 &
     tunnel_port production.analytics.0 $ANA_PG_PORT_PROD $ANA_PG_HOST_PROD 5432 &
     tunnel_port production.analytics.0 $AIR_PG_PORT_PROD $AIR_PG_HOST_PROD 5432 &
 }
 alias killtunnelbio="pkill -f 'nNT biomarin'"
 tunnelbio() {
     killtunnelbio
-    tunnel_port biomarin.postgres.0 $MAIN_PG_PORT_BIO localhost 5432 &
-    tunnel_port biomarin.activity.0 $ACT_PG_PORT_PROD $ACT_PG_HOST_PROD 5432 &
-    tunnel_port biomarin.activity.0 $ACT_RESQ_PORT_PROD localhost 8282 &
-    tunnel_port biomarin.analytics.0 $ANA_PG_PORT_PROD $ANA_PG_HOST_PROD 5432 &
-    tunnel_port biomarin.analytics.0 $AIR_PG_PORT_PROD $AIR_PG_HOST_PROD 5432 &
+    tunnel_port biomarin.analytics.0 $MAIN_PG_PORT_BIO biomarin.postgres.0 5432 &
+    tunnel_port biomarin.analytics.0 $ANA_PG_PORT_BIO $ANA_PG_HOST_BIO 5432 &
+    tunnel_port biomarin.analytics.0 $AIR_PG_PORT_BIO $AIR_PG_HOST_BIO 5432 &
 }
 
 alias pql='psql -d docurated -p 5432'
 
-connect_pql() {
-    psql -w -h localhost -p ${1} -U ${2} ${3}
-}
+connect_pql() { psql -w -h localhost -p ${1} -U ${2} ${3} }
 alias dpql='connect_pql $MAIN_PG_PORT_DEMO rails docurated'
 alias ppql='connect_pql $MAIN_PG_PORT_PROD rails docurated'
 alias bpql='connect_pql $MAIN_PG_PORT_BIO rails docurated'
