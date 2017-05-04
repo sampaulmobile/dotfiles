@@ -127,3 +127,11 @@ fi
 cd $DOC_PATH/utilities
 git remote set-url origin ssh://git@phabricator.docurated.rocks:2222/diffusion/UTL/utilities.git
 
+
+# KUBERNETES
+echo "Setting up kubernetes..."
+if [ ! -d $DOC_PATH/utilities ]; then
+    git clone ssh://git@phabricator.docurated.rocks:2222/diffusion/KUBE/kubernetes.git
+fi
+
+

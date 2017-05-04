@@ -138,6 +138,11 @@ if [ ! -d "/Applications/Tunnelblick.app" ]; then
     brew cask install tunnelblick
 fi
 
+if [ ! -d "/Applications/Divvy.app" ]; then
+    echo "Installing Divvy..."
+    brew cask install divvy
+fi
+
 # if [ ! -d "/Applications/Docker.app" ]; then
 #     brew cask install docker
 # fi
