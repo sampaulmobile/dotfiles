@@ -72,6 +72,18 @@ alias cdana='ssh demo.analytics.0'
 alias cpana='ssh production.analytics.0'
 alias cbana='ssh biomarin.analytics.0'
 
+# alias ckairweb="kubectl exec -it `kubectl get pods | grep airflow-webserver | awk '{print $1}'` bash"
+# alias ckairwork="kubectl exec -it `kubectl get pods | grep airflow-worker | awk '{print $1}'` bash"
+# alias ckairsched="kubectl exec -it `kubectl get pods | grep airflow-scheduler | awk '{print $1}'` bash"
+alias kpods='kubectl get pods'
+alias kjobs='kubectl get jobs'
+
+kube_deploy() {
+    $DOC_HOME/kubernetes/bin/deploy $1 v$2
+}
+alias kdair='kube_deploy airflow'
+
+
 # tunneling ports
 MAIN_PG_PORT_DEMO=5433
 MAIN_PG_PORT_PROD=5434
@@ -104,7 +116,7 @@ ANA_PG_HOST_BIO='analytics-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com'
 
 AIR_PG_HOST_DEMO='airflow-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
 AIR_PG_HOST_PROD='airflow-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
-AIR_PG_HOST_BIO='*** TODO: FILL IN ***'
+AIR_PG_HOST_BIO='airflow-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com'
 
 
 # ssh remote <user@hostname> <local port>:<host>:<port>
