@@ -23,6 +23,7 @@ brew cask install vlc
 brew cask install sabnzbd
 brew cask install couchpotato
 brew cask install sonarr
+brew cask install plex-media-server
 
 # CONFIGURATION
 
