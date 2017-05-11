@@ -1,5 +1,8 @@
 
-UseKeychain yes
+Host *
+    UseKeychain yes
+    AddKeysToAgent yes
+    IdentityFile ~/.ssh/id_rsa_pro
 
 Host classpass
     HostName 52.205.179.64
@@ -42,9 +45,11 @@ Host gate.mini
   User Docurated
   Port 8022
   HostKeyAlias macmini
+
 Host windowsbuild
   HostName windowsbuild
   User Administrator
+
 Host docurated.nfs
   HostName ec2-50-17-45-211.compute-1.amazonaws.com
   User ubuntu
