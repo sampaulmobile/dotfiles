@@ -175,7 +175,8 @@ alias ppqlair='connect_pql $AIR_PG_PORT_PROD airflowproduction airflow'
 alias cadmin='sshconnect production admin'
 
 # reset the stupid mac osx DNS for tunnelblick to work
-alias resetdns='sudo launchctl unload -w /System/Library/LaunchDaemons/com.apple.mDNSResponder.plist && sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.mDNSResponder.plist'
+# alias resetdns='sudo launchctl unload -w /System/Library/LaunchDaemons/com.apple.mDNSResponder.plist && sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.mDNSResponder.plist'
+alias resetdns='sudo killall -HUP mDNSResponder'
 
 
 # ===== AIRFLOW ========
