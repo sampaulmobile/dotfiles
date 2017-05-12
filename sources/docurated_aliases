@@ -83,6 +83,10 @@ alias cbana='ssh biomarin.analytics.0'
 # alias ckairsched="kubectl exec -it `kubectl get pods | grep airflow-scheduler | awk '{print $1}'` bash"
 alias kpods='kubectl get pods'
 alias kjobs='kubectl get jobs'
+kube_connect() {
+    kubectl exec -it $1 bash
+}
+alias ck="kube_connect"
 
 kube_deploy() {
     $DOC_HOME/kubernetes/bin/deploy $1 v$2
