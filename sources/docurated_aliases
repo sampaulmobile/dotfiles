@@ -87,6 +87,7 @@ kube_connect() {
     kubectl exec -it $1 bash
 }
 alias ck="kube_connect"
+alias ckcon="$DOC_HOME/kubernetes/bin/console"
 
 kube_deploy() {
     $DOC_HOME/kubernetes/bin/deploy $1 v$2
