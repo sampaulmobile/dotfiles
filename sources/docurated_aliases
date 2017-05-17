@@ -78,16 +78,26 @@ alias cdana='ssh demo.analytics.0'
 alias cpana='ssh production.analytics.0'
 alias cbana='ssh biomarin.analytics.0'
 
-# alias ckairweb="kubectl exec -it `kubectl get pods | grep airflow-webserver | awk '{print $1}'` bash"
-# alias ckairwork="kubectl exec -it `kubectl get pods | grep airflow-worker | awk '{print $1}'` bash"
-# alias ckairsched="kubectl exec -it `kubectl get pods | grep airflow-scheduler | awk '{print $1}'` bash"
 alias kpods='kubectl get pods'
 alias kjobs='kubectl get jobs'
+kube_pod_grep() {
+    kubectl get pods | grep $1 | awk '{print $1}'
+}
+alias kpodg="kube_pod_grep"
+
 kube_connect() {
     kubectl exec -it $1 bash
 }
 alias ck="kube_connect"
-alias ckcon="$DOC_HOME/kubernetes/bin/console"
+
+kube_grep_connect() {
+    ck `kpodg $1`
+}
+alias ckg="kube_grep_connect"
+alias ckairweb="ckg airflow-webserver"
+alias ckairwork="ckg airflow-worker"
+alias ckairsched="ckg airflow-scheduler"
+alias ckrails="$DOC_HOME/kubernetes/bin/console"
 
 kube_deploy() {
     $DOC_HOME/kubernetes/bin/deploy $1 v$2
