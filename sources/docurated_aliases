@@ -55,7 +55,7 @@ alias conbgetana='conbget repos/analytics/current_release'
 
 alias conpputana='conpput repos/analytics/current_release'
 alias condputana='condput repos/analytics/current_release'
-alias conbputana='conpput repos/analytics/current_release'
+alias conbputana='conbput repos/analytics/current_release'
 
 
 # ===== SSH ========
