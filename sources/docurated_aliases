@@ -23,6 +23,7 @@ alias doccli="cd $DOC_HOME/clients"
 alias docserv="cd $DOC_HOME/services"
 alias docevents="cd $DOC_HOME/events"
 alias docact="cd $DOC_HOME/activity"
+alias dockube="cd $DOC_HOME/kubernetes"
 
 alias hubc='open $GITHUB_URL/clients'
 alias hubw='open $GITHUB_URL/website'
@@ -42,6 +43,7 @@ alias jenka='open $JENKINS_URL/job/Activity/'
 
 
 # ===== CONSUL ========
+alias ctoken='echo $CONSUL_TOKEN | pbcopy'
 alias conpget='consul kv get -http-addr=consul.service.consul:8500 -datacenter=us-east-1-production'
 alias conpput='consul kv put -token=$CONSUL_TOKEN -http-addr=consul.service.consul:8500 -datacenter=us-east-1-production'
 alias condget='consul kv get -http-addr=consul.service.consul:8500 -datacenter=us-east-1-demo'
