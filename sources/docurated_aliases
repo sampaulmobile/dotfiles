@@ -255,11 +255,21 @@ alias airstat='airflow_status 5432 sampaul'
 alias airdstat='airflow_status $AIR_PG_PORT_DEMO airflowdemo'
 alias airpstat='airflow_status $AIR_PG_PORT_PROD airflowproduction'
 
+airflow_tail() {
+    latest=`ls -t $AIRFLOW_HOME/logs/$1/$2 | head -1`
+    tail -f -n 200 $AIRFLOW_HOME/logs/$1/$2/$latest
+}
+alias airtail='airflow_tail'
+
+
 
 # ===== ARCANIST  ========
 alias arcl='arc list'
 alias arcb='arc browse'
 alias arcd='git pull && arc diff --reviewers'
+arcdiff() {
+    git pull && arc diff --reviewers $1 --message ""
+}
 
 arcPatchMerge() {
     arc patch $1
