@@ -194,8 +194,8 @@ alias resetdns='sudo killall -HUP mDNSResponder'
 
 # ===== AIRFLOW ========
 alias airw='airflow webserver -D &'
-alias airwq='pkill -f "airflow.webserver"'
-alias airwr='airwq && airw'
+alias killairw='pkill -9 airflow.webserver'
+alias airwr='killairw && airw'
 alias airc='airflow clear'
 alias airb='airflow backfill -s `date +%Y-%m-%d`'
 alias airl='airflow list_dags'
@@ -260,7 +260,6 @@ airflow_tail() {
     tail -f -n 200 $AIRFLOW_HOME/logs/$1/$2/$latest
 }
 alias airtail='airflow_tail'
-
 
 
 # ===== ARCANIST  ========
