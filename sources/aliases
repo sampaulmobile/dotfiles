@@ -9,7 +9,7 @@ alias cdot='cd ~/dotfiles'
 alias dev='cd ~/Development/SBP'
 alias cdown='cd ~/Downloads'
 alias soz='source ~/.zshrc'
-alias cpwd='pwd | pbcopy'
+alias cpwd="pwd | tr -d '\n' | pbcopy"
 
 creds() {
     grep -i $1 --exclude=ssh_known_hosts $NOT_PUBLIC/links/*
