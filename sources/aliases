@@ -10,6 +10,7 @@ alias dev='cd ~/Development/SBP'
 alias cdown='cd ~/Downloads'
 alias soz='source ~/.zshrc'
 alias cpwd="pwd | tr -d '\n' | pbcopy"
+alias dm='mvim $NOT_PUBLIC/notes/daily_mission.md'
 
 creds() {
     grep -i $1 --exclude=ssh_known_hosts $NOT_PUBLIC/links/*
