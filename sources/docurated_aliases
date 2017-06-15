@@ -209,6 +209,10 @@ DELETE FROM task_fail WHERE dag_id = '$3';"
 alias aircc='airflow_full_clear 5432 sampaul'
 alias airdcc='airflow_full_clear $AIR_PG_PORT_DEMO airflowdemo'
 alias airpcc='airflow_full_clear $AIR_PG_PORT_PROD airflowproduction'
+airccb() {
+    aircc $1
+    airb $1
+}
 
 airflow_backfill_catchup() {
 sql="INSERT INTO dag_run 
