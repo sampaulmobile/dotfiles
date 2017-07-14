@@ -80,8 +80,12 @@ alias cdana='ssh demo.analytics.0'
 alias cpana='ssh production.analytics.0'
 alias cbana='ssh biomarin.analytics.0'
 
+
+# ===== KUBE ========
+alias kcont='kubectl config use-context'
 alias kpods='kubectl get pods'
 alias kjobs='kubectl get jobs'
+
 kube_pod_grep() {
     kubectl get pods | grep $1 | awk '{print $1}'
 }
