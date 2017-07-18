@@ -123,6 +123,7 @@ ACT_PG_PORT_BIO=5438
 
 ANA_PG_PORT_DEMO=5439
 ANA_PG_PORT_PROD=5440
+ANA_PG_PORT_PROD_LB=5444
 ANA_PG_PORT_BIO=5441
 
 AIR_PG_PORT_DEMO=5442
@@ -140,6 +141,7 @@ ACT_PG_HOST_BIO='activity-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com'
 
 ANA_PG_HOST_DEMO='analytics-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
 ANA_PG_HOST_PROD='analytics-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
+ANA_PG_HOST_PROD_LB='pgbouncer.service.consul'
 ANA_PG_HOST_BIO='analytics-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com'
 
 AIR_PG_HOST_DEMO='airflow-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
@@ -162,6 +164,7 @@ tunnelprod() {
     killtunnelprod
     tunnel_port production.postgres.0 $MAIN_PG_PORT_PROD localhost 5432 &
     tunnel_port production.analytics.0 $ANA_PG_PORT_PROD $ANA_PG_HOST_PROD 5432 &
+    tunnel_port production.analytics.0 $ANA_PG_PORT_PROD_LB $ANA_PG_HOST_PROD_LB 5432 &
     tunnel_port production.analytics.0 $AIR_PG_PORT_PROD $AIR_PG_HOST_PROD 5432 &
 }
 alias killtunnelbio="pkill -f 'nNT biomarin'"
@@ -185,6 +188,7 @@ alias bpqlact='connect_pql $ACT_PG_PORT_BIO activitybiomarin activity'
 
 alias dpqlana='connect_pql $ANA_PG_PORT_DEMO analyticsdemo analytics'
 alias ppqlana='connect_pql $ANA_PG_PORT_PROD analyticsproduction analytics'
+alias ppqlanalb='connect_pql $ANA_PG_PORT_PROD_LB analyticsproduction analytics_web'
 alias bpqlana='connect_pql $ANA_PG_PORT_BIO analyticsbiomarin analytics'
 
 alias dpqlair='connect_pql $AIR_PG_PORT_DEMO airflowdemo airflow'
