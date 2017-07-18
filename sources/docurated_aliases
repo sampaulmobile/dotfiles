@@ -108,7 +108,8 @@ alias ckairsched="ckg airflow-scheduler"
 alias ckrails="$DOC_HOME/kubernetes/bin/console"
 
 kube_deploy() {
-    $DOC_HOME/kubernetes/bin/deploy $1 v$2
+    cd $DOC_HOME/kubernetes
+    bin/deploy $1 v$2
 }
 alias kdair='kube_deploy airflow'
 
