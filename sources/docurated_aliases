@@ -85,6 +85,8 @@ alias cbana='ssh biomarin.analytics.0'
 alias kcont='kubectl config use-context'
 alias kpods='kubectl get pods'
 alias kjobs='kubectl get jobs'
+alias kprox='kubectl proxy &'
+alias killkprox="pkill -f 'kubectl proxy'"
 
 kube_pod_grep() {
     kubectl get pods | grep $1 | awk '{print $1}'
@@ -165,6 +167,7 @@ tunnelprod() {
     tunnel_port production.analytics.0 $ANA_PG_PORT_PROD $ANA_PG_HOST_PROD 5432 &
     tunnel_port production.analytics.0 $ANA_PG_PORT_PROD_LB $ANA_PG_HOST_PROD_LB 5432 &
     tunnel_port production.analytics.0 $AIR_PG_PORT_PROD $AIR_PG_HOST_PROD 5432 &
+    tunnel_port production.analytics.0 18080 localhost 18080 &
 }
 alias killtunnelbio="pkill -f 'nNT biomarin'"
 tunnelbio() {
