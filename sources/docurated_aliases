@@ -89,7 +89,7 @@ alias kprox='kubectl proxy &'
 alias killkprox="pkill -f 'kubectl proxy'"
 
 kube_pod_grep() {
-    kubectl get pods | grep $1 | awk '{print $1}'
+    kubectl get pods | grep "$1" | awk '{print $1}'
 }
 alias kpodg="kube_pod_grep"
 
@@ -119,9 +119,8 @@ MAIN_PG_PORT_DEMO=5433
 MAIN_PG_PORT_PROD=5434
 MAIN_PG_PORT_BIO=5435
 
-ACT_PG_PORT_DEMO=5436
-ACT_PG_PORT_PROD=5437
-ACT_PG_PORT_BIO=5438
+KUBE_PG_PORT=5436
+KUBE_PG_PORT_LB=5437
 
 ANA_PG_PORT_DEMO=5439
 ANA_PG_PORT_PROD=5440
@@ -131,15 +130,7 @@ ANA_PG_PORT_BIO=5441
 AIR_PG_PORT_DEMO=5442
 AIR_PG_PORT_PROD=5443
 
-ACT_RESQ_PORT_DEMO=8286
-ACT_RESQ_PORT_PROD=8287
-ACT_RESQ_PORT_BIO=8288
-
 REDIS_PORT_DEMO=6380
-
-ACT_PG_HOST_DEMO='activity-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
-ACT_PG_HOST_PROD='activity-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
-ACT_PG_HOST_BIO='activity-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com'
 
 ANA_PG_HOST_DEMO='analytics-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
 ANA_PG_HOST_PROD='analytics-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
@@ -177,6 +168,16 @@ tunnelbio() {
     tunnel_port biomarin.analytics.0 $ANA_PG_PORT_BIO $ANA_PG_HOST_BIO 5432 &
     tunnel_port biomarin.analytics.0 $AIR_PG_PORT_BIO $AIR_PG_HOST_BIO 5432 &
 }
+killtunnelkube() {
+    pkill -f 'kubectl proxy'
+    pkill -f 'kubectl port-forward'
+}
+tunnelkube() {
+    killtunnelkube
+    kubectl proxy &
+    kubectl port-forward `kpodg 'analytics-postgres-\d'` $KUBE_PG_PORT:6432 &
+    kubectl port-forward `kpodg 'analytics-postgres-db'` $KUBE_PG_PORT_LB:5432 &
+}
 
 alias pql='psql -d docurated -p 5432'
 
@@ -185,14 +186,13 @@ alias dpql='connect_pql $MAIN_PG_PORT_DEMO rails docurated'
 alias ppql='connect_pql $MAIN_PG_PORT_PROD rails docurated'
 alias bpql='connect_pql $MAIN_PG_PORT_BIO rails docurated'
 
-alias dpqlact='connect_pql $ACT_PG_PORT_DEMO activitydemo activity'
-alias ppqlact='connect_pql $ACT_PG_PORT_PROD activityproduction activity'
-alias bpqlact='connect_pql $ACT_PG_PORT_BIO activitybiomarin activity'
-
 alias dpqlana='connect_pql $ANA_PG_PORT_DEMO analyticsdemo analytics'
 alias ppqlana='connect_pql $ANA_PG_PORT_PROD analyticsproduction analytics'
 alias ppqlanalb='connect_pql $ANA_PG_PORT_PROD_LB analyticsproduction analytics_web'
 alias bpqlana='connect_pql $ANA_PG_PORT_BIO analyticsbiomarin analytics'
+
+alias kpqlana='connect_pql $KUBE_PG_PORT analytics analytics'
+alias kpqlanalb='connect_pql $KUBE_PG_PORT_LB analytics analytics'
 
 alias dpqlair='connect_pql $AIR_PG_PORT_DEMO airflowdemo airflow'
 alias ppqlair='connect_pql $AIR_PG_PORT_PROD airflowproduction airflow'
