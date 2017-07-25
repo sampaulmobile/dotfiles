@@ -186,6 +186,10 @@ tunnelmainprod() {
 tunnelmainkube() {
     kubectl port-forward `kpodg 'analytics-postgres-\d'` 5432:6432 &
 }
+killtunnelmain() {
+    pkill -f '5432:' #tunnelmainprod
+    pkill -f '5436:5432' #tunnelmainkube
+}
 
 alias pql='psql -d docurated -p 5432'
 
