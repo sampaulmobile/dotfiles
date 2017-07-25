@@ -119,7 +119,7 @@ MAIN_PG_PORT_DEMO=5433
 MAIN_PG_PORT_PROD=5434
 MAIN_PG_PORT_BIO=5435
 
-KUBE_PG_PORT=5432
+KUBE_PG_PORT=5436
 KUBE_PG_PORT_LB=5437
 
 ANA_PG_PORT_DEMO=5439
@@ -177,6 +177,14 @@ tunnelkube() {
     kubectl proxy &
     kubectl port-forward `kpodg 'analytics-postgres-db'` $KUBE_PG_PORT:5432 &
     kubectl port-forward `kpodg 'analytics-postgres-\d'` $KUBE_PG_PORT_LB:6432 &
+}
+
+# tunnel 5432 to a given db
+tunnelmainprod() {
+    tunnel_port production.analytics.0 5432 $ANA_PG_HOST_PROD_LB 5432 &
+}
+tunnelmainkube() {
+    kubectl port-forward `kpodg 'analytics-postgres-\d'` 5432:6432 &
 }
 
 alias pql='psql -d docurated -p 5432'

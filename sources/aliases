@@ -54,6 +54,10 @@ alias gmm='git merge master'
 alias gpp='git pull && git push'
 alias gitrm='git reset --hard origin/master'
 
+# ============ BREW =============
+alias bserv='brew services list'
+alias bstart='brew services start'
+alias bstop='brew services stop'
 
 # ============ CAPISTRANO =============
 alias cpd='cap production deploy'
