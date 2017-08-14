@@ -188,6 +188,10 @@ kube_port_forward() {
     kubectl port-forward `kpodg $1` $2:$3 &
 }
 alias kport='kube_port_forward'
+kill_port_forward() {
+    pkill -f "port-forward.*${1}"
+}
+alias killkport='kill_port_forward'
 
 # tunnel 5432 to a given db
 tunnelmainprod() {
