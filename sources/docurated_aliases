@@ -100,12 +100,12 @@ alias kpodg="kube_pod_grep"
 kube_connect() {
     kubectl exec -it $1 bash
 }
-alias ck="kube_connect"
+alias kube_conn="kube_connect"
 
 kube_grep_connect() {
-    ck `kpodg $1`
+    kube_conn `kpodg $1`
 }
-alias ckg="kube_grep_connect"
+alias ck="kube_grep_connect"
 alias ckairweb="ckg airflow-webserver"
 alias ckairwork="ckg airflow-worker"
 alias ckairsched="ckg airflow-scheduler"
@@ -184,6 +184,10 @@ tunnelkube() {
     kubectl port-forward `kpodg 'analytics-postgres-db'` $KUBE_PG_PORT:5432 &
     kubectl port-forward `kpodg 'analytics-postgres-\d'` $KUBE_PG_PORT_LB:6432 &
 }
+kube_port_forward() {
+    kubectl port-forward `kpodg $1` $2:$3 &
+}
+alias kport='kube_port_forward'
 
 # tunnel 5432 to a given db
 tunnelmainprod() {
