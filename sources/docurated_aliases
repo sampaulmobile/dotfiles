@@ -82,11 +82,30 @@ alias cbana='ssh biomarin.analytics.0'
 
 
 # ===== KUBE ========
-alias kc='kubectl config current-context'
+alias kc='kubectl config use-context'
 alias kcont='kubectl config use-context'
-alias kpods='kubectl get pods'
-alias kjobs='kubectl get jobs'
-alias kdesc='kubectl describe pod'
+alias kcc='kubectl config current-context'
+
+kube_pods_grep() {
+    kubectl get pods | grep "$1"
+}
+alias kpods='kube_pods_grep'
+
+kube_jobs_grep() {
+    kubectl get jobs | grep "$1"
+}
+alias kjobs='kube_jobs_grep'
+
+kube_deployments_grep() {
+    kubectl get deployments | grep "$1"
+}
+alias kdeps='kube_deployments_grep'
+
+alias kdesc='kubectl describe'
+alias kdescp='kubectl describe pod'
+alias kdescj='kubectl describe job'
+alias kdescd='kubectl describe deployment'
+
 alias kprox='kubectl proxy &'
 alias killkprox="pkill -f 'kubectl proxy'"
 
