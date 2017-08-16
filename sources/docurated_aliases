@@ -255,8 +255,9 @@ alias resetdns='sudo killall -HUP mDNSResponder'
 
 # ===== REDSHIFT  ========
 connect_redshift() { psql -w -h ${1} -p 5439 -U analytics analytics }
-alias dred='connect_redshift demo-analytics.cndrmhyebfrr.us-east-1.redshift.amazonaws.com'
-alias rred='connect_redshift randf-analytics.cuviv7qimwij.us-west-2.redshift.amazonaws.com'
+alias redd='connect_redshift demo-analytics.cndrmhyebfrr.us-east-1.redshift.amazonaws.com'
+alias redp='connect_redshift production-analytics.cndrmhyebfrr.us-east-1.redshift.amazonaws.com'
+alias redr='connect_redshift randf-analytics.cuviv7qimwij.us-west-2.redshift.amazonaws.com'
 
 
 # ===== AIRFLOW ========
