@@ -101,10 +101,15 @@ kube_deployments_grep() {
 }
 alias kdeps='kube_deployments_grep'
 
-alias kdesc='kubectl describe'
-alias kdescp='kubectl describe pod'
-alias kdescj='kubectl describe job'
-alias kdescd='kubectl describe deployment'
+alias kdes='kubectl describe'
+alias kdesp='kubectl describe pod'
+alias kdesj='kubectl describe job'
+alias kdesd='kubectl describe deployment'
+
+alias kdel='kubectl delete'
+alias kdelp='kubectl delete pod'
+alias kdelj='kubectl delete job'
+alias kdeld='kubectl delete deployment'
 
 alias kprox='kubectl proxy &'
 alias killkprox="pkill -f 'kubectl proxy'"
@@ -125,9 +130,9 @@ kube_grep_connect() {
     kube_conn `kpodg $1`
 }
 alias ck="kube_grep_connect"
-alias ckairweb="ckg airflow-webserver"
-alias ckairwork="ckg airflow-worker"
-alias ckairsched="ckg airflow-scheduler"
+alias ckairweb="ck airflow-webserver"
+alias ckairwork="ck airflow-worker"
+alias ckairsched="ck airflow-scheduler"
 alias ckrails="$DOC_HOME/kubernetes/bin/console"
 
 kube_deploy() {
