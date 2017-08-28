@@ -141,6 +141,8 @@ kube_deploy() {
 }
 alias kdair='kube_deploy airflow'
 
+alias airversion='kdesp airflow-worker | grep version'
+
 alias stail='stern --tail 100 -t'
 
 
@@ -163,6 +165,7 @@ AIR_PG_PORT_PROD=5443
 REDIS_PORT_DEMO=6380
 
 ANA_PG_HOST_DEMO='analytics-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
+ANA_PG_HOST_DEMO_LB='pgbouncer.service.consul'
 ANA_PG_HOST_PROD='analytics-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
 ANA_PG_HOST_PROD_LB='pgbouncer.service.consul'
 ANA_PG_HOST_BIO='analytics-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com'
@@ -218,6 +221,9 @@ kill_port_forward() {
 alias killkport='kill_port_forward'
 
 # tunnel 5432 to a given db
+tunnelmaindemo() {
+    tunnel_port demo.pgbouncer.0 5432 $ANA_PG_HOST_DEMO_LB 5432 &
+}
 tunnelmainprod() {
     tunnel_port production.analytics.0 5432 $ANA_PG_HOST_PROD_LB 5432 &
 }
@@ -225,7 +231,7 @@ tunnelmainkube() {
     kubectl port-forward `kpodg 'analytics-postgres-\d'` 5432:6432 &
 }
 killtunnelmain() {
-    pkill -f '5432:' #tunnelmainprod
+    pkill -f '5432:' #tunnelmaindemo/tunnelmainprod
     pkill -f '5436:5432' #tunnelmainkube
 }
 
