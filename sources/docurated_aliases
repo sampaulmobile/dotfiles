@@ -239,6 +239,22 @@ killtunnelmain() {
 # create ~/.pgpass and then execute psql statement
 # https://stackoverflow.com/questions/43499313/executing-multiple-commands-or-from-a-shell-script-in-a-kubernetes-pod
 
+kube_connect_pg_demo() {
+    line="$ANA_PG_HOST_DEMO:5432:analytics:analyticsdemo:$ANA_PG_PASS_DEMO"
+    kc demo
+    kubectl exec `kpodg airflow-worker` -- bash -c "echo $line > ~/.pgpass && chmod 600 ~/.pgpass"
+    kubectl exec -it `kpodg airflow-worker` -- psql -w -h $ANA_PG_HOST_DEMO -p 5432 -U analyticsdemo analytics
+}
+alias dpqlana=kube_connect_pg_demo
+
+kube_connect_pg_prod() {
+    line="$ANA_PG_HOST_PROD:5432:analytics:analyticsproduction:1oEKdAbXVip5"
+    kc production
+    kubectl exec `kpodg airflow-worker` -- bash -c "echo $line > ~/.pgpass && chmod 600 ~/.pgpass"
+    kubectl exec -it `kpodg airflow-worker` -- psql -w -h $ANA_PG_HOST_PROD -p 5432 -U analyticsproduction analytics
+}
+alias ppqlana=kube_connect_pg_prod
+
 alias pql='psql -d docurated -p 5432'
 
 connect_pql() { psql -w -h localhost -p ${1} -U ${2} ${3} }
@@ -246,10 +262,10 @@ alias dpql='connect_pql $MAIN_PG_PORT_DEMO rails docurated'
 alias ppql='connect_pql $MAIN_PG_PORT_PROD rails docurated'
 alias bpql='connect_pql $MAIN_PG_PORT_BIO rails docurated'
 
-alias dpqlana='connect_pql $ANA_PG_PORT_DEMO analyticsdemo analytics'
-alias ppqlana='connect_pql $ANA_PG_PORT_PROD analyticsproduction analytics'
-alias ppqlanalb='connect_pql $ANA_PG_PORT_PROD_LB analyticsproduction analytics_web'
-alias bpqlana='connect_pql $ANA_PG_PORT_BIO analyticsbiomarin analytics'
+# alias dpqlana='connect_pql $ANA_PG_PORT_DEMO analyticsdemo analytics'
+# alias ppqlana='connect_pql $ANA_PG_PORT_PROD analyticsproduction analytics'
+# alias ppqlanalb='connect_pql $ANA_PG_PORT_PROD_LB analyticsproduction analytics_web'
+# alias bpqlana='connect_pql $ANA_PG_PORT_BIO analyticsbiomarin analytics'
 
 alias kpqlana='connect_pql $KUBE_PG_PORT analytics analytics'
 alias kpqlanalb='connect_pql $KUBE_PG_PORT_LB analytics analytics'
