@@ -235,6 +235,10 @@ killtunnelmain() {
     pkill -f '5436:5432' #tunnelmainkube
 }
 
+# need to use this for setting up psql for kube
+# create ~/.pgpass and then execute psql statement
+# https://stackoverflow.com/questions/43499313/executing-multiple-commands-or-from-a-shell-script-in-a-kubernetes-pod
+
 alias pql='psql -d docurated -p 5432'
 
 connect_pql() { psql -w -h localhost -p ${1} -U ${2} ${3} }
