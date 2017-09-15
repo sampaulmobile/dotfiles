@@ -36,9 +36,7 @@ alias huba='open $GITHUB_URL/activity'
 # ===== JENKINS ========
 alias jenk='open $JENKINS_URL/'
 alias jenkc='open $JENKINS_URL/job/Client%20Build/'
-alias jenks='open $JENKINS_URL/job/BuildTestDeployWebStage/'
-alias jenkw='open $JENKINS_URL/job/BuildTestDeployWebMaster/'
-alias jenke='open $JENKINS_URL/job/Events%20Build/'
+alias jenkw='open $JENKINS_URL/job/website/'
 alias jenka='open $JENKINS_URL/job/Activity/'
 
 
