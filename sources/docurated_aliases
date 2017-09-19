@@ -240,29 +240,29 @@ killtunnelmain() {
 # create ~/.pgpass and then execute psql statement
 # https://stackoverflow.com/questions/43499313/executing-multiple-commands-or-from-a-shell-script-in-a-kubernetes-pod
 
-kube_connect_pg_demo() {
+kube_connect_anal_pg_demo() {
     line="$ANA_PG_HOST_DEMO:5432:analytics:analyticsdemo:$ANA_PG_PASS_DEMO"
     kc demo
     kubectl exec `kpodg airflow-worker` -- bash -c "echo $line > ~/.pgpass && chmod 600 ~/.pgpass"
     kubectl exec -it `kpodg airflow-worker` -- psql -w -h $ANA_PG_HOST_DEMO -p 5432 -U analyticsdemo analytics
 }
-alias dpqlana=kube_connect_pg_demo
+alias dpqlana=kube_connect_anal_pg_demo
 
-kube_connect_pg_prod() {
+kube_connect_anal_pg_prod() {
     line="$ANA_PG_HOST_PROD:5432:analytics:analyticsproduction:$ANA_PG_PASS_PROD"
     kc production
     kubectl exec `kpodg airflow-worker` -- bash -c "echo $line > ~/.pgpass && chmod 600 ~/.pgpass"
     kubectl exec -it `kpodg airflow-worker` -- psql -w -h $ANA_PG_HOST_PROD -p 5432 -U analyticsproduction analytics
 }
-alias ppqlana=kube_connect_pg_prod
+alias ppqlana=kube_connect_anal_pg_prod
 
-kube_connect_pg_bio() {
+kube_connect_anal_pg_bio() {
     line="$ANA_PG_HOST_BIO:5432:analytics:analyticsbiomarin:$ANA_PG_PASS_BIO"
     kc biomarin
     kubectl exec `kpodg airflow-worker` -- bash -c "echo $line > ~/.pgpass && chmod 600 ~/.pgpass"
     kubectl exec -it `kpodg airflow-worker` -- psql -w -h $ANA_PG_HOST_BIO -p 5432 -U analyticsbiomarin analytics
 }
-alias bpqlana=kube_connect_pg_bio
+alias bpqlana=kube_connect_anal_pg_bio
 
 alias pql='psql -d docurated -p 5432'
 
@@ -270,11 +270,6 @@ connect_pql() { psql -w -h localhost -p ${1} -U ${2} ${3} }
 alias dpql='connect_pql $MAIN_PG_PORT_DEMO rails docurated'
 alias ppql='connect_pql $MAIN_PG_PORT_PROD rails docurated'
 alias bpql='connect_pql $MAIN_PG_PORT_BIO rails docurated'
-
-# alias dpqlana='connect_pql $ANA_PG_PORT_DEMO analyticsdemo analytics'
-# alias ppqlana='connect_pql $ANA_PG_PORT_PROD analyticsproduction analytics'
-# alias ppqlanalb='connect_pql $ANA_PG_PORT_PROD_LB analyticsproduction analytics_web'
-# alias bpqlana='connect_pql $ANA_PG_PORT_BIO analyticsbiomarin analytics'
 
 alias kpqlana='connect_pql $KUBE_PG_PORT analytics analytics'
 alias kpqlanalb='connect_pql $KUBE_PG_PORT_LB analytics analytics'
@@ -293,6 +288,7 @@ connect_redshift() { psql -w -h ${1} -p 5439 -U analytics analytics }
 alias redd='connect_redshift demo-analytics.cndrmhyebfrr.us-east-1.redshift.amazonaws.com'
 alias redp='connect_redshift production-analytics.cndrmhyebfrr.us-east-1.redshift.amazonaws.com'
 alias redr='connect_redshift randf-analytics.cuviv7qimwij.us-west-2.redshift.amazonaws.com'
+alias redb='connect_redshift biomarin-analytics.cuviv7qimwij.us-west-2.redshift.amazonaws.com'
 
 
 # ===== AIRFLOW ========

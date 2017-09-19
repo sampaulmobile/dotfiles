@@ -8,6 +8,11 @@ if [ -d ~/.pyenv ]; then
     PYTHON_PROMPT_="%{$FG[136]%}\$(pyenv version-name)%{$reset_color%}"
 fi
 
+# get the current python version with pyenv
+if [ -d ~/.kube ]; then
+    KUBE_PROMPT_="%{$FG[140]%}\$(kcc)%{$reset_color%}"
+fi
+
 if [ -e ~/.rvm/bin/rvm-prompt ] || [ -d ~/.pyenv ]; then
     VERS_PROMPT_="%{$fg_bold[blue]%}("
     if [ -e ~/.rvm/bin/rvm-prompt ]; then
@@ -15,6 +20,9 @@ if [ -e ~/.rvm/bin/rvm-prompt ] || [ -d ~/.pyenv ]; then
     fi
     if [ -d ~/.pyenv ]; then
         VERS_PROMPT_=$VERS_PROMPT_"%{$fg_bold[blue]%}|"$PYTHON_PROMPT_
+    fi
+    if [ -d ~/.kube ]; then
+        VERS_PROMPT_=$VERS_PROMPT_"%{$fg_bold[blue]%}|"$KUBE_PROMPT_
     fi
     VERS_PROMPT_=$VERS_PROMPT_"%{$fg_bold[blue]%})%{$reset_color%} "
 fi
