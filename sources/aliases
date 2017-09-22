@@ -3,6 +3,8 @@
 # ============ FILES =============
 alias todo='vim $NOT_PUBLIC/TODO.taskpaper'
 alias notes='cd $NOT_PUBLIC/notes && mvim'
+alias crypto='cd $NOT_PUBLIC/notes/crypto'
+alias cryp='cd $NOT_PUBLIC/notes/crypto'
 alias dotz='vim $LINKS/zshrc'
 alias dotv='vim $LINKS/vimrc'
 alias dotal='vim $SOURCES/aliases'

@@ -138,6 +138,7 @@ alias killkportspark="pkill -f 'port-forward airflow-worker'"
 
 kube_deploy() {
     cd $DOC_HOME/kubernetes
+    git pull
     bin/deploy $1 v$2
 }
 alias kdair='kube_deploy airflow'
