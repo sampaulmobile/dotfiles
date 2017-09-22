@@ -13,7 +13,7 @@ if [ -d ~/.kube ]; then
     KUBE_PROMPT_="%{$FG[140]%}\$(kcc)%{$reset_color%}"
 fi
 
-if [ -e ~/.rvm/bin/rvm-prompt ] || [ -d ~/.pyenv ]; then
+if [ -e ~/.rvm/bin/rvm-prompt ] || [ -d ~/.pyenv ] || [ -d ~/.kube ]; then
     VERS_PROMPT_="%{$fg_bold[blue]%}("
     if [ -e ~/.rvm/bin/rvm-prompt ]; then
         VERS_PROMPT_=$VERS_PROMPT_$RUBY_PROMPT_

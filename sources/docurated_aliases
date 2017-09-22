@@ -182,18 +182,18 @@ alias killtunneldemo="pkill -f 'nNT demo'"
 tunneldemo() {
     killtunneldemo
     tunnel_port demo.postgres.0 $MAIN_PG_PORT_DEMO localhost 5432 &
-    tunnel_port demo.pgbouncer.0 $ANA_PG_PORT_DEMO $ANA_PG_HOST_DEMO 5432 &
-    tunnel_port demo.pgbouncer.0 $AIR_PG_PORT_DEMO $AIR_PG_HOST_DEMO 5432 &
+    # tunnel_port demo.pgbouncer.0 $ANA_PG_PORT_DEMO $ANA_PG_HOST_DEMO 5432 &
+    # tunnel_port demo.pgbouncer.0 $AIR_PG_PORT_DEMO $AIR_PG_HOST_DEMO 5432 &
     tunnel_port demo.pgbouncer.0 $REDIS_PORT_DEMO main.redis.service.consul 6379 &
 }
 alias killtunnelprod="pkill -f 'nNT prod'"
 tunnelprod() {
     killtunnelprod
     tunnel_port production.postgres.0 $MAIN_PG_PORT_PROD localhost 5432 &
-    tunnel_port production.analytics.0 $ANA_PG_PORT_PROD $ANA_PG_HOST_PROD 5432 &
-    tunnel_port production.analytics.0 $ANA_PG_PORT_PROD_LB $ANA_PG_HOST_PROD_LB 5432 &
-    tunnel_port production.analytics.0 $AIR_PG_PORT_PROD $AIR_PG_HOST_PROD 5432 &
-    tunnel_port production.analytics.0 18080 localhost 18080 &
+    # tunnel_port production.analytics.0 $ANA_PG_PORT_PROD $ANA_PG_HOST_PROD 5432 &
+    # tunnel_port production.analytics.0 $ANA_PG_PORT_PROD_LB $ANA_PG_HOST_PROD_LB 5432 &
+    # tunnel_port production.analytics.0 $AIR_PG_PORT_PROD $AIR_PG_HOST_PROD 5432 &
+    # tunnel_port production.analytics.0 18080 localhost 18080 &
 }
 alias killtunnelbio="pkill -f 'nNT biomarin'"
 tunnelbio() {
@@ -363,6 +363,16 @@ airflow_tail() {
     tail -f -n 200 $AIRFLOW_HOME/logs/$1/$2/$latest
 }
 alias airtail='airflow_tail'
+
+# airflow_tail_kube() {
+#     log_dir=/var/pg_dumps/logs/$1/$2
+#     worker=`kpodg airflow-worker`
+#     latest=`kubectl exec -it $worker -- ls -Art $log_dir | tail -1 | awk 'NF>1{print $NF}'`
+#     echo $latest
+#     echo "$log_dir/$latest"
+#     kubectl exec -it `kpodg airflow-worker` -- tail -f -n 500 $log_dir/$latest*
+# }
+# alias kairtail='airflow_tail_kube'
 
 
 # ===== ARCANIST  ========
