@@ -242,10 +242,12 @@ killtunnelmain() {
 # https://stackoverflow.com/questions/43499313/executing-multiple-commands-or-from-a-shell-script-in-a-kubernetes-pod
 
 kube_connect_anal_pg_demo() {
-    line="$ANA_PG_HOST_DEMO:5432:analytics:analyticsdemo:$ANA_PG_PASS_DEMO"
+    # line="$ANA_PG_HOST_DEMO:5432:analytics:analyticsdemo:$ANA_PG_PASS_DEMO"
+    line="analytics-postgres:5432:analytics_web:analyticsdemo:$ANA_PG_PASS_DEMO"
     kc demo
     kubectl exec `kpodg airflow-worker` -- bash -c "echo $line > ~/.pgpass && chmod 600 ~/.pgpass"
-    kubectl exec -it `kpodg airflow-worker` -- psql -w -h $ANA_PG_HOST_DEMO -p 5432 -U analyticsdemo analytics
+    # kubectl exec -it `kpodg airflow-worker` -- psql -w -h $ANA_PG_HOST_DEMO -p 5432 -U analyticsdemo analytics_web
+    kubectl exec -it `kpodg airflow-worker` -- psql -w -h analytics-postgres -p 5432 -U analyticsdemo analytics_web
 }
 alias dpqlana=kube_connect_anal_pg_demo
 
