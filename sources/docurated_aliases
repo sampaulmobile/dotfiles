@@ -185,7 +185,7 @@ tunneldemo() {
     tunnel_port demo.postgres.0 $MAIN_PG_PORT_DEMO localhost 5432 &
     # tunnel_port demo.pgbouncer.0 $ANA_PG_PORT_DEMO $ANA_PG_HOST_DEMO 5432 &
     # tunnel_port demo.pgbouncer.0 $AIR_PG_PORT_DEMO $AIR_PG_HOST_DEMO 5432 &
-    tunnel_port demo.pgbouncer.0 $REDIS_PORT_DEMO main.redis.service.consul 6379 &
+    # tunnel_port demo.pgbouncer.0 $REDIS_PORT_DEMO main.redis.service.consul 6379 &
 }
 alias killtunnelprod="pkill -f 'nNT prod'"
 tunnelprod() {
