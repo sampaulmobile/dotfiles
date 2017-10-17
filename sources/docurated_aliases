@@ -163,6 +163,8 @@ ANA_PG_PORT_BIO=5441
 
 AIR_PG_PORT_DEMO=5442
 AIR_PG_PORT_PROD=5443
+AIR_PG_PORT_BIO=5445
+AIR_PG_PORT_RANDF=5446
 
 REDIS_PORT_DEMO=6380
 
@@ -285,6 +287,38 @@ alias cadmin='sshconnect production admin'
 # reset the stupid mac osx DNS for tunnelblick to work
 # alias resetdns='sudo launchctl unload -w /System/Library/LaunchDaemons/com.apple.mDNSResponder.plist && sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.mDNSResponder.plist'
 alias resetdns='sudo killall -HUP mDNSResponder'
+
+get_dag_stats() {
+    kc demo
+    kport airflow-postgres-db $AIR_PG_PORT_DEMO 5432
+    kc production
+    kport airflow-postgres-db $AIR_PG_PORT_PROD 5432
+    kc biomarin
+    kport airflow-postgres-db $AIR_PG_PORT_BIO 5432
+    kc randf
+    kport airflow-postgres-db $AIR_PG_PORT_RANDF 5432
+    sleep 3
+
+    stat="$DOC_HOME/activity/utils/dag_status.sql"
+
+    echo ""
+    echo ""
+    echo "DEMO:"
+    psql -h localhost -p $AIR_PG_PORT_DEMO -U airflow airflow -f $stat
+    echo ""
+    echo "PROD:"
+    psql -h localhost -p $AIR_PG_PORT_PROD -U airflow airflow -f $stat
+    echo ""
+    echo "BIO:"
+    psql -h localhost -p $AIR_PG_PORT_BIO -U airflow airflow -f $stat
+    echo ""
+    echo "RANDF:"
+    psql -h localhost -p $AIR_PG_PORT_RANDF -U airflow airflow -f $stat
+
+    killkport
+}
+alias dag_stats='get_dag_stats'
+
 
 # ===== REDSHIFT  ========
 connect_redshift() { psql -w -h ${1} -p 5439 -U analytics analytics }
