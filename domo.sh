@@ -17,12 +17,17 @@ brew tap caskroom/cask
 
 brew cask install google-chrome
 brew cask install iterm2
-brew cask install witch
+# brew cask install witch
 brew cask install vlc
 
+cd /Applications
+
+git clone https://github.com/CouchPotato/CouchPotatoServer.git /Applications/CouchPotatoServer
+
+# brew cask install couchpotato
 brew cask install sabnzbd
-brew cask install couchpotato
 brew cask install sonarr
+brew cask install radarr
 brew cask install plex-media-server
 
 # CONFIGURATION
