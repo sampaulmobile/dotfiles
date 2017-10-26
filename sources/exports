@@ -15,6 +15,11 @@ elif [ -d /opt/airflow ]; then
     export AIRFLOW_HOME=/opt/airflow
 fi
 
+if [ -d /usr/local/opt/google-cloud-sdk ]; then
+    source /usr/local/opt/google-cloud-sdk/completion.zsh.inc
+    source /usr/local/opt/google-cloud-sdk/path.zsh.inc
+fi
+
 export PYTHONPATH=/Users/sampaul/Development/Docurated/activity/analytics
 
 # export DOCKER_HOST=tcp://192.168.59.103:2376
