@@ -1,7 +1,7 @@
 # ============ Aliases =============
 
 # ============ FILES =============
-alias todo='mvim $NOT_PUBLIC/todos/personal.taskpaper'
+alias todo='mvim $NOT_PUBLIC/TODOS/personal.taskpaper'
 alias notes='cd $NOT_PUBLIC/notes && mvim'
 alias crypto='cd $NOT_PUBLIC/notes/crypto'
 alias cryp='cd $NOT_PUBLIC/notes/crypto'
