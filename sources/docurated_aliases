@@ -133,8 +133,8 @@ alias ckairwork="ck airflow-worker"
 alias ckairsched="ck airflow-scheduler"
 alias ckrails="$DOC_HOME/kubernetes/bin/console"
 
-alias kportspark="kport `kpodg 'airflow-worker'` 4040 4040"
-alias killkportspark="pkill -f 'port-forward airflow-worker'"
+# alias kportspark="kport `kpodg 'airflow-worker'` 4040 4040"
+# alias killkportspark="pkill -f 'port-forward airflow-worker'"
 
 kube_deploy() {
     cd $DOC_HOME/kubernetes
