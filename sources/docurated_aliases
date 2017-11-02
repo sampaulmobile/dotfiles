@@ -248,16 +248,15 @@ kube_connect_anal_pg_demo() {
     line="analytics-postgres:5432:analytics_web:analyticsdemo:$ANA_PG_PASS_DEMO"
     kc demo
     kubectl exec `kpodg airflow-worker` -- bash -c "echo $line > ~/.pgpass && chmod 600 ~/.pgpass"
-    # kubectl exec -it `kpodg airflow-worker` -- psql -w -h $ANA_PG_HOST_DEMO -p 5432 -U analyticsdemo analytics_web
     kubectl exec -it `kpodg airflow-worker` -- psql -w -h analytics-postgres -p 5432 -U analyticsdemo analytics_web
 }
 alias dpqlana=kube_connect_anal_pg_demo
 
 kube_connect_anal_pg_prod() {
-    line="$ANA_PG_HOST_PROD:5432:analytics:analyticsproduction:$ANA_PG_PASS_PROD"
+    line="analytics-postgres:5432:analytics_web:analyticsproduction:$ANA_PG_PASS_PROD"
     kc production
     kubectl exec `kpodg airflow-worker` -- bash -c "echo $line > ~/.pgpass && chmod 600 ~/.pgpass"
-    kubectl exec -it `kpodg airflow-worker` -- psql -w -h $ANA_PG_HOST_PROD -p 5432 -U analyticsproduction analytics
+    kubectl exec -it `kpodg airflow-worker` -- psql -w -h analytics-postgres -p 5432 -U analyticsproduction analytics_web
 }
 alias ppqlana=kube_connect_anal_pg_prod
 
