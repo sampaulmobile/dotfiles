@@ -1,15 +1,40 @@
 # ===== HISTORY =====
 
+
 HISTFILE=$HOME/.zsh_history
 if [ -d "$HOME/dropbox/!public" ]; then
-    HISTFILE=$HOME/dropbox/!public/.zsh_history;
+    hist_dir="${HOME}/dropbox/!public/history"
+    [ ! -d $hist_dir ] && mkdir $hist_dir
+
+    HOSTNAME_SHORT=$(hostname -s)
+    HISTFILE="${hist_dir}/$(date -u +%Y-%m-%d.%H.%M.%S)_${HOSTNAME_SHORT}_$$"
+    # HISTFILE=$HOME/dropbox/!public/.zsh_history;
 fi
+
+# __fzf_history__() {
+#     sift --no-color -e "^[^#]" --files "_${HOSTNAME_SHORT}_" \
+#     -N --no-filename $HOME/Sync/Dotfiles/history \
+#     | sort | uniq -c | sort \
+#     | $(__fzfcmd) +s --tac +m -n1..,.. --tiebreak=index --toggle-sort=ctrl-r \
+#     | sed "s/ [0-9] *//"
+# }
+
+rg -e "^[^#]" --glob "_${HOSTNAME_SHORT}_" -N --no-filename $NOT_PUBLIC/history/* | sort | uniq -c | sort
+
+__fzf_history__() {
+    rg -e "^[^#]" --glob "_${HOSTNAME_SHORT}_" \
+    -N --no-filename $NOT_PUBLIC/history/* \
+    | sort | uniq -c | sort \
+    | $(__fzfcmd) +s --tac +m -n1..,.. --tiebreak=index --toggle-sort=ctrl-r \
+    | sed "s/ [0-9] *//"
+}
+
 
 HISTSIZE=100000
 SAVEHIST=100000
 
 # Overwrite ZSH's history to show timestamps
-alias history='fc -i -l 1'
+# alias history='fc -i -l 1'
 
 # Most of these are covered by ZSH already
 setopt APPEND_HISTORY
