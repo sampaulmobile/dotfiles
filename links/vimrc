@@ -99,11 +99,15 @@ nnoremap g# g#zz
 nnoremap <esc> :noh<return><esc>
 nnoremap <esc>^[ <esc>^[
 
-syntax on "turn on syntax highlighting
+" syntax on "turn on syntax highlighting
 
 " =============================  INIT VUNDLES  ==============================
-if filereadable(expand("~/.vim/vundles.vim"))
-  source ~/.vim/vundles.vim
+" if filereadable(expand("~/.vim/vundles.vim"))
+"   source ~/.vim/vundles.vim
+" endif
+
+if filereadable(expand("~/.vim/plugged.vim"))
+  source ~/.vim/plugged.vim
 endif
 
 
@@ -120,14 +124,16 @@ map T :NERDTreeToggle<CR>
 let g:NERDTreeWinSize = 20
 let NERDTreeIgnore = ['\.pyc$','\.pyo$', '\.db$', '__pycache__']
 
-"TagBar toggle set to leader + b
-" let g:tagbar_usearrows = 1
-" nnoremap <leader>b :TagbarToggle<CR>
+if executable('rg')
+  set grepprg=rg\ --color=never
+  let g:ctrlp_user_command = 'rg %s --files --color=never --glob ""'
+  let g:ctrlp_use_caching = 0
+endif
 
-"CtrlP toggle set to leader + t
+" CtrlP toggle set to leader + t
 map <leader>t :CtrlP<CR>
 
-"leader + shift + t => reload CtrlP"
+" leader + shift + t => reload CtrlP
 nnoremap <silent> <leader>T :ClearCtrlPCache<cr>\|:CtrlP<cr>
 let g:ctrlp_custom_ignore = {
   \ 'file': '\v\.(pyc|pyo)$',
@@ -141,33 +147,92 @@ map <leader>/ <c-_><c-_>
 "Gundo - GUI Undo Tree (visualized)
 map <leader>u :GundoToggle<CR>
 
-"Yankring map display to leader y
-nnoremap <silent> <leader>y :YRShow<CR>
-
 " python folding - preview docstring in fold text
 let g:SimpylFold_docstring_preview = 1
-" let g:ycm_autoclose_preview_window_after_completion = 1
-let g:ycm_autoclose_preview_window_after_insertion = 1
 
 " set YouCompleteMe goto definition
-map <leader>g  :YcmCompleter GoToDefinitionElseDeclaration<CR>
+" map <leader>g  :YcmCompleter GoToDefinitionElseDeclaration<CR>
+" let g:ycm_autoclose_preview_window_after_completion = 1
+" let g:ycm_autoclose_preview_window_after_insertion = 1
 
 " indent guide - minimum width, subtle highlighting
 let g:indent_guides_guide_size = 1
 let g:indent_guides_color_change_percent = 3
 let g:indent_guides_enable_on_vim_startup = 1
 
-"Remapping yankring n/p to meta key
-" let g:yankring_replace_n_pkey = '<m-p>'
-" let g:yankring_replace_n_nkey = '<m-n>'
-
-"change yankring directory
-"let g:yankring_history_dir = '/Users/sampaul/dropbox/!public'
+" FZF (replaces Ctrl-P, FuzzyFinder and Command-T)
+" set rtp+=/usr/local/opt/fzf
+" set rtp+=~/.fzf
+" nmap ; :Buffers<CR>
+" nmap <Leader>r :Tags<CR>
+" nmap <Leader>t :Files<CR>
+" nmap <Leader>a :Ag<CR>
 
 "Mappings for fugitive
 map <leader>gb :Gblame<CR>
 map <leader>gh :Gbrowse<CR>
 
+" GitGutter
+let g:gitgutter_sign_added = '∙'
+let g:gitgutter_sign_modified = '∙'
+let g:gitgutter_sign_removed = '∙'
+let g:gitgutter_sign_modified_removed = '∙'
+
+" ALE
+let g:ale_sign_warning = '▲'
+let g:ale_sign_error = '✗'
+let g:ale_echo_msg_format = '[%linter%] %s [%severity%]'
+highlight link ALEWarningSign String
+highlight link ALEErrorSign Title
+
+" Lightline
+let g:lightline = {
+\ 'colorscheme': 'wombat',
+\ 'active': {
+\   'left': [['mode', 'paste'], ['filename', 'modified']],
+\   'right': [['lineinfo'], ['percent'], ['readonly', 'linter_warnings', 'linter_errors', 'linter_ok']]
+\ },
+\ 'component_expand': {
+\   'linter_warnings': 'LightlineLinterWarnings',
+\   'linter_errors': 'LightlineLinterErrors',
+\   'linter_ok': 'LightlineLinterOK'
+\ },
+\ 'component_type': {
+\   'readonly': 'error',
+\   'linter_warnings': 'warning',
+\   'linter_errors': 'error'
+\ },
+\ }
+
+function! LightlineLinterWarnings() abort
+  let l:counts = ale#statusline#Count(bufnr(''))
+  let l:all_errors = l:counts.error + l:counts.style_error
+  let l:all_non_errors = l:counts.total - l:all_errors
+  return l:counts.total == 0 ? '' : printf('%d ◆', all_non_errors)
+endfunction
+
+function! LightlineLinterErrors() abort
+  let l:counts = ale#statusline#Count(bufnr(''))
+  let l:all_errors = l:counts.error + l:counts.style_error
+  let l:all_non_errors = l:counts.total - l:all_errors
+  return l:counts.total == 0 ? '' : printf('%d ✗', all_errors)
+endfunction
+
+function! LightlineLinterOK() abort
+  let l:counts = ale#statusline#Count(bufnr(''))
+  let l:all_errors = l:counts.error + l:counts.style_error
+  let l:all_non_errors = l:counts.total - l:all_errors
+  return l:counts.total == 0 ? '✓ ' : ''
+endfunction
+
+autocmd User ALELint call s:MaybeUpdateLightline()
+
+" Update and show lightline but only if it's visible (e.g., not in Goyo)
+function! s:MaybeUpdateLightline()
+  if exists('#lightline')
+    call lightline#update()
+  end
+endfunction
 
 "Need to set coloscheme after vundles are loaded
 " colorscheme badwolf

@@ -11,25 +11,6 @@ if [ -d "$HOME/dropbox/!public" ]; then
     # HISTFILE=$HOME/dropbox/!public/.zsh_history;
 fi
 
-# __fzf_history__() {
-#     sift --no-color -e "^[^#]" --files "_${HOSTNAME_SHORT}_" \
-#     -N --no-filename $HOME/Sync/Dotfiles/history \
-#     | sort | uniq -c | sort \
-#     | $(__fzfcmd) +s --tac +m -n1..,.. --tiebreak=index --toggle-sort=ctrl-r \
-#     | sed "s/ [0-9] *//"
-# }
-
-rg -e "^[^#]" --glob "_${HOSTNAME_SHORT}_" -N --no-filename $NOT_PUBLIC/history/* | sort | uniq -c | sort
-
-__fzf_history__() {
-    rg -e "^[^#]" --glob "_${HOSTNAME_SHORT}_" \
-    -N --no-filename $NOT_PUBLIC/history/* \
-    | sort | uniq -c | sort \
-    | $(__fzfcmd) +s --tac +m -n1..,.. --tiebreak=index --toggle-sort=ctrl-r \
-    | sed "s/ [0-9] *//"
-}
-
-
 HISTSIZE=100000
 SAVEHIST=100000
 

@@ -33,6 +33,11 @@ mkdir -p ~/.vim
 mv ~/.vim/vundles.vim $deldir
 ln -s $dir/vundles.vim ~/.vim/vundles.vim
 
+echo "Linking plugged..."
+mkdir -p ~/.vim
+mv ~/.vim/plugged.vim $deldir
+ln -s $dir/plugged.vim ~/.vim/plugged.vim
+
 if [ -d ~/.oh-my-zsh ]; then
     echo "Linking in custom theme (sampaul)..."
     mv ~/.oh-my-zsh/custom/sampaul.zsh-theme $deldir

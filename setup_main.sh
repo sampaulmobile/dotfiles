@@ -24,14 +24,13 @@ brew install macvim
 brew install the_silver_searcher
 brew install awscli
 brew install pyenv
-brew install postgresql
+brew install ripgrep
+
+pip install flake8
 
 brew install fzf
 $(brew --prefix)/opt/fzf/install
 
-brew install ripgrep
-
-brew services start postgresql
 
 echo "Tapping caskroom..."
 brew tap caskroom/cask
@@ -67,11 +66,6 @@ if [ ! -f $HOME/.vim/bundle/YouCompleteMe/third_party/ycmd/ycm_core.so ]; then
     cd $HOME/.vim/bundle/YouCompleteMe
     ./install.py
     cd
-fi
-
-if [ ! -f /usr/local/bin/psql ]; then
-    echo "Setting up postgres..."
-    createuser $USER -P -s
 fi
 
 if [ ! -d $HOME/.oh-my-zsh ]; then
