@@ -34,7 +34,7 @@ alias egrep='egrep --colour=auto'
 #alias rmv='rsync -v --progress --remove-source-files'
 alias which='which -a'
 
-alias g='ag'
+alias g='rg'
 alias hist="rg -N '' $NOT_PUBLIC/history/*"
 hist_g() {
     export LC_CTYPE=C 
