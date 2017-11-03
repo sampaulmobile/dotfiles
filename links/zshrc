@@ -52,12 +52,19 @@ bindkey '^h' backward-delete-char
 
 set -o vi
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
-export FZF_DEFAULT_OPTS='--height 20% --reverse'
+export FZF_DEFAULT_OPTS='--height 40% --reverse'
 
-# __fzf_history__() {
-#     rg -e "^[^#]" -N --no-filename $NOT_PUBLIC/history/* \
-#     | sed -E 's/^\: [0-9]+\:[0-9]\;//g' | sort | uniq -c | sort \
-#     | $(__fzfcmd) +s --tac +m -n1..,.. --tiebreak=index --toggle-sort=ctrl-r \
-#     | sed "s/ [0-9] *//"
-# }
+function history-fzf() {
+  export LC_CTYPE=C 
+  export LANG=C
+  BUFFER=$(rg -e "^[^#]" -N --no-filename $NOT_PUBLIC/history/* |
+    sed -E 's/^\: [0-9]+\:[0-9]\;//g' | sort | uniq -c | sort |
+    $(__fzfcmd) +s --tac +m -n1..,.. --tiebreak=index --toggle-sort=ctrl-r |
+    sed "s/ [0-9] *//" | sed "s/[0-9] *//" | sed "s/^ //")
+  CURSOR=$#BUFFER
+
+  zle reset-prompt
+}
+zle -N history-fzf
+bindkey '^r' history-fzf
 

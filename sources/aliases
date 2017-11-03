@@ -36,7 +36,9 @@ alias which='which -a'
 
 alias g='ag'
 alias hist='history'
+alias h='hist'
 alias histg='history | grep'
+alias hg='histg'
 
 psgrep() { ps aux | grep $1 | grep -v grep }
 alias psg=psgrep

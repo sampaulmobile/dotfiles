@@ -8,14 +8,14 @@ if [ -d "$HOME/dropbox/!public" ]; then
 
     HOSTNAME_SHORT=$(hostname -s)
     HISTFILE="${hist_dir}/$(date -u +%Y-%m-%d.%H.%M.%S)_${HOSTNAME_SHORT}_$$"
-    # HISTFILE=$HOME/dropbox/!public/.zsh_history;
+    # HISTFILE=$HOME/dropbox/!public/.zsh_history
 fi
 
 HISTSIZE=100000
 SAVEHIST=100000
 
 # Overwrite ZSH's history to show timestamps
-# alias history='fc -i -l 1'
+alias history='fc -i -l 1'
 
 # Most of these are covered by ZSH already
 setopt APPEND_HISTORY
@@ -23,9 +23,9 @@ setopt APPEND_HISTORY
 # setopt INC_APPEND_HISTORY
 
 # dont save duplicates
-setopt HIST_IGNORE_DUPS
-setopt HIST_IGNORE_ALL_DUPS
-setopt HIST_REDUCE_BLANKS
+# setopt HIST_IGNORE_DUPS
+# setopt HIST_IGNORE_ALL_DUPS
+# setopt HIST_REDUCE_BLANKS
 
 # If a line starts with a space, don't save it.
 setopt HIST_IGNORE_SPACE
@@ -36,7 +36,60 @@ setopt HIST_VERIFY
 
 # Save the time and how long a command ran
 setopt EXTENDED_HISTORY
-setopt HIST_SAVE_NO_DUPS
-setopt HIST_EXPIRE_DUPS_FIRST
-setopt HIST_FIND_NO_DUPS
+# setopt HIST_SAVE_NO_DUPS
+# setopt HIST_EXPIRE_DUPS_FIRST
+# setopt HIST_FIND_NO_DUPS
+
+# h() {
+#     rg -e "^[^#]" -N --no-filename $NOT_PUBLIC/history/* \
+#     | sed -E 's/^\: [0-9]+\:[0-9]\;//g' | sort | uniq -c | sort \
+#     | $(__fzfcmd) +s --tac +m -n1..,.. --tiebreak=index --toggle-sort=ctrl-r \
+#     | sed "s/ [0-9] *//"
+# }
+
+# fzf-history-widget() {
+#   local selected num
+#   setopt localoptions noglobsubst noposixbuiltins pipefail 2> /dev/null
+#   selected=( $(rg -e "^[^#]" -N --no-filename $NOT_PUBLIC/history/* |
+#     sed -E 's/^\: [0-9]+\:[0-9]\;//g' | sort | uniq -c | sort |
+#     $(__fzfcmd) +s --tac +m -n1..,.. --tiebreak=index --toggle-sort=ctrl-r |
+#     sed "s/ [0-9] *//") )
+#     # FZF_DEFAULT_OPTS="--height ${FZF_TMUX_HEIGHT:-40%} $FZF_DEFAULT_OPTS -n2..,.. --tiebreak=index --bind=ctrl-r:toggle-sort $FZF_CTRL_R_OPTS --query=${(qqq)LBUFFER} +m" $(__fzfcmd)) )
+#   local ret=$?
+#   echo $selected
+#   echo $ret
+#   if [ -n "$selected" ]; then
+#     num=$selected[1]
+#     echo $num
+#     if [ -n "$num" ]; then
+#       zle vi-fetch-history -n $num
+#     fi
+#   fi
+#   zle redisplay
+#   typeset -f zle-line-init >/dev/null && zle zle-line-init
+#   return $ret
+# }
+# zle     -N   fzf-history-widget
+# bindkey '^R' fzf-history-widget
+
+# fzf-history-widget() {
+#   local selected restore_no_bang_hist
+#   # if selected=$(fc -l 1 | $(__fzfcmd) +s --tac +m -n2..,.. --tiebreak=index --toggle-sort=ctrl-r -q "$LBUFFER"); then
+#   if selected=$(rg -e "^[^#]" -N --no-filename $NOT_PUBLIC/history/* |
+#         sed -E 's/^\: [0-9]+\:[0-9]\;//g' | sort | uniq -c | sort |
+#         $(__fzfcmd) +s --tac +m -n1..,.. --tiebreak=index --toggle-sort=ctrl-r -q "$LBUFFER"); then
+#         # sed "s/ [0-9] *//")
+#     num=$(echo "$selected" | head -1 | awk '{print $1}' | sed 's/[^0-9]//g')
+#     LBUFFER=!$num
+#     if setopt | grep nobanghist > /dev/null; then
+#       restore_no_bang_hist=1
+#       unsetopt no_bang_hist
+#     fi
+#     zle expand-history
+#     [ -n "$restore_no_bang_hist" ] && setopt no_bang_hist
+#   fi
+#   zle redisplay
+# }
+# zle     -N   fzf-history-widget
+# bindkey '^R' fzf-history-widget
 
