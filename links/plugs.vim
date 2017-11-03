@@ -78,6 +78,10 @@ Plug 'itchyny/lightline.vim'
 " Fuzzy file, buffer, mru, tag, etc finder
 Plug 'kien/ctrlp.vim'
 
+" FZF
+Plug 'junegunn/fzf', { 'dir': '~/.fzf', 'do': './install --all' }
+Plug 'junegunn/fzf.vim'
+
 " 'distraction free writing in vim'
 " Plug 'junegunn/goyo.vim'
 
