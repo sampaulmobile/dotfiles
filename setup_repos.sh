@@ -57,6 +57,10 @@ OrganizationsSolrCluster.create(
 EOL
     bundle exec rails runner "eval(File.read 'temp.rb')"
     rm temp.rb
+
+    sudo -- sh -c 'echo "" >> /etc/hosts'
+    sudo -- sh -c 'echo "#dev for docurated" >> /etc/hosts'
+    sudo -- sh -c 'echo "127.0.0.1       development.docurated.com" >> /etc/hosts'
 fi
 ln -Fs $NOT_PUBLIC/links/database.yml $DOC_PATH/website/rails/config/database.yml
 ln -Fs $NOT_PUBLIC/links/siteconfig.yml $DOC_PATH/website/rails/config/siteconfig.yml

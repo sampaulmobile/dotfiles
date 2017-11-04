@@ -3,9 +3,6 @@
 # accept xcode command line tools terms
 xcode-select --install
 
-# add SSH keys somewhere
-# ssh-add them too
-
 # link (some) dotfiles
 $HOME/dotfiles/bin/links.sh
 
@@ -24,6 +21,9 @@ $HOME/dotfiles/bin/hosts.sh
 # restart to install rvm
 $HOME/dotfiles/bin/rvm.sh
 
-# setup 1password, dropbox, link rest of dotfiles
+# setup 1password/dropbox, then link rest of dotfiles
 # $HOME/dotfiles/links.sh
+
+# ssh-add SSH keys (if applicable)
+# ssh-add -K ~/.ssh/id_rsa_air
 
