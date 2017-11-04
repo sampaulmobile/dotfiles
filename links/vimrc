@@ -99,6 +99,11 @@ nnoremap g# g#zz
 nnoremap <esc> :noh<return><esc>
 nnoremap <esc>^[ <esc>^[
 
+nmap <Leader>vs :vsplit<CR>
+nmap <Leader>s :split<CR>
+nmap <Leader>c :close<CR>
+nmap <Leader>wq :wq<CR>
+
 " syntax on "turn on syntax highlighting
 
 " =============================  INIT VUNDLES  ==============================
@@ -201,6 +206,7 @@ let g:gitgutter_eager = 0
 let g:ale_sign_warning = '▲'
 let g:ale_sign_error = '✗'
 let g:ale_echo_msg_format = '[%linter%] %s [%severity%]'
+let g:ale_lint_on_text_changed = 'never'
 highlight link ALEWarningSign String
 highlight link ALEErrorSign Title
 

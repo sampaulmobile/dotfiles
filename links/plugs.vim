@@ -63,6 +63,9 @@ Plug 'scrooloose/nerdtree'
 " Show git diff in vim 'gutter'
 Plug 'airblade/vim-gitgutter'
 
+" Add git status indicators to NERDTree
+Plug 'Xuyuanp/nerdtree-git-plugin'
+
 " Git wrapper - :gblame, :gbrowse, etc.
 Plug 'tpope/vim-fugitive' "| Plug 'tpope/vim-rhubarb'
 

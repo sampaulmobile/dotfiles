@@ -7,7 +7,7 @@ xcode-select --install
 # ssh-add them too
 
 # link (some) dotfiles
-$HOME/dotfiles/bin/links.sho
+$HOME/dotfiles/bin/links.sh
 
 # change macOS configs/defaults
 $HOME/dotfiles/bin/macos.sh
