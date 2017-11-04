@@ -2,10 +2,7 @@ call plug#begin('~/.vim/plugs')
 
 " ======================== Syntax =======================
 
-" A collection of language packs for Vim.
-Plug 'sheerun/vim-polyglot'
-
-" Asyncrhronous lint engine
+" Asynchronous lint engine
 Plug 'w0rp/ale'
 
 " Syntax highlighting for salt
@@ -13,6 +10,12 @@ Plug 'saltstack/salt-vim'
 
 " Taskpaper (todo list) helpers/syntax
 Plug 'davidoc/taskpaper.vim'
+
+" Extra highlighting of typedefs, enumerations etc (based on ctags)
+" Plug 'vim-scripts/TagHighlight'
+
+" A collection of language packs for Vim.
+" Plug 'sheerun/vim-polyglot'
 
 " ======================== Text Editing =======================
 
@@ -42,9 +45,6 @@ Plug 'tmhedberg/SimpylFold'
 
 " Text filtering and alignment
 Plug 'godlygeek/tabular'
-
-" Quoting/parenthesizing made simple
-" Plug 'tpope/vim-surround'
 
 " Autocomplete stuff
 " Plug 'Valloric/YouCompleteMe'
