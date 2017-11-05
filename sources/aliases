@@ -37,10 +37,8 @@ alias which='which -a'
 alias g='rg --follow --smart-case'
 alias hist="rg -N '' $NOT_PUBLIC/history/*"
 hist_g() {
-    export LC_CTYPE=C 
-    export LANG=C
     rg -e "^[^#]" -N --no-filename $NOT_PUBLIC/history/* |
-    sed -E 's/^\: [0-9]+\:[0-9]\;//g' | grep "$1"
+    LC_ALL='C' sed -E 's/^\: [0-9]+\:[0-9]\;//g' | grep "$1"
 }
 alias h='hist_g'
 
