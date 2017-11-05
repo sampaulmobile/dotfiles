@@ -11,11 +11,11 @@ Plug 'saltstack/salt-vim'
 " Taskpaper (todo list) helpers/syntax
 Plug 'davidoc/taskpaper.vim'
 
-" Extra highlighting of typedefs, enumerations etc (based on ctags)
-" Plug 'vim-scripts/TagHighlight'
-
 " A collection of language packs for Vim.
 Plug 'sheerun/vim-polyglot'
+
+" Extra highlighting of typedefs, enumerations etc (based on ctags)
+" Plug 'vim-scripts/TagHighlight'
 
 " ======================== Text Editing =======================
 
@@ -47,7 +47,7 @@ Plug 'tmhedberg/SimpylFold'
 Plug 'godlygeek/tabular'
 
 " Autocomplete stuff
-" Plug 'Valloric/YouCompleteMe'
+Plug 'Valloric/YouCompleteMe'
 
 " Multiple Plug commands can be written in a single line using | separators
 " Plug 'SirVer/ultisnips' | Plug 'honza/vim-snippets'

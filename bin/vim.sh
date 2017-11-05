@@ -6,10 +6,10 @@ fi
 
 cd $HOME && vim +PlugUpgrade +PlugUpdate +qall
 
-# if [ ! -f $HOME/.vim/bundle/YouCompleteMe/third_party/ycmd/ycm_core.so ]; then
-#     echo "Building/installing YouCompleteMe..."
-#     cd $HOME/.vim/bundle/YouCompleteMe
-#     ./install.py
-#     cd
-# fi
+if [ ! -f $HOME/.vim/plugs/YouCompleteMe/third_party/ycmd/ycm_core.so ]; then
+    echo "Building/installing YouCompleteMe..."
+    cd $HOME/.vim/plugs/YouCompleteMe
+    ./install.py
+    cd
+fi
 
