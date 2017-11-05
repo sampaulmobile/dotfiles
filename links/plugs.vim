@@ -15,7 +15,7 @@ Plug 'davidoc/taskpaper.vim'
 " Plug 'vim-scripts/TagHighlight'
 
 " A collection of language packs for Vim.
-" Plug 'sheerun/vim-polyglot'
+Plug 'sheerun/vim-polyglot'
 
 " ======================== Text Editing =======================
 

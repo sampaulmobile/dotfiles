@@ -33,6 +33,18 @@ set autochdir " always set pwd to path of current file
 "set smartindent
 "set smarttab
 
+" syntax on "turn on syntax highlighting
+
+" =============================  INIT VUNDLES  ==============================
+" if filereadable(expand("~/.vim/vundles.vim"))
+"   source ~/.vim/vundles.vim
+" endif
+
+if filereadable(expand("~/.vim/plugs.vim"))
+  source ~/.vim/plugs.vim
+endif
+
+
 "highlight characters past 80 columns
 augroup vimrc_autocmds
   autocmd BufEnter * highlight OverLength ctermbg=darkgrey guibg=#592929
@@ -103,17 +115,6 @@ nmap <Leader>vs :vsplit<CR>
 nmap <Leader>s :split<CR>
 nmap <Leader>c :close<CR>
 nmap <Leader>wq :wq<CR>
-
-" syntax on "turn on syntax highlighting
-
-" =============================  INIT VUNDLES  ==============================
-" if filereadable(expand("~/.vim/vundles.vim"))
-"   source ~/.vim/vundles.vim
-" endif
-
-if filereadable(expand("~/.vim/plugs.vim"))
-  source ~/.vim/plugs.vim
-endif
 
 
 " ========================  VUNDLE/PLUGIN MAPPINGS  =========================
@@ -276,5 +277,4 @@ endfunction
 
 autocmd! User GoyoEnter nested call <SID>goyo_enter()
 autocmd! User GoyoLeave nested call <SID>goyo_leave()
-
 
