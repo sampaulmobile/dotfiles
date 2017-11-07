@@ -28,11 +28,6 @@ mkdir -p ~/.ssh
 mv ~/.ssh/config $deldir
 ln -s $dir/ssh_config ~/.ssh/config
 
-echo "Linking vundles..."
-mkdir -p ~/.vim
-mv ~/.vim/vundles.vim $deldir
-ln -s $dir/vundles.vim ~/.vim/vundles.vim
-
 echo "Linking plugs..."
 mkdir -p ~/.vim
 mv ~/.vim/plugs.vim $deldir
