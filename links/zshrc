@@ -33,7 +33,7 @@ set -o vi
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 export FZF_DEFAULT_OPTS='--height 40% --reverse'
 
-# Use vi-mode in the shell
+# ===== VI-MODE =====
 bindkey -v
 bindkey -M viins 'jj' vi-cmd-mode #map jj to exit (mimic ESC)
 # backspace and ^h working even after returning from command mode

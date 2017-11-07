@@ -90,7 +90,7 @@ set wildignore+=*.png,*.jpg,*.gif
 " jj to exit insert mode
 imap jj <Esc>
 
-" toggle fold open/closed with <S-Space> if over a fold
+" Toggle fold open/closed with <S-Space> if over a fold
 nnoremap <silent> <S-Space> @=(foldlevel('.')?'za':'l')<CR>
 
 " Move between split windows with Ctrl + arrow keys
@@ -99,7 +99,7 @@ nnoremap <silent> <C-l> <C-w>l
 nnoremap <silent> <C-k> <C-w>k
 nnoremap <silent> <C-j> <C-w>j
 
-"make search results appear in middle of screen
+" Make search results appear in middle of screen
 nnoremap n nzz
 nnoremap N Nzz
 nnoremap * *zz
@@ -107,15 +107,18 @@ nnoremap # #zz
 nnoremap g* g*zz
 nnoremap g# g#zz
 
-"clear searches with ESC
+" Clear searches with ESC
 nnoremap <esc> :noh<return><esc>
 nnoremap <esc>^[ <esc>^[
 
 nmap <Leader>vs :vsplit<CR>
 nmap <Leader>s :split<CR>
 nmap <Leader>c :close<CR>
+nmap <Leader>w :w<CR>
 nmap <Leader>wq :wq<CR>
 
+" Remove all trailing whitespace by pressing F5
+nnoremap <Leader>ww :let _s=@/<Bar>:%s/\s\+$//e<Bar>:let @/=_s<Bar><CR>
 
 " ========================  VUNDLE/PLUGIN MAPPINGS  =========================
 
@@ -125,7 +128,7 @@ vmap <Leader>a= :Tabularize /=<CR>
 nmap <Leader>a: :Tabularize /:\zs<CR>
 vmap <Leader>a: :Tabularize /:\zs<CR>
 
-"NERDTree toggle set to capital T
+" NERDTree toggle set to capital T
 map T :NERDTreeToggle<CR>
 let g:NERDTreeWinSize = 20
 let NERDTreeIgnore = ['\.pyc$','\.pyo$', '\.db$', '__pycache__']
