@@ -46,6 +46,12 @@ Host gate.mini
   Port 8022
   HostKeyAlias macmini
 
+Host tableau_demo
+    HostName 172.18.1.77
+    User Administrator
+    Port 22
+    IdentityFile ~/.ssh/id_rsa_pro
+
 Host windowsbuild
   HostName windowsbuild
   User Administrator
