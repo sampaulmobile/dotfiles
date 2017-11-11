@@ -8,12 +8,19 @@ JIRA_URL='https://docurated.atlassian.net'
 GITHUB_URL='https://github.com/Docurated'
 JENKINS_URL='https://jenkins.service.consul'
 HANGOUTS_URL='https://hangouts.google.com/hangouts'
+GCAL_URL='https://calendar.google.com/calendar'
+GMAIL_URL='https://mail.google.com/mail'
+PHAB_URL='https://phabricator.docurated.rocks'
 
 
-# ===== GOOGLE HANGOUTS ========
-openHangout() { open "$HANGOUTS_URL/_/docurated.com/$1?authuser=$2" }
-alias relho='openHangout relevance sam@docurated.com'
+# ===== GOOGLE ========
+open_hangout() { open "$HANGOUTS_URL/_/docurated.com/$1?authuser=$2" }
+alias relho='open_hangout relevance sam@docurated.com'
 alias relno='open "https://docs.google.com/a/docurated.com/document/d/1ktuCdngDhUZxfd5-uND9jC23_l9SzQiCkLMC2RU0zzg/edit?usp=sharing"'
+open_gcal() { open "$GCAL_URL/b/${1:-0}" }
+alias gcal='open_gcal'
+open_gmail() { open "$GMAIL_URL/u/${1:-0}/#inbox" }
+alias gmail='open_gmail'
 
 
 # ===== GIT REPOS ========
@@ -418,14 +425,20 @@ alias arcd='git pull && arc diff --reviewers'
 arcdiff() {
     git pull && arc diff --reviewers $1 --message ""
 }
-
-arcPatchMerge() {
+arc_patch_merge() {
     arc patch $1
     gco master
     arc land arcpatch-$1
     git pull
 }
-alias arcpm='arcPatchMerge'
+alias arcpm='arc_patch_merge'
+arc_copy_diff_to_clipboard() {
+    num=${1:-1}
+    diff=`arcl | head -n $num | tail -n 1 | g -o 'D\d+'`
+    echo "$PHAB_URL/$diff" | pbcopy
+    echo "Copied $PHAB_URL/$diff to clipboard!"
+}
+alias arccp='arc_copy_diff_to_clipboard'
 
 
 # ===== SPARK ========
