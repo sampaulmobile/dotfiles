@@ -49,8 +49,8 @@ Plug 'godlygeek/tabular'
 " Autocomplete stuff
 Plug 'Valloric/YouCompleteMe'
 
-" Multiple Plug commands can be written in a single line using | separators
-" Plug 'SirVer/ultisnips' | Plug 'honza/vim-snippets'
+" Ultisnips + snippets + supertab to make it work with YCM
+Plug 'SirVer/ultisnips' | Plug 'honza/vim-snippets' | Plug 'ervandew/supertab'
 
 " ======================== VIM Tools =======================
 
