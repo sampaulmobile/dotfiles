@@ -33,6 +33,7 @@ alias egrep='egrep --colour=auto'
 #alias rcp='rsync -v --progress'
 #alias rmv='rsync -v --progress --remove-source-files'
 alias which='which -a'
+alias m='mvim'
 
 alias g='rg --follow --smart-case'
 alias hist="rg -N '' $NOT_PUBLIC/history/*"
