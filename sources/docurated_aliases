@@ -134,7 +134,8 @@ alias kube_conn="kube_connect"
 kube_grep_connect() {
     kube_conn `kpodg $1`
 }
-alias ck="kube_grep_connect"
+alias ck="kube_connect"
+alias ckg="kube_grep_connect"
 alias ckairweb="ck airflow-webserver"
 alias ckairwork="ck airflow-worker"
 alias ckairsched="ck airflow-scheduler"
