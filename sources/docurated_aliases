@@ -136,9 +136,9 @@ kube_grep_connect() {
 }
 alias ck="kube_connect"
 alias ckg="kube_grep_connect"
-alias ckairweb="ck airflow-webserver"
-alias ckairwork="ck airflow-worker"
-alias ckairsched="ck airflow-scheduler"
+alias ckairweb="ckg airflow-webserver"
+alias ckairwork="ckg airflow-worker"
+alias ckairsched="ckg airflow-scheduler"
 alias ckrails="$DOC_HOME/kubernetes/bin/console"
 
 # alias kportspark="kport `kpodg 'airflow-worker'` 4040 4040"
