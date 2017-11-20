@@ -20,6 +20,16 @@ creds() {
     grep -i $1 --exclude=ssh_known_hosts $NOT_PUBLIC/links/*
 }
 
+make_note() {
+    if [ $# -eq 1 ]
+    then
+        mvim $NOT_PUBLIC/notes/$1.md
+    else
+        mvim $NOT_PUBLIC/notes/$2/$1.md
+    fi
+}
+alias note='make_note'
+
 
 # ============ UNIX =============
 alias c='clear'
