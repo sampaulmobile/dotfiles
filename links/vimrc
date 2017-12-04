@@ -116,6 +116,7 @@ nmap <Leader>s :split<CR>
 nmap <Leader>c :close<CR>
 nmap <Leader>w :w<CR>
 nmap <Leader>wq :wq<CR>
+nmap <Leader>q :q<CR>
 
 " Remove unnecessary whitespace (trailing, between {}/quotes)
 nnoremap <Leader>ww :let _s=@/
