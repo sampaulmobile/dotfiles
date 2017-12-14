@@ -422,10 +422,6 @@ alias airtail='airflow_tail'
 # ===== ARCANIST  ========
 alias arcl='arc list'
 alias arcb='arc browse'
-alias arcd='git pull && arc diff --reviewers'
-arcdiff() {
-    git pull && arc diff --reviewers $1 --message ""
-}
 arc_patch_merge() {
     arc patch $1
     gco master
@@ -440,6 +436,12 @@ arc_copy_diff_to_clipboard() {
     echo "Copied $PHAB_URL/$diff to clipboard!"
 }
 alias arccp='arc_copy_diff_to_clipboard'
+arcdiff() {
+    git pull
+    arc diff --verbatim --reviewers $1
+    arccp
+}
+alias arcd='arcdiff'
 
 
 # ===== SPARK ========
