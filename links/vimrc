@@ -64,6 +64,9 @@ autocmd FileType haml set sw=4 sts=4 et
 autocmd FileType coffee set sw=4 sts=4 et
 autocmd FileType scss set sw=4 sts=4 et
 autocmd FileType erb set sw=4 sts=4 et
+autocmd FileType py set sw=4 sts=4 et
+autocmd Filetype javascript setlocal ts=4 sts=4 sw=4
+au FileType crontab setlocal bkc=yes
 
 " Keep undo history across sessions, by storing in file.
 silent !mkdir ~/.vim/backups > /dev/null 2>&1
