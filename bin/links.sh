@@ -57,6 +57,15 @@ if [ -d $NOT_PUBLIC/links ]; then
     echo "Linking pgpass..."
     mv ~/.pgpass $deldir
     ln -s $NOT_PUBLIC/links/pgpass ~/.pgpass
+
+	if [ -d $HOME/.kube ]; then
+		ln -s $NOT_PUBLIC/keys/sam.paul.vpn.crt ~/.kube/client.crt
+		ln -s $NOT_PUBLIC/keys/sam.paul.vpn.key ~/.kube/client.key
+	fi
+
+	if [ -d $NOT_PUBLIC/keys/Configurations ]; then
+		ln -s $NOT_PUBLIC/keys/Configurations ~/Library/Application\ Support/Tunnelblick/Configurations
+	fi
 fi
 
 echo "ALL FINISHED LINKING RCs"
