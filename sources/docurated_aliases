@@ -85,6 +85,12 @@ alias cdana='ssh demo.analytics.0'
 alias cpana='ssh production.analytics.0'
 alias cbana='ssh biomarin.analytics.0'
 
+alias cdtab='connect_tab 172.18.1.168 us-east-1'
+alias cptab='connect_tab 172.23.1.181 us-east-1'
+connect_tab() {
+    ssh ubuntu@$1 -i ~/.ssh/dfn-tableau-$2.pem
+}
+
 
 # ===== KUBE ========
 alias kc='kubectl config use-context'
