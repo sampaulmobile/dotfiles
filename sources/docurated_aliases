@@ -348,6 +348,7 @@ alias redd='connect_redshift demo-analytics.cndrmhyebfrr.us-east-1.redshift.amaz
 alias redp='connect_redshift production-analytics.cndrmhyebfrr.us-east-1.redshift.amazonaws.com'
 alias redr='connect_redshift randf-analytics.cuviv7qimwij.us-west-2.redshift.amazonaws.com'
 alias redb='connect_redshift biomarin-analytics.cuviv7qimwij.us-west-2.redshift.amazonaws.com'
+alias reds='connect_redshift schwab-analytics.cuviv7qimwij.us-west-2.redshift.amazonaws.com'
 
 
 # ===== AIRFLOW ========

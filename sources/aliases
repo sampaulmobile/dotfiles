@@ -109,6 +109,7 @@ alias sltoast='open http://www.seamless.com/food-delivery/toasties-delicatessen-
 alias slzumi='open http://www.seamless.com/food-delivery/izumi-sushi-new-york-city.1688.r'
 alias weather='open http://www.weather.com/weather/hourbyhour/l/10003:4:US'
 alias ff='open https://football.fantasysports.yahoo.com/f1/119334'
+alias fandango='open https://www.fandango.com/10003_movietimes?mode=general&q=10003'
 
 
 # ============ BUZZER / PUSHFOROPEN =============
