@@ -187,7 +187,9 @@ ANA_PG_HOST_DEMO='analytics-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
 ANA_PG_HOST_DEMO_LB='pgbouncer.service.consul'
 ANA_PG_HOST_PROD='analytics-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
 ANA_PG_HOST_PROD_LB='pgbouncer.service.consul'
-ANA_PG_HOST_BIO='analytics-biomarin.cr9ikdrfc2gy.us-west-2.rds.amazonaws.com'
+ANA_PG_HOST_BIO='analytics-postgres'
+ANA_PG_HOST_RANDF='analytics-postgres'
+ANA_PG_HOST_SCHWAB='analytics-postgres'
 
 AIR_PG_HOST_DEMO='airflow-demo.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
 AIR_PG_HOST_PROD='airflow-production.cpk5zbekyq7f.us-east-1.rds.amazonaws.com'
@@ -290,6 +292,14 @@ kube_connect_anal_pg_randf() {
     kubectl exec -it `kpodg airflow-worker` -- psql -w -h $ANA_PG_HOST_RANDF -p 5432 -U analytics analytics
 }
 alias rpqlana=kube_connect_anal_pg_randf
+
+kube_connect_anal_pg_schwab() {
+    line="$ANA_PG_HOST_SCHWAB:5432:analytics:analytics:$ANA_PG_PASS_SCHWAB"
+    kc schwab
+    kubectl exec `kpodg airflow-worker` -- bash -c "echo $line > ~/.pgpass && chmod 600 ~/.pgpass"
+    kubectl exec -it `kpodg airflow-worker` -- psql -w -h $ANA_PG_HOST_SCHWAB -p 5432 -U analytics analytics
+}
+alias spqlana=kube_connect_anal_pg_schwab
 
 alias pql='psql -d docurated -p 5432'
 
