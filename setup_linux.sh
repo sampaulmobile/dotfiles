@@ -3,6 +3,9 @@
 # get dotfiles dir
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
+sudo apt-get update
+sudo apt-get install -y build-essential gcc
+
 # brew (and installs)
 $DOTFILES/bin/install_linuxbrew.sh
 brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_base
