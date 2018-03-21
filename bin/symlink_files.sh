@@ -1,12 +1,12 @@
 #!/bin/bash
 ############################
-# links.sh
-# This script creates symlinks for all the rc files (and vundles)
+# symlink_files.sh
+# This script creates symlinks for ALL THE FILES
 ############################
 
 ########## Variables
 
-dir=$HOME/dotfiles/links        # dotfiles directory
+dir=$HOME/dotfiles/dots        # dotfiles directory
 deldir=$HOME/DELETE_dotfiles     # backup directory (deprecated)
 files="vimrc zshrc gemrc gitconfig gitignore"   # list of files/folders to symlink in homedir
 NOT_PUBLIC=$HOME/dropbox/!public
