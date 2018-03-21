@@ -1,14 +1,15 @@
 #!/bin/bash
 
-DOTFILES=$HOME/dotfiles
+# get dotfiles dir
+DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # brew (and installs)
 $DOTFILES/bin/install_linuxbrew.sh
 brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_base
 
-# pip (and installs)
+# pyenv/pip (and installs)
+$DOTFILES/bin/pyenv_installs.sh
 $DOTFILES/bin/install_pip.sh
-$DOTFILES/bin/install_pyenv.sh
 $DOTFILES/bin/pip_installs.sh
 
 # link (some) dotfiles
