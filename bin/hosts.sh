@@ -7,7 +7,7 @@ fi
 
 echo "Updating /etc/hosts blacklist..."
 sudo -v
-tmp_dir=$HOME/Downloads/hosts
+tmp_dir=/tmp/hosts
 
 git clone git@github.com:StevenBlack/hosts.git $tmp_dir
 python $tmp_dir/updateHostsFile.py \

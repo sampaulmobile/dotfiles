@@ -45,24 +45,24 @@ if [ -d $NOT_PUBLIC/links ]; then
     mv ~/.aws/credentials $deldir
     ln -s $NOT_PUBLIC/links/aws_credentials ~/.aws/credentials
 
+    echo "Linking ssh config/known_hosts..."
     mkdir -p ~/.ssh
-    echo "Linking ssh known_hosts..."
-    mv ~/.ssh/known_hosts $deldir
-    ln -s $NOT_PUBLIC/links/ssh_known_hosts ~/.ssh/known_hosts
-
-    echo "Linking ssh config..."
     mv ~/.ssh/config $deldir
     ln -s $NOT_PUBLIC/links/ssh_config ~/.ssh/config
+    mv ~/.ssh/known_hosts $deldir
+    ln -s $NOT_PUBLIC/links/ssh_known_hosts ~/.ssh/known_hosts
 
     echo "Linking pgpass..."
     mv ~/.pgpass $deldir
     ln -s $NOT_PUBLIC/links/pgpass ~/.pgpass
 
+    echo "Linking kube..."
     if [ -d $HOME/.kube ]; then
 	ln -s $NOT_PUBLIC/keys/sam.paul.vpn.crt ~/.kube/client.crt
 	ln -s $NOT_PUBLIC/keys/sam.paul.vpn.key ~/.kube/client.key
     fi
 
+    echo "Linking tunnelblick..."
     if [ -d $NOT_PUBLIC/keys/Configurations ]; then
 	ln -s $NOT_PUBLIC/keys/Configurations ~/Library/Application\ Support/Tunnelblick/Configurations
     fi

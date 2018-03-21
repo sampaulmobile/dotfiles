@@ -1,8 +1,8 @@
 
 if [ ! -f /usr/local/bin/pip ]; then
-    curl -o $HOME/downloads/get-pip.py https://bootstrap.pypa.io/get-pip.py
-    sudo python $HOME/downloads/get-pip.py
-    rm $HOME/downloads/get-pip.py
+    curl -o /tmp/get-pip.py https://bootstrap.pypa.io/get-pip.py
+    sudo python /tmp/get-pip.py
+    rm /tmp/get-pip.py
 fi
 
 if [ ! -d $HOME/.pyenv ]; then
