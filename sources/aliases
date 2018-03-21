@@ -14,7 +14,6 @@ alias dev='cd ~/Development/SBP'
 alias cdown='cd ~/Downloads'
 alias soz='source ~/.zshrc'
 alias cpwd="pwd | tr -d '\n' | pbcopy"
-alias dm='mvim $NOT_PUBLIC/notes/work/daily_mission.md'
 
 creds() {
     grep -i $1 --exclude=ssh_known_hosts $NOT_PUBLIC/links/*
@@ -79,6 +78,11 @@ alias gitrm='git reset --hard origin/master'
 alias bserv='brew services list'
 alias bstart='brew services start'
 alias bstop='brew services stop'
+
+
+# ============ DOCKER =============
+alias d='docker'
+alias dm='docker-machine'
 
 
 # ============ CAPISTRANO =============
