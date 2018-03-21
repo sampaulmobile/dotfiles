@@ -1,13 +1,8 @@
 cask_args appdir: '/Applications'
 tap 'caskroom/cask'
 
-brew 'zsh'
-brew 'vim'
 brew 'macvim'
 brew 'awscli'
-brew 'pyenv'
-brew 'ripgrep'
-brew 'fzf'
 
 cask 'java'
 cask 'google-chrome'

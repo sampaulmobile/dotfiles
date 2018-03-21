@@ -3,8 +3,8 @@
 
 zsh_path=$(which zsh | head -n 1)
 if [ "$SHELL" != $zsh_path ]; then
-	echo "Setting ZSH to default shell..."
-	sudo dscl . -create /Users/$USER UserShell $zsh_path
+    echo "Setting ZSH to default shell..."
+    chsh -s $zsh_path
 fi
 
 if [ ! -d $HOME/.oh-my-zsh ]; then
