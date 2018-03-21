@@ -1,4 +1,3 @@
-
 if [ ! -d $HOME/.rvm ]; then
     echo "Installing RVM... (+Ruby 2.2.5)"
     \curl -sSL https://get.rvm.io | bash

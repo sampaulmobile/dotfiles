@@ -1,5 +1,3 @@
-#!/bin/bash
-
 if grep -q "StevenBlack/hosts" /etc/hosts; then
 	echo "/etc/hosts blacklist already updated, exiting..."
 	exit 0
