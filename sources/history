@@ -51,4 +51,3 @@ function history-fzf() {
 }
 zle -N history-fzf
 bindkey '^r' history-fzf
-

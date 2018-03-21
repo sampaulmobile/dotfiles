@@ -40,7 +40,6 @@ bindkey -M viins 'jj' vi-cmd-mode #map jj to exit (mimic ESC)
 bindkey '^?' backward-delete-char
 bindkey '^h' backward-delete-char
 
-
 # ===== HISTORY =====
 [[ -f "$SOURCES/history" ]] && source $SOURCES/history
 

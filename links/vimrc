@@ -1,7 +1,7 @@
 " =============================  GENERAL CONFIG  ==============================
 let mapleader=","               "Change leader to a comma
 
-"win 120 80                     "Make window 80 wide x 45 tall
+" win 120 80                    "Make window 80 wide x 45 tall
 set nocompatible                "Use vim defaults
 set ru                          "Turn on ruler
 set number                      "Line numbers are good

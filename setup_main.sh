@@ -26,4 +26,3 @@ $HOME/dotfiles/bin/rvm.sh
 
 # ssh-add SSH keys (if applicable)
 # ssh-add -K ~/.ssh/id_rsa_air
-

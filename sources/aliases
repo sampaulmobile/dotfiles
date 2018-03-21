@@ -74,10 +74,12 @@ alias gmm='git merge master'
 alias gpp='git pull && git push'
 alias gitrm='git reset --hard origin/master'
 
+
 # ============ BREW =============
 alias bserv='brew services list'
 alias bstart='brew services start'
 alias bstop='brew services stop'
+
 
 # ============ CAPISTRANO =============
 alias cpd='cap production deploy'
@@ -98,9 +100,11 @@ alias berake=fixedrake
 alias berspec='bundle exec rspec'
 alias ber='bundle exec rspec'
 
+
 # ============ GOOGLE CLOUD =============
 alias gc='gcloud'
 alias gcssh='gcloud compute ssh'
+
 
 # ============ WEBSITES =============
 alias sl='open http://www.seamless.com/food-delivery/vendors.m'
@@ -125,4 +129,3 @@ rmpython() {
     find . -name "*.pyo*" | xargs rm
 }
 alias rmpy=rmpython
-
