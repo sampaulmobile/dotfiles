@@ -4,7 +4,7 @@ DOTFILES=$HOME/dotfiles
 
 # brew (and installs)
 $DOTFILES/bin/install_linuxbrew.sh
-brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_basic
+brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_base
 
 # pip (and installs)
 $DOTFILES/bin/install_pip.sh
@@ -17,11 +17,10 @@ $DOTFILES/bin/symlink_files.sh
 # vim (and plugs)
 $DOTFILES/bin/install_vim_plug.sh
 $DOTFILES/bin/update_vim_plugs.sh
-# $DOTFILES/bin/install_ycm.sh
 
-# shell (zsh)
-# $DOTFILES/bin/set_shell_linux.sh
-# $DOTFILES/bin/install_oh_my_zsh.sh
+# shell (assuming ZSH has been installed)
+$DOTFILES/bin/set_shell_linux.sh
+$DOTFILES/bin/install_oh_my_zsh.sh
 
 # /etc/hosts (blacklist)
-# $DOTFILES/bin/blacklist_hosts.sh
+$DOTFILES/bin/blacklist_hosts.sh

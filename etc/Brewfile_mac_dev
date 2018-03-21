@@ -1,0 +1,10 @@
+cask_args appdir: '/Applications'
+tap 'caskroom/cask'
+
+cask 'dropbox'
+cask 'slack'
+cask '1password'
+cask 'istat-menus'
+cask 'witch'
+cask 'divvy'
+# cask 'dash'
