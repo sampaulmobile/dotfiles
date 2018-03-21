@@ -20,4 +20,3 @@ if [ ! -d $OPT_DIR/zsh-git-prompt ]; then
     stack setup
     stack build && stack install
 fi
-

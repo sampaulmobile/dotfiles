@@ -55,4 +55,3 @@ bindkey '^h' backward-delete-char
 
 # ===== ENV VARIABLES =====
 [[ -f "$NOT_PUBLIC/links/envvars" ]] && source $NOT_PUBLIC/links/envvars
-

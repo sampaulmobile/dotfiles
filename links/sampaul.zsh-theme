@@ -51,4 +51,3 @@ PROMPT=$HOST$DIR$VERS_PROMPT_$GIT
 
 # Display time in rprompt
 RPROMPT='%{$FG[045]%}%*%{$reset_color%}'
-

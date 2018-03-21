@@ -28,24 +28,19 @@ set softtabstop=4
 set tabstop=4
 set expandtab
 set autochdir " always set pwd to path of current file
-"set cin
-"set autoindent
-"set smartindent
-"set smarttab
+" set cin
+" set autoindent
+" set smartindent
+" set smarttab
 
-" syntax on "turn on syntax highlighting
 
-" =============================  INIT VUNDLES  ==============================
-" if filereadable(expand("~/.vim/vundles.vim"))
-"   source ~/.vim/vundles.vim
-" endif
-
+" =============================  INIT PLUGS  ==============================
 if filereadable(expand("~/.vim/plugs.vim"))
   source ~/.vim/plugs.vim
 endif
 
 
-"highlight characters past 80 columns
+" highlight characters past 80 columns
 augroup vimrc_autocmds
   autocmd BufEnter * highlight OverLength ctermbg=darkgrey guibg=#592929
   autocmd BufEnter * match OverLength /\%80v.*/
@@ -53,8 +48,8 @@ augroup END
 
 set foldnestmax=5               "deepest fold is 5 levels
 set foldmethod=syntax           "fold by syntax
-"set foldmethod=indent          "fold based on indent
-"set nofoldenable               "dont fold by default
+" set foldmethod=indent          "fold based on indent
+" set nofoldenable               "dont fold by default
 
 " Display tabs and trailing spaces visually
 set list listchars=tab:\ \ ,trail:·
@@ -157,13 +152,13 @@ nnoremap <silent> <leader>T :ClearCtrlPCache<cr>\|:CtrlP<cr>
 let g:ctrlp_custom_ignore = {
   \ 'file': '\v\.(pyc|pyo)$',
   \ }
-"have CtrlP follow symlinks
+" have CtrlP follow symlinks
 let g:ctrlp_follow_symlinks = 1
 
-"TComment remap to c key
+" TComment remap to c key
 map <leader>/ <c-_><c-_>
 
-"Gundo - GUI Undo Tree (visualized)
+" Gundo - GUI Undo Tree (visualized)
 map <leader>u :GundoToggle<CR>
 
 " python folding - preview docstring in fold text
@@ -215,7 +210,7 @@ let g:rg_command = '
 command! -bang -nargs=* Find call fzf#vim#grep(g:rg_command .shellescape(<q-args>), 1, <bang>0)
 nmap <Leader>f :Find<CR>
 
-"Mappings for fugitive
+" Mappings for fugitive
 map <leader>gb :Gblame<CR>
 map <leader>gh :Gbrowse<CR>
 
@@ -284,12 +279,12 @@ function! s:MaybeUpdateLightline()
   end
 endfunction
 
-"Need to set coloscheme after vundles are loaded
+" Need to set coloscheme after plugs are loaded
 " silent! colorscheme badwolf
 silent! colorscheme molokai
 hi Folded guibg=#3e3e3e
 hi Folded guifg=#b0b0b0
-"set background=light             "Options are 'dark' or 'light'
+" set background=light             "Options are 'dark' or 'light'
 
 function! s:goyo_enter()
     colorscheme pencil
@@ -301,4 +296,3 @@ endfunction
 
 autocmd! User GoyoEnter nested call <SID>goyo_enter()
 autocmd! User GoyoLeave nested call <SID>goyo_leave()
-

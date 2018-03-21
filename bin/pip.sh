@@ -15,4 +15,3 @@ if [ ! -d $HOME/.pyenv ]; then
 fi
 
 pip install flake8
-

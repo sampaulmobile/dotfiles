@@ -5,4 +5,3 @@ if [ ! -f /usr/local/bin/brew ]; then
 fi
 
 brew bundle --no-upgrade --file=$HOME/dotfiles/links/Brewfile
-

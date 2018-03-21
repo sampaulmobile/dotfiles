@@ -5,4 +5,3 @@ if [ ! -d $HOME/.rvm ]; then
     source $HOME/.rvm/scripts/rvm
     rvm install ruby-2.2.5
 fi
-

@@ -8,7 +8,7 @@
 
 dir=$HOME/dotfiles/links        # dotfiles directory
 deldir=$HOME/DELETE_dotfiles     # backup directory (deprecated)
-files="vimrc zshrc gemrc gitconfig gitignore ackrc"   # list of files/folders to symlink in homedir
+files="vimrc zshrc gemrc gitconfig gitignore"   # list of files/folders to symlink in homedir
 NOT_PUBLIC=$HOME/dropbox/!public
 
 ##########
@@ -22,11 +22,6 @@ for file in $files; do
     mv ~/.$file $deldir
     ln -s $dir/$file ~/.$file
 done
-
-echo "Linking SSH config..."
-mkdir -p ~/.ssh
-mv ~/.ssh/config $deldir
-ln -s $dir/ssh_config ~/.ssh/config
 
 echo "Linking plugs..."
 mkdir -p ~/.vim
@@ -50,9 +45,14 @@ if [ -d $NOT_PUBLIC/links ]; then
     mv ~/.aws/credentials $deldir
     ln -s $NOT_PUBLIC/links/aws_credentials ~/.aws/credentials
 
+    mkdir -p ~/.ssh
     echo "Linking ssh known_hosts..."
     mv ~/.ssh/known_hosts $deldir
     ln -s $NOT_PUBLIC/links/ssh_known_hosts ~/.ssh/known_hosts
+
+    echo "Linking ssh config..."
+    mv ~/.ssh/config $deldir
+    ln -s $NOT_PUBLIC/links/ssh_config ~/.ssh/config
 
     echo "Linking pgpass..."
     mv ~/.pgpass $deldir
@@ -72,4 +72,3 @@ echo "ALL FINISHED LINKING RCs"
 echo "DELETING old dotfiles"
 rm -rf $deldir
 echo "Done."
-
