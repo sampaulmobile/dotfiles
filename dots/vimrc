@@ -33,6 +33,11 @@ set autochdir " always set pwd to path of current file
 " set smartindent
 " set smarttab
 
+" Disable scrollbars
+set guioptions-=r
+set guioptions-=R
+set guioptions-=l
+set guioptions-=L
 
 " =============================  INIT PLUGS  ==============================
 if filereadable(expand("~/.vim/plugs.vim"))

@@ -6,7 +6,6 @@ if [ ! -d $HOME/.linuxbrew ]; then
 	echo 'export PATH="/home/ubuntu/.linuxbrew/bin:$PATH"' >> $RCFILE
 	echo 'export MANPATH="/home/ubuntu/.linuxbrew/share/man:$MANPATH"' >> $RCFILE
 	echo 'export INFOPATH="/home/ubuntu/.linuxbrew/share/info:$INFOPATH"' >> $RCFILE
-	exec "$SHELL"
 	brew update
 	brew doctor
 fi
