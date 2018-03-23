@@ -1,5 +1,5 @@
 if [ ! -d $HOME/.pyenv ]; then
-	RCFILE=$HOME/.bashrc
+	RCFILE=$HOME/.zshenv
 
 	git clone https://github.com/pyenv/pyenv.git $HOME/.pyenv
 	echo 'export PYENV_ROOT="$HOME/.pyenv"' >> $RCFILE
