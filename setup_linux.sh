@@ -6,19 +6,21 @@ DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # install stuff
 sudo apt-get update
 sudo apt-get install -y git vim zsh python-pip build-essential
-
-# $DOTFILES/bin/install_linuxbrew.sh
+sudo apt-get install -y make libssl-dev zlib1g-dev libbz2-dev \
+    libreadline-dev libsqlite3-dev wget curl llvm libncurses5-dev \
+    libncursesw5-dev xz-utils tk-dev
 
 $DOTFILES/bin/install_pyenv.sh
 $DOTFILES/bin/install_fzf.sh
 # $DOTFILES/bin/install_ripgrep.sh
 
+# $DOTFILES/bin/install_linuxbrew.sh
 # brews="ripgrep"
 # for b in $brews; do brew install $b; done
 # brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_base
 
 # pyenv/pip (and installs)
-$DOTFILES/bin/pyenv_installs.sh
+$DOTFILES/bin/pyenv_installs_linux.sh
 $DOTFILES/bin/install_pip.sh
 $DOTFILES/bin/pip_installs.sh
 

@@ -15,7 +15,7 @@ brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_base
 brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_mac
 
 # pyenv/pip (and installs)
-$DOTFILES/bin/pyenv_installs.sh
+$DOTFILES/bin/pyenv_installs_mac.sh
 $DOTFILES/bin/install_pip.sh
 $DOTFILES/bin/pip_installs.sh
 
