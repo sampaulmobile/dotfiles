@@ -1,4 +1,4 @@
-if [ ! -f $HOME/.linuxbrew ]; then
+if [ ! -d $HOME/.linuxbrew ]; then
 	echo "Installing linuxbrew..."
 	RCFILE=$HOME/.zshenv
 	git clone https://github.com/Linuxbrew/brew.git $HOME/.linuxbrew
