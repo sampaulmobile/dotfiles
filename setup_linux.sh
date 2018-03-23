@@ -3,12 +3,19 @@
 # get dotfiles dir
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
+# install stuff
 sudo apt-get update
-sudo apt-get install -y build-essential gcc
+sudo apt-get install -y git vim zsh python-pip build-essential
 
-# brew (and installs)
-$DOTFILES/bin/install_linuxbrew.sh
-brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_base
+# $DOTFILES/bin/install_linuxbrew.sh
+
+$DOTFILES/bin/install_pyenv.sh
+$DOTFILES/bin/install_fzf.sh
+# $DOTFILES/bin/install_ripgrep.sh
+
+# brews="ripgrep"
+# for b in $brews; do brew install $b; done
+# brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_base
 
 # pyenv/pip (and installs)
 $DOTFILES/bin/pyenv_installs.sh
