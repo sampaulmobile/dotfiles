@@ -135,4 +135,4 @@ defaults write NSGlobalDomain InitialKeyRepeat -int 15
 for app in 	"Dock" "Finder"; do
 	killall "${app}" &> /dev/null
 done
-echo "Done. Note that some of these changes require a logout/restart to take effect."
+echo "Done. Some of these changes require a logout/restart to take effect."

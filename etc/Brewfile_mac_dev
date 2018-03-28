@@ -1,6 +1,7 @@
 cask_args appdir: '/Applications'
 tap 'caskroom/cask'
 
+cask 'java8'
 cask 'dropbox'
 cask 'slack'
 cask '1password'

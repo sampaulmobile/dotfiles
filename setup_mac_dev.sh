@@ -17,6 +17,7 @@ $DOTFILES/bin/zsh_git_prompt.sh
 
 # restart to install rvm
 $DOTFILES/bin/install_rvm.sh
+$DOTFILES/bin/rvm_installs.sh
 
 # setup 1password/dropbox, then link rest of dotfiles
 # $DOTFILES/bin/symlink_files.sh

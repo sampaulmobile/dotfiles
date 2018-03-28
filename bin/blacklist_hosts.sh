@@ -1,9 +1,7 @@
-if grep -q "StevenBlack/hosts" /etc/hosts; then
-	echo "/etc/hosts blacklist already updated, exiting..."
+if [ $# -eq 0 ] && grep -q "StevenBlack/hosts" /etc/hosts; then
 	exit 0
 fi
 
-echo "Updating /etc/hosts blacklist..."
 sudo -v
 tmp_dir=/tmp/hosts
 

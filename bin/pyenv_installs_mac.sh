@@ -1,6 +1,8 @@
-echo "Attempting to install Python 3.5.2"
+PYTHON_VERSION=3.5.2
+
+# --enable-framework required for haskell YCM
 CFLAGS="-I$(brew --prefix openssl)/include" \
 LDFLAGS="-L$(brew --prefix openssl)/lib" \
-PYTHON_CONFIGURE_OPTS="--enable-framework" \ # required for haskell YCM
-pyenv install 3.5.2
-pyenv global 3.5.2
+PYTHON_CONFIGURE_OPTS="--enable-framework" \
+pyenv install -s $PYTHON_VERSION
+pyenv global $PYTHON_VERSION

@@ -4,7 +4,6 @@ tap 'caskroom/cask'
 brew 'macvim'
 brew 'awscli'
 
-cask 'java8'
 cask 'google-chrome'
 cask 'iterm2'
 # cask 'vlc'

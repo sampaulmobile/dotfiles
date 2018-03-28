@@ -33,7 +33,7 @@ $DOTFILES/bin/install_vim_plug.sh
 $DOTFILES/bin/update_vim_plugs.sh
 
 # shell (assuming ZSH has been installed)
-$DOTFILES/bin/set_shell_linux.sh
+$DOTFILES/bin/set_zsh_linux.sh
 $DOTFILES/bin/install_oh_my_zsh.sh
 
 # /etc/hosts (blacklist)

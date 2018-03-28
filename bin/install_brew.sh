@@ -1,4 +1,5 @@
-if [ ! -f /usr/local/bin/brew ]; then
-	echo "Installing homebrew..."
-	ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
+if [ $# -eq 0 ] && [ -f /usr/local/bin/brew ]; then
+	exit 0
 fi
+
+ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"

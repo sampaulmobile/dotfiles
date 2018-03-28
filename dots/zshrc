@@ -1,5 +1,5 @@
 ###### ===== THE BEST ZSHRC FILE EVER by Sam Paul ===== ######
-DOTS=$$HOME/dotfiles/dots
+DOTS=$HOME/dotfiles/dots
 SOURCES=$HOME/dotfiles/sources
 NOT_PUBLIC=$HOME/dropbox/!public
 OPT_DIR=/usr/local/opt
