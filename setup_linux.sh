@@ -5,9 +5,9 @@ DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # install stuff
 sudo apt-get update
-sudo apt-get install -y git vim zsh build-essential \
-    make libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
-    wget curl llvm libncurses5-dev libncursesw5-dev xz-utils tk-dev snapd
+sudo apt-get install -y git vim zsh wget curl make build-essential
+sudo apt-get install -y libssl-dev zlib1g-dev libbz2-dev libreadline-dev \
+    libsqlite3-dev llvm libncurses5-dev libncursesw5-dev xz-utils tk-dev snapd
 
 # install (ghetto) linuxbrew (and *some* brews)
 $DOTFILES/bin/install_linuxbrew.sh

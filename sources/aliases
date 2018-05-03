@@ -120,8 +120,8 @@ alias ff='open https://football.fantasysports.yahoo.com/f1/119334'
 alias fandango='open https://www.fandango.com/10003_movietimes?mode=general&q=10003'
 
 
-# ============ BUZZER =============
-BUZZER_URL='http://buzz.sampaulweb.com'
+# ============ BUZZER / PUSHFOROPEN =============
+BUZZER_URL='http://buzz.linktothecode.com'
 hit_buzzer() { curl "$BUZZER_URL/open/$1" }
 alias buzz='hit_buzzer'
 
