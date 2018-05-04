@@ -18,8 +18,8 @@ DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 sudo apt-get update
 sudo apt-get upgrade -y
 sudo apt-get install -y git vim zsh wget curl make build-essential
-# sudo apt-get install -y libssl-dev zlib1g-dev libbz2-dev libreadline-dev \
-#     libsqlite3-dev llvm libncurses5-dev libncursesw5-dev xz-utils tk-dev snapd
+sudo apt-get install -y libssl-dev zlib1g-dev libbz2-dev libreadline-dev \
+    libsqlite3-dev llvm libncurses5-dev libncursesw5-dev xz-utils tk-dev snapd
 
 # shell (assuming ZSH has been installed)
 $DOTFILES/bin/set_zsh_linux.sh
@@ -27,7 +27,7 @@ $DOTFILES/bin/install_oh_my_zsh.sh
 
 # install (ghetto) linuxbrew (and *some* brews)
 $DOTFILES/bin/install_linuxbrew.sh
-brews="vim pyenv" # ripgrep"
+brews="pyenv vim" # ripgrep"
 for b in $brews; do brew install $b; done
 
 # fzf/ripgrep (b/c brew installing these is a nightmare)
@@ -36,7 +36,7 @@ for b in $brews; do brew install $b; done
 
 # pyenv/pip (and installs)
 # $DOTFILES/bin/install_pyenv.sh
-$DOTFILES/bin/install_pip.sh
+# $DOTFILES/bin/install_pip.sh
 $DOTFILES/bin/pyenv_installs_linux.sh
 $DOTFILES/bin/pip_installs.sh
 
