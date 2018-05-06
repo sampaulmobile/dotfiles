@@ -1,6 +1,11 @@
 cask_args appdir: '/Applications'
 tap 'caskroom/cask'
 
+brew 'zsh'
+brew 'vim'
+brew 'pyenv'
+brew 'ripgrep'
+brew 'fzf'
 brew 'macvim'
 brew 'awscli'
 

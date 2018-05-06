@@ -8,10 +8,10 @@ sudo -v
 
 # linuxbrew
 $DOTFILES/bin/install_linuxbrew.sh
-cd $HOME/.linuxbrew/bin
-brew update
-brew doctor
-brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_linux
+bin_brew=$HOME/.linuxbrew/bin/brew # so we dont have to restart shell
+$bin_brew update
+$bin_brew doctor
+$bin_brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_linux
 
 # ripgrep (b/c need to use compiled binary)
 $DOTFILES/bin/install_ripgrep.sh

@@ -11,7 +11,6 @@ $DOTFILES/bin/macos_defaults.sh
 
 # brew (and installs)
 $DOTFILES/bin/install_brew.sh
-brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_base
 brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_mac
 
 # shell (assuming ZSH has been installed)
