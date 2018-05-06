@@ -1,5 +1,6 @@
-if [ $# -eq 0 ] && [ -f /usr/local/bin/rg ]; then
-	exit 0
+if [ $# -eq 0 ] && [ `which rg` ]; then
+	exit 1
 fi
 
-sudo snap install rg
+brew tap burntsushi/ripgrep https://github.com/BurntSushi/ripgrep.git
+brew install ripgrep-bin
