@@ -22,17 +22,18 @@ for b in $brews; do brew install $b; done
 # ripgrep (b/c need to use compiled binary)
 $DOTFILES/bin/install_ripgrep.sh
 
+# link dotfiles
+$DOTFILES/bin/symlink_files.sh
+source $HOME/.zshrc
+
 # pyenv/pip installs
 $DOTFILES/bin/pyenv_installs_linux.sh
 $DOTFILES/bin/pip_installs.sh
 
-# link (some) dotfiles
-$DOTFILES/bin/symlink_files.sh
-source $HOME/.zshrc
-
 # vim (and plugs)
 $DOTFILES/bin/install_vim_plug.sh
 $DOTFILES/bin/update_vim_plugs.sh
+# $DOTFILES/bin/install_ycm.sh
 
 # /etc/hosts (blacklist)
 # $DOTFILES/bin/blacklist_hosts.sh

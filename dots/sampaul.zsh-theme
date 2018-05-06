@@ -40,7 +40,7 @@ fi
 # prompt
 HOST="%{$fg[$NCOLOR]%}%B%n%b"$SSH
 
-DIR="%{$reset_color%}:%{$FG[208]%}%40<...<%~%<<%{$reset_color%}"
+DIR="%{$reset_color%}:%{$FG[208]%}%40<...<%~%<<%{$reset_color%} "
 # DIR="%{$reset_color%}:%{$FG[208]%}%~%{$reset_color%}|"
 
 GIT=$'$(git_super_status)
