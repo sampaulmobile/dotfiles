@@ -33,7 +33,7 @@ $DOTFILES/bin/pip_installs.sh
 # vim (and plugs)
 $DOTFILES/bin/install_vim_plug.sh
 $DOTFILES/bin/update_vim_plugs.sh
-# $DOTFILES/bin/install_ycm.sh
 
-# /etc/hosts (blacklist)
-# $DOTFILES/bin/blacklist_hosts.sh
+# dev stuff
+# $DOTFILES/bin/install_ycm.sh
+# $DOTFILES/bin/zsh_git_prompt.sh
