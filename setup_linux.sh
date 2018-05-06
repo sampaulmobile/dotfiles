@@ -8,7 +8,7 @@ sudo apt-get update
 sudo apt-get upgrade -y
 sudo apt-get install -y git vim zsh wget curl make build-essential
 sudo apt-get install -y libssl-dev zlib1g-dev libbz2-dev libreadline-dev \
-    libsqlite3-dev llvm libncurses5-dev libncursesw5-dev xz-utils tk-dev snapd
+    libsqlite3-dev llvm libncurses5-dev libncursesw5-dev xz-utils tk-dev
 
 # shell (assuming ZSH has been installed)
 $DOTFILES/bin/set_zsh_linux.sh
@@ -28,6 +28,7 @@ $DOTFILES/bin/pip_installs.sh
 
 # link (some) dotfiles
 $DOTFILES/bin/symlink_files.sh
+source $HOME/.zshrc
 
 # vim (and plugs)
 $DOTFILES/bin/install_vim_plug.sh
