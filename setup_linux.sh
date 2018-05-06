@@ -3,12 +3,8 @@
 # get dotfiles dir
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-# install stuff
-sudo apt-get update
-sudo apt-get upgrade -y
-sudo apt-get install -y git vim zsh wget curl make build-essential
-sudo apt-get install -y libssl-dev zlib1g-dev libbz2-dev libreadline-dev \
-    libsqlite3-dev llvm libncurses5-dev libncursesw5-dev xz-utils tk-dev
+# get sudo privs upfront
+sudo -v
 
 # shell (assuming ZSH has been installed)
 $DOTFILES/bin/set_zsh_linux.sh
