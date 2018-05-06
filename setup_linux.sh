@@ -16,7 +16,7 @@ $DOTFILES/bin/install_oh_my_zsh.sh
 
 # install (ghetto) linuxbrew (and *some* brews)
 $DOTFILES/bin/install_linuxbrew.sh
-brews="pyenv vim fzf"
+brews=(pyenv vim fzf) # if bash, parens should be quotes
 for b in $brews; do brew install $b; done
 
 # ripgrep (b/c need to use compiled binary)
