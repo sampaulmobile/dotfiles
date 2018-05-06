@@ -6,21 +6,24 @@ DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # get sudo privs upfront
 sudo -v
 
-# shell (assuming ZSH has been installed)
-$DOTFILES/bin/set_zsh_linux.sh
-$DOTFILES/bin/install_oh_my_zsh.sh
-
-# install (ghetto) linuxbrew (and *some* brews)
+# linuxbrew
 $DOTFILES/bin/install_linuxbrew.sh
-brews=(pyenv vim fzf) # if bash, parens should be quotes
-for b in $brews; do brew install $b; done
+cd $HOME/.linuxbrew/bin
+brew update
+brew doctor
+brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_linux
 
 # ripgrep (b/c need to use compiled binary)
 $DOTFILES/bin/install_ripgrep.sh
 
+# shell (assuming ZSH has been installed)
+$DOTFILES/bin/set_zsh_linux.sh
+$DOTFILES/bin/install_oh_my_zsh.sh
+
 # link dotfiles
 $DOTFILES/bin/symlink_files.sh
-source $HOME/.zshrc
+
+exit 0
 
 # pyenv/pip installs
 $DOTFILES/bin/pyenv_installs_linux.sh

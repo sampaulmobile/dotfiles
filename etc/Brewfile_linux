@@ -1,0 +1,3 @@
+brew 'pyenv'
+brew 'vim'
+brew 'fzf'

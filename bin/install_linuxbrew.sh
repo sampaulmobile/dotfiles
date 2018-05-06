@@ -8,6 +8,3 @@ git clone https://github.com/Linuxbrew/brew.git $HOME/.linuxbrew
 echo 'export PATH="/home/$USER/.linuxbrew/bin:$PATH"' >> $RCFILE
 echo 'export MANPATH="/home/$USER/.linuxbrew/share/man:$MANPATH"' >> $RCFILE
 echo 'export INFOPATH="/home/$USER/.linuxbrew/share/info:$INFOPATH"' >> $RCFILE
-source $RCFILE
-brew update
-brew doctor
