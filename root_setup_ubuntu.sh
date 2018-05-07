@@ -6,7 +6,7 @@ PUB_KEY_URL=https://www.dropbox.com/s/rwvh7mfqwm4zx0f/id_rsa_linode.pub?dl=0
 # install stuff
 apt-get update
 apt-get upgrade -y
-apt-get install -y git vim zsh wget curl make build-essential
+apt-get install -y git vim zsh tmux wget curl make build-essential
 apt-get install -y libssl-dev zlib1g-dev libbz2-dev libreadline-dev \
     libsqlite3-dev llvm libncurses5-dev libncursesw5-dev xz-utils tk-dev cmake
 
