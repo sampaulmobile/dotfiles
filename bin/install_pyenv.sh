@@ -1,5 +1,5 @@
 if [ $# -eq 0 ] && [ -d $HOME/.pyenv ]; then
-	exit 0
+	exit 1
 fi
 
 RCFILE=$HOME/.zshenv

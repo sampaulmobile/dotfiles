@@ -1,5 +1,5 @@
 if [ $# -eq 0 ] && [ -f /usr/local/bin/pip ]; then
-	exit 0
+	exit 1
 fi
 
 curl -o /tmp/get-pip.py https://bootstrap.pypa.io/get-pip.py

@@ -1,5 +1,5 @@
 if [ $# -eq 0 ] && [ -d $HOME/.fzf ]; then
-	exit 0
+	exit 1
 fi
 
 git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf

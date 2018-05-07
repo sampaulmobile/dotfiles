@@ -1,5 +1,5 @@
 if [ $# -eq 0 ] && [ -d $HOME/.rvm ]; then
-	exit 0
+	exit 1
 fi
 
 \curl -sSL https://get.rvm.io | bash

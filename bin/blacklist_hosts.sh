@@ -1,5 +1,5 @@
 if [ $# -eq 0 ] && grep -q "StevenBlack/hosts" /etc/hosts; then
-	exit 0
+	exit 1
 fi
 
 sudo -v

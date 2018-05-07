@@ -8,7 +8,7 @@ apt-get update
 apt-get upgrade -y
 apt-get install -y git vim zsh wget curl make build-essential
 apt-get install -y libssl-dev zlib1g-dev libbz2-dev libreadline-dev \
-    libsqlite3-dev llvm libncurses5-dev libncursesw5-dev xz-utils tk-dev
+    libsqlite3-dev llvm libncurses5-dev libncursesw5-dev xz-utils tk-dev cmake
 
 # create user and assign password
 adduser $NEW_USER --gecos "" --disabled-password

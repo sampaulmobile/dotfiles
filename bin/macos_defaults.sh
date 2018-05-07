@@ -2,7 +2,7 @@
 keyRepeat=$(defaults read NSGlobalDomain KeyRepeat)
 initKeyRepeat=$(defaults read NSGlobalDomain InitialKeyRepeat)
 if [ $keyRepeat -eq 1 ] && [ $initKeyRepeat -eq 15 ]; then
-	exit 0
+	exit 1
 fi
 
 

@@ -1,5 +1,5 @@
 if [ $# -eq 0 ] && [ -f ~/.vim/autoload/plug.vim ]; then
-    exit 0
+    exit 1
 fi
 
 curl -fLo ~/.vim/autoload/plug.vim --create-dirs \

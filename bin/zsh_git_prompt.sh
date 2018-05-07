@@ -1,5 +1,5 @@
 if [ $# -eq 0 ] && [ -d $HOME/.zsh-git-prompt ]; then
-	exit 0
+	exit 1
 fi
 
 GIT_URL=https://github.com/olivierverdier/zsh-git-prompt.git
