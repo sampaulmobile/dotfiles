@@ -56,7 +56,7 @@ if [ -d $NOT_PUBLIC/links ]; then
 	ln -s $NOT_PUBLIC/keys/sam.paul.vpn.key ~/.kube/client.key
     fi
 
-    if [ -d $NOT_PUBLIC/keys/Configurations ]; then
+    if [ -d $HOME/Library/Application\ Support/Tunnelblick ]; then
 	mv ~/Library/Application\ Support/Tunnelblick/Configurations $deldir
 	ln -s $NOT_PUBLIC/keys/Configurations ~/Library/Application\ Support/Tunnelblick/Configurations
     fi
