@@ -72,6 +72,9 @@ alias pscpu10='ps auxf | sort -nr -k 3 | head -10'
 ## Get server cpu info ##
 alias cpuinfo='lscpu'
 
+wttr_weather() { curl "wttr.in/${1:-10003}" }
+alias ww='wttr_weather'
+
 
 # ============ GIT =============
 # alias g='git'
