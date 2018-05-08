@@ -74,6 +74,10 @@ alias gpp='git pull && git push'
 alias gitrm='git reset --hard origin/master'
 
 
+# ============ TMUX =============
+alias t='tmux'
+
+
 # ============ BREW =============
 alias bserv='brew services list'
 alias bstart='brew services start'
