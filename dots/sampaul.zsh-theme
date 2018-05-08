@@ -1,31 +1,33 @@
+
+PROMPTS=()
 # Get the current ruby version in use with RVM:
 if [ -e ~/.rvm/bin/rvm-prompt ]; then
     RUBY_PROMPT_="%{$FG[124]%}\$(~/.rvm/bin/rvm-prompt v g)%{$reset_color%}"
+    PROMPTS+=$RUBY_PROMPT_
 fi
 
 # get the current python version with pyenv
 if [ -d ~/.pyenv ]; then
     PYTHON_PROMPT_="%{$FG[136]%}\$(pyenv version-name)%{$reset_color%}"
+    PROMPTS+=$PYTHON_PROMPT_
 fi
 
 # get the current python version with pyenv
 if [ -d ~/.kube ]; then
     KUBE_PROMPT_="%{$FG[140]%}\$(kcc)%{$reset_color%}"
+    PROMPTS+=$KUBE_PROMPT_
 fi
 
-if [ -e ~/.rvm/bin/rvm-prompt ] || [ -d ~/.pyenv ] || [ -d ~/.kube ]; then
-    VERS_PROMPT_="%{$fg_bold[blue]%}("
-    if [ -e ~/.rvm/bin/rvm-prompt ]; then
-        VERS_PROMPT_=$VERS_PROMPT_$RUBY_PROMPT_
-    fi
-    if [ -d ~/.pyenv ]; then
-        VERS_PROMPT_=$VERS_PROMPT_"%{$fg_bold[blue]%}|"$PYTHON_PROMPT_
-    fi
-    if [ -d ~/.kube ]; then
-        VERS_PROMPT_=$VERS_PROMPT_"%{$fg_bold[blue]%}|"$KUBE_PROMPT_
-    fi
-    VERS_PROMPT_=$VERS_PROMPT_"%{$fg_bold[blue]%})%{$reset_color%} "
-fi
+VERS_PROMPT_="%{$fg_bold[blue]%}("
+for i in $PROMPTS; do 
+  idx=${PROMPTS[(ie)$i]}
+
+  if [ $idx != 1 ]; then
+    VERS_PROMPT_=$VERS_PROMPT_"%{$fg_bold[blue]%}|"
+  fi
+  VERS_PROMPT_=$VERS_PROMPT_"${i}"
+done
+VERS_PROMPT_=$VERS_PROMPT_"%{$fg_bold[blue]%})%{$reset_color%} "
 
 # if superuser make the username red
 if [ $UID -eq 0 ]; then NCOLOR="red"; else NCOLOR="white"; fi
@@ -49,8 +51,8 @@ GIT=$'$(git_super_status)
 %(!.#.$) ' 
 fi
 
-PROMPT=$HOST$DIR$GIT
-# PROMPT=$HOST$DIR$VERS_PROMPT_$GIT
+# PROMPT=$HOST$DIR$GIT
+PROMPT=$HOST$DIR$VERS_PROMPT_$GIT
 #RPROMPT='!%{%B%F{cyan}%}%!%{%f%k%b%}'
 
 # Display time in rprompt
