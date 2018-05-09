@@ -291,6 +291,9 @@ hi Folded guibg=#3e3e3e
 hi Folded guifg=#b0b0b0
 " set background=light             "Options are 'dark' or 'light'
 
+" color fix for running vim in tmux
+hi Normal ctermbg=NONE
+
 function! s:goyo_enter()
     colorscheme pencil
 endfunction
