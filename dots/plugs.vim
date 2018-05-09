@@ -85,6 +85,9 @@ Plug 'kien/ctrlp.vim'
 Plug 'junegunn/fzf', { 'dir': '~/.fzf', 'do': './install --all' }
 Plug 'junegunn/fzf.vim'
 
+" Switch between vim/tmux panes seamlessly
+Plug 'christoomey/vim-tmux-navigator'
+
 " 'distraction free writing in vim'
 " Plug 'junegunn/goyo.vim'
 
