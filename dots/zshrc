@@ -1,7 +1,7 @@
 ###### ===== THE BEST ZSHRC FILE EVER by Sam Paul ===== ######
 DOTS=$HOME/dotfiles/dots
 SOURCES=$HOME/dotfiles/sources
-NOT_PUBLIC=$HOME/dropbox/!public
+NOT_PUBLIC=$HOME/Dropbox/!Public
 
 # ===== OH-MY-ZSH ========
 ZSH=$HOME/.oh-my-zsh
