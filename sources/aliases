@@ -43,6 +43,8 @@ alias egrep='egrep --colour=auto'
 #alias rmv='rsync -v --progress --remove-source-files'
 alias which='which -a'
 alias m='mvim'
+open_vim() { vim ${1:-.}}
+alias v='open_vim'
 
 alias g='rg --follow --smart-case'
 alias hist="rg -N '' $NOT_PUBLIC/history/*"
@@ -93,6 +95,11 @@ alias gitrm='git reset --hard origin/master'
 
 # ============ TMUX =============
 alias t='tmux'
+alias tl='tmux ls'
+tmux_attach() { tmux a -t ${1:-base} }
+alias ta='tmux_attach'
+tmux_new() { tmux new -s ${1:-base} }
+alias tn='tmux_new'
 
 
 # ============ BREW =============
