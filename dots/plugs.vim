@@ -73,7 +73,7 @@ Plug 'tpope/vim-fugitive' "| Plug 'tpope/vim-rhubarb'
 Plug 'sjl/gundo.vim'
 
 " Visually display indent levels in code
-Plug 'nathanaelkane/vim-indent-guides'
+" Plug 'nathanaelkane/vim-indent-guides'
 
 " Minimal airline
 Plug 'itchyny/lightline.vim'
