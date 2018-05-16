@@ -61,6 +61,8 @@ if [ -d $NOT_PUBLIC/links ]; then
 	ln -s $NOT_PUBLIC/keys/sam.paul.vpn.crt ~/.kube/client.crt
 	mv ~/.kube/client.key $deldir
 	ln -s $NOT_PUBLIC/keys/sam.paul.vpn.key ~/.kube/client.key
+	mv ~/.kube/ca.crt $deldir
+	ln -s $NOT_PUBLIC/keys/docurated.intermediate.crt ~/.kube/ca.crt
     fi
 
     if [ -d $HOME/Library/Application\ Support/Tunnelblick ]; then
