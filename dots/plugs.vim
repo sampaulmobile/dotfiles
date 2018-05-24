@@ -47,24 +47,24 @@ Plug 'tmhedberg/SimpylFold'
 Plug 'godlygeek/tabular'
 
 " Autocomplete stuff
-Plug 'Valloric/YouCompleteMe'
+" Plug 'Valloric/YouCompleteMe'
 
 " Ultisnips + snippets + supertab to make it work with YCM
-Plug 'SirVer/ultisnips' | Plug 'honza/vim-snippets' | Plug 'ervandew/supertab'
+" Plug 'SirVer/ultisnips' | Plug 'honza/vim-snippets' | Plug 'ervandew/supertab'
 
 " ======================== VIM Tools =======================
-
-" NERDTree and tabs together in Vim
-Plug 'jistr/vim-nerdtree-tabs'
 
 " NERDTree BRO!
 Plug 'scrooloose/nerdtree'
 
-" Show git diff in vim 'gutter'
-Plug 'airblade/vim-gitgutter'
+" NERDTree and tabs together in Vim
+Plug 'jistr/vim-nerdtree-tabs'
 
 " Add git status indicators to NERDTree
 Plug 'Xuyuanp/nerdtree-git-plugin'
+
+" Show git diff in vim 'gutter'
+Plug 'airblade/vim-gitgutter'
 
 " Git wrapper - :gblame, :gbrowse, etc.
 Plug 'tpope/vim-fugitive' "| Plug 'tpope/vim-rhubarb'
@@ -95,5 +95,6 @@ Plug 'christoomey/vim-tmux-navigator'
 Plug 'sjl/badwolf'
 Plug 'tomasr/molokai'
 Plug 'reedes/vim-colors-pencil'
+Plug 'morhetz/gruvbox'
 
 call plug#end()

@@ -42,10 +42,6 @@ alias egrep='egrep --colour=auto'
 #alias rcp='rsync -v --progress'
 #alias rmv='rsync -v --progress --remove-source-files'
 alias which='which -a'
-alias m='mvim'
-open_vim() { vim ${1:-.}}
-alias v='open_vim'
-
 alias g='rg --follow --smart-case'
 alias hist="rg -N '' $NOT_PUBLIC/history/*"
 hist_g() {
@@ -53,7 +49,8 @@ hist_g() {
     LC_ALL='C' sed -E 's/^\: [0-9]+\:[0-9]\;//g' | grep "$1"
 }
 alias h='hist_g'
-
+alias m='mvim'
+alias v='vim'
 
 psgrep() { ps aux | grep $1 | grep -v grep }
 alias psg=psgrep
