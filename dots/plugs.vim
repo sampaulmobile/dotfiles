@@ -3,7 +3,7 @@ call plug#begin('~/.vim/plugs')
 " ======================== Syntax =======================
 
 " Asynchronous lint engine
-Plug 'w0rp/ale'
+" Plug 'w0rp/ale'
 
 " Syntax highlighting for salt
 Plug 'saltstack/salt-vim'
@@ -73,7 +73,7 @@ Plug 'tpope/vim-fugitive' "| Plug 'tpope/vim-rhubarb'
 Plug 'sjl/gundo.vim'
 
 " Visually display indent levels in code
-" Plug 'nathanaelkane/vim-indent-guides'
+Plug 'nathanaelkane/vim-indent-guides'
 
 " Minimal airline
 Plug 'itchyny/lightline.vim'
