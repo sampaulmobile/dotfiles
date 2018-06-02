@@ -3,6 +3,9 @@
 # get dotfiles dir
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
+# get sudo privs upfront
+sudo -v
+
 # accept xcode command line tools terms
 xcode-select --install
 
