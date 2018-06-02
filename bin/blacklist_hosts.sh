@@ -12,4 +12,4 @@ sudo -v
 # rm -rf $tmp_dir
 
 curl -o /tmp/hosts https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews/hosts
-mv -f /tmp/hosts /etc/hosts
+sudo mv -f /tmp/hosts /etc/hosts
