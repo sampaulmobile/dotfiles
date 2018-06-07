@@ -1,10 +1,9 @@
 
 keyRepeat=$(defaults read NSGlobalDomain KeyRepeat)
 initKeyRepeat=$(defaults read NSGlobalDomain InitialKeyRepeat)
-if [ $keyRepeat -eq 1 ] && [ $initKeyRepeat -eq 15 ]; then
+if [ $# -eq 0 ] && [ $keyRepeat -eq 1 ] && [ $initKeyRepeat -eq 15 ]; then
 	exit 1
 fi
-
 
 # Close any open System Preferences panes, to prevent them from overriding
 # settings we’re about to change
@@ -46,15 +45,15 @@ defaults write com.apple.universalaccess closeViewScrollWheelToggle -bool true
 defaults write com.apple.universalaccess HIDScrollZoomModifierMask -int 262144
 
 # Stop iTunes from responding to the keyboard media keys
-#launchctl unload -w /System/Library/LaunchAgents/com.apple.rcd.plist 2> /dev/null
+launchctl unload -w /System/Library/LaunchAgents/com.apple.rcd.plist 2> /dev/null
 
 # Save screenshots in PNG format (other options: BMP, GIF, JPG, PDF, TIFF)
 defaults write com.apple.screencapture type -string "jpg"
 
-# Set Desktop as the default location for new Finder windows
+# Set $Home as the default location for new Finder windows
 # For other paths, use `PfLo` and `file:///full/path/here/`
-# defaults write com.apple.finder NewWindowTarget -string "PfDe"
-# defaults write com.apple.finder NewWindowTargetPath -string "file://${HOME}/Desktop/"
+defaults write com.apple.finder NewWindowTarget -string "PfLo"
+defaults write com.apple.finder NewWindowTargetPath -string "file://${HOME}/"
 
 # Show icons for hard drives, servers, and removable media on the desktop
 defaults write com.apple.finder ShowExternalHardDrivesOnDesktop -bool true
@@ -87,6 +86,8 @@ defaults write com.apple.dock autohide -bool true
 defaults write com.apple.dock autohide-delay -float 0
 # Remove the animation when hiding/showing the Dock
 defaults write com.apple.dock autohide-time-modifier -float 0
+# Minimize dock size
+defaults write com.apple.dock tilesize -int 8
 
 # Hot corners
 # Possible values:
