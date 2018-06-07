@@ -28,6 +28,7 @@ set softtabstop=4
 set tabstop=4
 set expandtab
 set autochdir " always set pwd to path of current file
+set clipboard=unnamed           "Allow vim to access OS clipboard
 " set cin
 " set autoindent
 " set smartindent
