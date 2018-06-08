@@ -50,7 +50,16 @@ hist_g() {
 }
 alias h='hist_g'
 alias m='mvim'
-alias v='vim'
+launch_vim() {
+    if [ -n "$TMUX" ]; then
+        curr_folder=${PWD##*/}
+        tmux new-window -a -n $curr_folder
+        tmux send-keys -t $curr_folder "vim $1" Enter
+    else
+        vim $1
+    fi
+}
+alias v='launch_vim'
 
 psgrep() { ps aux | grep $1 | grep -v grep }
 alias psg=psgrep
