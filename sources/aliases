@@ -53,8 +53,7 @@ alias m='mvim'
 launch_vim() {
     if [ -n "$TMUX" ]; then
         curr_folder=${PWD##*/}
-        tmux new-window -a -n $curr_folder
-        tmux send-keys -t $curr_folder "vim $1" Enter
+        tmux new-window -a -n $curr_folder "source $HOME/.zshrc && vim $1"
     else
         vim $1
     fi
