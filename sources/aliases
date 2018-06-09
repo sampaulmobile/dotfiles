@@ -1,7 +1,6 @@
 # ============ Aliases =============
 
 # ============ FILES =============
-alias todo='vim $NOT_PUBLIC/notes/todo/personal.taskpaper'
 alias notes='cd $NOT_PUBLIC/notes && vim .'
 alias crypto='cd $NOT_PUBLIC/crypto'
 alias cryp='cd $NOT_PUBLIC/crypto'
@@ -14,6 +13,16 @@ alias dev='cd ~/Development/SBP'
 alias cdown='cd ~/Downloads'
 alias soz='source ~/.zshrc'
 alias cpwd="pwd | tr -d '\n' | pbcopy"
+
+launch_todo() {
+    fpath=$NOT_PUBLIC/notes/todo/personal.taskpaper
+    if [ -n "$TMUX" ]; then
+        tmux new-window -a -n todo "source $HOME/.zshrc && vim $fpath"
+    else
+        vim $fpath
+    fi
+}
+alias todo='launch_todo'
 
 creds() {
     grep -i $1 --exclude=ssh_known_hosts $NOT_PUBLIC/links/*
