@@ -105,6 +105,10 @@ alias gpush='git push'
 alias gmm='git merge master'
 alias gpp='git pull && git push'
 alias gitrm='git reset --hard origin/master'
+gcamp() {
+    gcam $1
+    gpp
+}
 
 
 # ============ TMUX =============
