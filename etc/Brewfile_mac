@@ -8,6 +8,7 @@ brew 'ripgrep'
 brew 'fzf'
 brew 'macvim'
 brew 'awscli'
+brew 'exa'
 
 cask 'google-chrome'
 cask 'iterm2'

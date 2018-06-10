@@ -2,13 +2,14 @@
 DOTS=$HOME/dotfiles/dots
 SOURCES=$HOME/dotfiles/sources
 NOT_PUBLIC=$HOME/Dropbox/!Public
+typeset -U path
 
 # ===== OH-MY-ZSH ========
 ZSH=$HOME/.oh-my-zsh
 ZSH_THEME="sampaul"
 SYNTAX_DIR=$ZSH/custom/plugins/zsh-syntax-highlighting
 
-plugins=(jira zsh-syntax-highlighting)
+# plugins=(zsh-syntax-highlighting)
 [[ -f "$ZSH/oh-my-zsh.sh" ]] && source $ZSH/oh-my-zsh.sh
 
 # ===== ZSH SYNTAX-HIGHLIGHTING =====
@@ -23,8 +24,7 @@ ZSH_THEME_GIT_PROMPT_CHANGED="%{$FG[009]%}%{✚%G%}"
 [[ -d "$HOME/.pyenv" ]] && eval "$(pyenv init -)"
 
 # ===== RVM =====
-[[ -s "$HOME/.rvm/scripts/rvm" ]] && source "$HOME/.rvm/scripts/rvm"
-typeset -U path
+# [[ -s "$HOME/.rvm/scripts/rvm" ]] && source "$HOME/.rvm/scripts/rvm"
 
 # ===== FZF =====
 set -o vi

@@ -40,6 +40,9 @@ alias note='make_note'
 
 
 # ============ UNIX =============
+if which exa >/dev/null 2>&1; then
+    alias ls='exa'
+fi
 alias c='clear'
 alias cp='cp -iv'
 alias mv='mv -iv'
