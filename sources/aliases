@@ -108,12 +108,23 @@ alias gitrm='git reset --hard origin/master'
 
 
 # ============ TMUX =============
-alias t='tmux'
 alias tl='tmux ls'
 tmux_attach() { tmux a -t ${1:-base} }
 alias ta='tmux_attach'
-tmux_new() { tmux new -s ${1:-base} }
+tmux_new() { tmux new -A -s ${1:-base} }
 alias tn='tmux_new'
+tmux_wrapper() {
+    if [ $# -eq 0 ]; then
+        if [ -n "$TMUX" ]; then
+            echo "SMOOTH BRO"
+        else
+            tn
+        fi
+    else
+        tmux "$@"
+    fi
+}
+alias t='tmux_wrapper'
 
 
 # ============ BREW =============
