@@ -9,7 +9,7 @@ ZSH=$HOME/.oh-my-zsh
 ZSH_THEME="sampaul"
 SYNTAX_DIR=$ZSH/custom/plugins/zsh-syntax-highlighting
 
-# plugins=(zsh-syntax-highlighting)
+plugins=(zsh-syntax-highlighting)
 [[ -f "$ZSH/oh-my-zsh.sh" ]] && source $ZSH/oh-my-zsh.sh
 
 # ===== ZSH SYNTAX-HIGHLIGHTING =====

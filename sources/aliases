@@ -65,7 +65,7 @@ alias m='mvim'
 launch_vim() {
     if [ -n "$TMUX" ]; then
         curr_folder=${PWD##*/}
-        tmux new-window -a -n $curr_folder "source $HOME/.zshrc && vim $1"
+        tmux new-window -a -n $curr_folder "export TERM='xterm-256color' && vim $1"
     else
         vim $1
     fi
