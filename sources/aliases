@@ -37,6 +37,7 @@ make_note() {
     fi
 }
 alias note='make_note'
+alias study_time='cd $NOT_PUBLIC/study/EPI && ../study_time.sh'
 
 
 # ============ UNIX =============
