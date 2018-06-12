@@ -166,6 +166,7 @@ alias rvml='rvm list'
 alias rvmgl='rvm gemset list'
 alias rvmg='rvm gemset use'
 alias rvmrc="echo 'rvm --create use$1' >> .rvmrc"
+alias loadrvm='. "$HOME/.rvm/scripts/rvm"'
 
 
 # ============ RAILS =============

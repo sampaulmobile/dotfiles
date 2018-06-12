@@ -1,19 +1,19 @@
 
 PROMPTS=()
 # Get the current ruby version in use with RVM:
-if [ -e ~/.rvm/bin/rvm-prompt ]; then
+if which rvm >/dev/null 2>&1; then
     RUBY_PROMPT_="%{$FG[124]%}\$(~/.rvm/bin/rvm-prompt v g)%{$reset_color%}"
     PROMPTS+=$RUBY_PROMPT_
 fi
 
 # get the current python version with pyenv
-if [ -d ~/.pyenv ]; then
+if which pyenv >/dev/null 2>&1; then
     PYTHON_PROMPT_="%{$FG[136]%}\$(pyenv version-name)%{$reset_color%}"
     PROMPTS+=$PYTHON_PROMPT_
 fi
 
 # get the current python version with pyenv
-if [ -d ~/.kube ]; then
+if which kubectl >/dev/null 2>&1; then
     KUBE_PROMPT_="%{$FG[140]%}\$(kcc)%{$reset_color%}"
     PROMPTS+=$KUBE_PROMPT_
 fi
@@ -46,7 +46,7 @@ DIR="%{$reset_color%}:%{$FG[208]%}%40<...<%~%<<%{$reset_color%} "
 # DIR="%{$reset_color%}:%{$FG[208]%}%~%{$reset_color%}|"
 
 GIT=""
-if [ -d ~/.pyenv ]; then
+if which pyenv >/dev/null 2>&1; then
 GIT=$'$(git_super_status)
 %(!.#.$) ' 
 fi
