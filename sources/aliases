@@ -55,7 +55,17 @@ alias egrep='egrep --colour=auto'
 #alias rcp='rsync -v --progress'
 #alias rmv='rsync -v --progress --remove-source-files'
 alias which='which -a'
-alias g='rg --follow --smart-case'
+alias rg_better='rg --follow --smart-case'
+grep_filetype() {
+    if [ $# -eq 2 ]; then
+        rg_better -g "*.$2" $1
+    else
+        rg_better $1
+    fi
+}
+alias g='grep_filetype'
+
+
 alias hist="rg -N '' $NOT_PUBLIC/history/*"
 hist_g() {
     rg -e "^[^#]" -N --no-filename $NOT_PUBLIC/history/* |

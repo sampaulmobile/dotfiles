@@ -214,7 +214,7 @@ let g:indent_guides_enable_on_vim_startup = 1
 " --color: Search color options
 let g:rg_command = '
   \ rg --column --line-number --no-heading --fixed-strings --ignore-case 
-  \ --no-ignore --hidden --follow --color "always"
+  \ --hidden --follow --color "always"
   \ -g "!{.git,node_modules,vendor}/*" '
 command! -bang -nargs=* Find call fzf#vim#grep(g:rg_command .shellescape(<q-args>), 1, <bang>0)
 nmap <Leader>f :Find<CR>
