@@ -199,7 +199,7 @@ alias buzz='hit_buzzer'
 
 
 # ============ VIM (cleanup) =============
-alias rmswp='find . -name "*.sw*" | xargs rm'
+alias rmswp='find . -name "*.sw[g-p]" | xargs rm'
 rmpython() {
     find . -name "*.pyc*" | xargs rm
     find . -name "*.pyo*" | xargs rm
