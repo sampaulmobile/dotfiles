@@ -79,7 +79,7 @@ Plug 'nathanaelkane/vim-indent-guides'
 Plug 'itchyny/lightline.vim'
 
 " Fuzzy file, buffer, mru, tag, etc finder
-Plug 'kien/ctrlp.vim'
+" Plug 'kien/ctrlp.vim'
 
 " FZF
 Plug 'junegunn/fzf', { 'dir': '~/.fzf', 'do': './install --all' }

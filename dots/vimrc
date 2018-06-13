@@ -147,23 +147,29 @@ let NERDTreeIgnore = ['\.pyc$','\.pyo$', '\.db$', '__pycache__']
 " open NERDtree in console
 let g:nerdtree_tabs_open_on_console_startup=1
 
-if executable('rg')
-  set grepprg=rg\ --color=never
-  let g:ctrlp_user_command = 'rg %s --files --color=never --glob ""'
-  let g:ctrlp_use_caching = 0
-endif
+" FZF (replacing Ctrl-P, FuzzyFinder and Command-T)
 
-" CtrlP toggle set to leader + t
-map <leader>t :CtrlP<CR>
+" --column: Show column number
+" --line-number: Show line number
+" --no-heading: Do not show file headings in results
+" --fixed-strings: Search term as a literal string
+" --ignore-case: Case insensitive search
+" --no-ignore: Do not respect .gitignore, etc...
+" --hidden: Search hidden files and folders
+" --follow: Follow symlinks
+" --glob: Additional conditions for search (in this case ignore everything in the .git/ folder)
+" --color: Search color options
+let g:rg_command = '
+  \ rg --column --line-number --no-heading --fixed-strings --ignore-case 
+  \ --follow --color "always"
+  \ -g "!{.git,node_modules,vendor}/*" '
+command! -bang -nargs=* Find call fzf#vim#grep(g:rg_command .shellescape(<q-args>), 1, <bang>0)
+nmap <Leader>f :Find<CR>
+nmap <Leader>t :GitFiles<CR>
 
-" leader + shift + t => reload CtrlP
-nnoremap <silent> <leader>T :ClearCtrlPCache<cr>\|:CtrlP<cr>
-let g:ctrlp_custom_ignore = {
-  \ 'file': '\v\.(pyc|pyo)$',
-  \ }
-" have CtrlP follow symlinks
-let g:ctrlp_follow_symlinks = 1
-
+" Mappings for fugitive
+map <leader>gb :Gblame<CR>
+map <leader>gh :Gbrowse<CR>
 " TComment remap to c key
 map <leader>/ <c-_><c-_>
 
@@ -193,35 +199,6 @@ let g:UltiSnipsJumpBackwardTrigger = "<s-tab>"
 let g:indent_guides_guide_size = 1
 let g:indent_guides_color_change_percent = 3
 let g:indent_guides_enable_on_vim_startup = 1
-
-" FZF (replaces Ctrl-P, FuzzyFinder and Command-T)
-" set rtp+=/usr/local/opt/fzf
-" set rtp+=~/.fzf
-" nmap ; :Buffers<CR>
-" nmap <Leader>r :Tags<CR>
-" nmap <Leader>t :Files<CR>
-" nmap <Leader>a :Ag<CR>
-
-" --column: Show column number
-" --line-number: Show line number
-" --no-heading: Do not show file headings in results
-" --fixed-strings: Search term as a literal string
-" --ignore-case: Case insensitive search
-" --no-ignore: Do not respect .gitignore, etc...
-" --hidden: Search hidden files and folders
-" --follow: Follow symlinks
-" --glob: Additional conditions for search (in this case ignore everything in the .git/ folder)
-" --color: Search color options
-let g:rg_command = '
-  \ rg --column --line-number --no-heading --fixed-strings --ignore-case 
-  \ --hidden --follow --color "always"
-  \ -g "!{.git,node_modules,vendor}/*" '
-command! -bang -nargs=* Find call fzf#vim#grep(g:rg_command .shellescape(<q-args>), 1, <bang>0)
-nmap <Leader>f :Find<CR>
-
-" Mappings for fugitive
-map <leader>gb :Gblame<CR>
-map <leader>gh :Gbrowse<CR>
 
 " GitGutter
 let g:gitgutter_sign_added = '∙'
