@@ -52,6 +52,9 @@ Plug 'godlygeek/tabular'
 " Ultisnips + snippets + supertab to make it work with YCM
 " Plug 'SirVer/ultisnips' | Plug 'honza/vim-snippets' | Plug 'ervandew/supertab'
 
+" latex editing/compiling
+Plug 'lervag/vimtex', { 'for': 'tex' }
+
 " ======================== VIM Tools =======================
 
 " NERDTree BRO!

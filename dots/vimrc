@@ -1,5 +1,6 @@
 " =============================  GENERAL CONFIG  ==============================
 let mapleader=","               "Change leader to a comma
+let maplocalleader = "\\"       "Change local leader to backslash
 
 " win 120 80                    "Make window 80 wide x 45 tall
 set nocompatible                "Use vim defaults
@@ -215,6 +216,9 @@ let g:ale_echo_msg_format = '[%linter%] %s [%severity%]'
 let g:ale_lint_on_text_changed = 'never'
 highlight link ALEWarningSign String
 highlight link ALEErrorSign Title
+
+" disable polyglot when using latex
+let g:polyglot_disabled = ['latex']
 
 " Lightline
 let g:lightline = {
