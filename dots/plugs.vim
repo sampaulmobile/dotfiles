@@ -47,10 +47,10 @@ Plug 'tmhedberg/SimpylFold'
 Plug 'godlygeek/tabular'
 
 " Autocomplete stuff
-" Plug 'Valloric/YouCompleteMe'
+Plug 'Valloric/YouCompleteMe'
 
 " Ultisnips + snippets + supertab to make it work with YCM
-" Plug 'SirVer/ultisnips' | Plug 'honza/vim-snippets' | Plug 'ervandew/supertab'
+Plug 'SirVer/ultisnips' | Plug 'honza/vim-snippets' | Plug 'ervandew/supertab'
 
 " latex editing/compiling
 Plug 'lervag/vimtex', { 'for': 'tex' }
@@ -80,9 +80,6 @@ Plug 'nathanaelkane/vim-indent-guides'
 
 " Minimal airline
 Plug 'itchyny/lightline.vim'
-
-" Fuzzy file, buffer, mru, tag, etc finder
-" Plug 'kien/ctrlp.vim'
 
 " FZF
 Plug 'junegunn/fzf', { 'dir': '~/.fzf', 'do': './install --all' }
