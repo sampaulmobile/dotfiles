@@ -166,7 +166,13 @@ let g:rg_command = '
   \ -g "!{.git,node_modules,vendor}/*" '
 command! -bang -nargs=* Find call fzf#vim#grep(g:rg_command .shellescape(<q-args>), 1, <bang>0)
 nmap <Leader>f :Find<CR>
-nmap <Leader>t :GitFiles --others<CR>
+
+function! s:find_git_root()
+  return system('git rev-parse --show-toplevel 2> /dev/null')[:-2]
+endfunction
+command! ProjectFiles execute 'Files' s:find_git_root()
+nmap <Leader>t :ProjectFiles<CR>
+
 
 " Mappings for fugitive
 map <leader>gb :Gblame<CR>

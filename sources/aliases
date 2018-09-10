@@ -15,11 +15,11 @@ alias soz='source ~/.zshrc'
 alias cpwd="pwd | tr -d '\n' | pbcopy"
 
 launch_todo() {
-    fpath=$NOT_PUBLIC/notes/todo/personal.taskpaper
+    filepath=$NOT_PUBLIC/notes/todo/personal.taskpaper
     if [ -n "$TMUX" ]; then
-        tmux new-window -a -n todo "source $HOME/.zshrc && vim $fpath"
+        tmux new-window -a -n todo "source $HOME/.zshrc && vim $filepath"
     else
-        vim $fpath
+        vim $filepath
     fi
 }
 alias todo='launch_todo'
@@ -37,7 +37,7 @@ make_note() {
     fi
 }
 alias note='make_note'
-alias study_time='cd $NOT_PUBLIC/study/EPI && ../study_time.sh'
+alias study_time='cd $NOT_PUBLIC/study/leetcode && ../study_time.sh'
 
 
 # ============ UNIX =============
@@ -210,3 +210,59 @@ rmpython() {
     find . -name "*.pyo*" | xargs rm
 }
 alias rmpy=rmpython
+
+
+# ===== KUBE ========
+alias kc='kubectl config use-context'
+alias kcont='kubectl config use-context'
+alias kcc='kubectl config current-context'
+
+kube_pods_grep() {
+    kubectl get pods | grep "$1"
+}
+alias kpods='kube_pods_grep'
+
+kube_jobs_grep() {
+    kubectl get jobs | grep "$1"
+}
+alias kjobs='kube_jobs_grep'
+
+kube_deployments_grep() {
+    kubectl get deployments | grep "$1"
+}
+alias kdeps='kube_deployments_grep'
+
+alias kdes='kubectl describe'
+alias kdesp='kubectl describe pod'
+alias kdesj='kubectl describe job'
+alias kdesd='kubectl describe deployment'
+
+alias kdel='kubectl delete'
+alias kdelp='kubectl delete pod'
+alias kdelj='kubectl delete job'
+alias kdeld='kubectl delete deployment'
+
+alias kprox='kubectl proxy &'
+alias killkprox="pkill -f 'kubectl proxy'"
+
+alias hvals='helm get values'
+
+kube_pod_grep() {
+    kubectl get pods | grep "$1" | awk '{print $1}'
+}
+alias kpodg="kube_pod_grep"
+
+kube_connect() {
+    kubectl exec -it $1 bash
+}
+alias kube_conn="kube_connect"
+
+kube_grep_connect() {
+    kube_conn `kpodg $1`
+}
+alias ck="kube_connect"
+alias ckg="kube_grep_connect"
+
+
+
+

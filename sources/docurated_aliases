@@ -93,55 +93,6 @@ connect_tab() {
 
 
 # ===== KUBE ========
-alias kc='kubectl config use-context'
-alias kcont='kubectl config use-context'
-alias kcc='kubectl config current-context'
-
-kube_pods_grep() {
-    kubectl get pods | grep "$1"
-}
-alias kpods='kube_pods_grep'
-
-kube_jobs_grep() {
-    kubectl get jobs | grep "$1"
-}
-alias kjobs='kube_jobs_grep'
-
-kube_deployments_grep() {
-    kubectl get deployments | grep "$1"
-}
-alias kdeps='kube_deployments_grep'
-
-alias kdes='kubectl describe'
-alias kdesp='kubectl describe pod'
-alias kdesj='kubectl describe job'
-alias kdesd='kubectl describe deployment'
-
-alias kdel='kubectl delete'
-alias kdelp='kubectl delete pod'
-alias kdelj='kubectl delete job'
-alias kdeld='kubectl delete deployment'
-
-alias kprox='kubectl proxy &'
-alias killkprox="pkill -f 'kubectl proxy'"
-
-alias hvals='helm get values'
-
-kube_pod_grep() {
-    kubectl get pods | grep "$1" | awk '{print $1}'
-}
-alias kpodg="kube_pod_grep"
-
-kube_connect() {
-    kubectl exec -it $1 bash
-}
-alias kube_conn="kube_connect"
-
-kube_grep_connect() {
-    kube_conn `kpodg $1`
-}
-alias ck="kube_connect"
-alias ckg="kube_grep_connect"
 alias ckairweb="ckg airflow-webserver"
 alias ckairwork="ckg airflow-worker"
 alias ckairsched="ckg airflow-scheduler"
@@ -457,7 +408,7 @@ arc_patch_merge() {
 alias arcpm='arc_patch_merge'
 arc_copy_diff_to_clipboard() {
     num=${1:-1}
-    diff=`arcl | head -n $num | tail -n 1 | g -o 'D\d+'`
+    diff=`arcl | head -n $num | tail -n 1 | rg -o 'D\d+'`
     echo "$PHAB_URL/$diff" | pbcopy
     echo "Copied $PHAB_URL/$diff to clipboard!"
 }
