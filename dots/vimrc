@@ -173,10 +173,10 @@ endfunction
 command! ProjectFiles execute 'Files' s:find_git_root()
 nmap <Leader>t :ProjectFiles<CR>
 
-
 " Mappings for fugitive
 map <leader>gb :Gblame<CR>
 map <leader>gh :Gbrowse<CR>
+
 " TComment remap to c key
 map <leader>/ <c-_><c-_>
 
