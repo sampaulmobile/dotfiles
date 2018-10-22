@@ -83,10 +83,21 @@ launch_vim() {
 }
 alias v='launch_vim'
 
-psgrep() { ps aux | grep $1 | grep -v grep }
+psgrep() { ps aux | grep -v grep | fzf -0 -q $1 }
 alias psg=psgrep
-psgrepi() { ps aux | grep -i $1 | grep -v grep }
-alias psgi=psgrepi
+
+psgrep_kill() { 
+    ps_id=`psgrep $1 | awk '{print $2}'`
+    echo "killing process ${ps_id}"
+    kill $ps_id
+}
+alias psgkill='psgrep_kill'
+psgrep_kill9() { 
+    ps_id=`psgrep $1 | awk '{print $2}'`
+    echo "killing process ${ps_id}"
+    kill -9 $ps_id
+}
+alias psgkill9='psgrep_kill9'
 
 ## pass options to free ##
 alias meminfo='free -m -l -t'
@@ -113,11 +124,11 @@ alias rmltx='latexmk -c'
 
 # ============ GIT =============
 # alias g='git'
-alias gs='git status'
-alias ga='git add'
+# alias gs='git status'
+# alias ga='git add'
 alias gco='git checkout'
 alias gci='git commit'
-alias gb='git branch'
+# alias gb='git branch'
 alias gcam='git commit -a -m'
 alias gpull='git pull'
 alias gpush='git push'
@@ -128,6 +139,10 @@ gcamp() {
     gcam $1
     gpp
 }
+
+
+# ============ GITHUB =============
+alias ghiss='open https://github.com/issues/assigned'
 
 
 # ============ TMUX =============
@@ -158,7 +173,56 @@ alias bstop='brew services stop'
 
 # ============ DOCKER =============
 alias d='docker'
-alias dm='docker-machine'
+alias dcl='docker container ls'
+alias dcla='docker container ls -a'
+docker_grep_all() {
+    info=`dcla | sed 1d | awk '{print $1, "\t", $2, "\t", $NF}'`
+    if [ "$#" -ne 1 ]; then
+        echo $info | fzf -0 | awk '{print $1}'
+    else
+        echo $info | fzf -0 -q $1 | awk '{print $1}'
+    fi
+}
+alias dgrep="docker_grep_all"
+docker_grep_running() {
+    info=`dcl | sed 1d | awk '{print $1, "\t", $2, "\t", $NF}'`
+    if [ "$#" -ne 1 ]; then
+        echo $info | fzf -0 | awk '{print $1}'
+    else
+        echo $info | fzf -0 -q $1 | awk '{print $1}'
+    fi
+}
+alias dgrepr='docker_grep_running'
+docker_start() {
+    c_id=`dgrep $1`
+    docker container start $c_id
+}
+alias dstart='docker_start'
+docker_stop() {
+    c_id=`dgrepr $1`
+    docker container stop $c_id
+}
+alias dstop='docker_stop'
+docker_restart() {
+    c_id=`dgrepr $1`
+    docker container restart $c_id
+}
+alias drestart='docker_restart'
+docker_remove() {
+    c_id=`dgrep $1`
+    if [[ $(dcl) == *"${c_id}"* ]]; then
+        echo "${c_id} running, stopping first..."
+        docker stop $c_id > /dev/null 2>&1
+    fi
+    docker container rm $c_id
+}
+alias drm='docker_remove'
+
+docker_logs() {
+    c_id=`dgrepr $1`
+    docker logs -f $c_id
+}
+alias dlogs='docker_logs'
 
 
 # ============ CAPISTRANO =============

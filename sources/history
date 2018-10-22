@@ -2,13 +2,14 @@
 
 
 HISTFILE=$HOME/.zsh_history
+RG_HISTFILE=$HOME/.zsh_history
 if [ -d "$HOME/dropbox/!public" ]; then
     hist_dir="${HOME}/dropbox/!public/history"
     [ ! -d $hist_dir ] && mkdir $hist_dir
 
     HOSTNAME_SHORT=$(hostname -s)
     HISTFILE="${hist_dir}/$(date -u +%Y-%m-%d.%H.%M.%S)_${HOSTNAME_SHORT}_$$"
-    # HISTFILE=$HOME/dropbox/!public/.zsh_history
+    RG_HISTFILE=$NOT_PUBLIC/history/*
 fi
 
 HISTSIZE=100000
@@ -40,7 +41,7 @@ setopt HIST_NO_STORE
 
 
 function history-fzf() {
-  BUFFER=$(rg -e "^[^#]" -N --no-filename $NOT_PUBLIC/history/* |
+  BUFFER=$(rg -e "^[^#]" -N --no-filename $RG_HISTFILE |
     LC_ALL='C' sed -E 's/^\: [0-9]+\:[0-9]\;//g' | LC_ALL='C' sort |
     LC_ALL='C' uniq -c | LC_ALL='C' sort |
     $(__fzfcmd) +s --tac +m -n1..,.. --tiebreak=index --toggle-sort=ctrl-r |
