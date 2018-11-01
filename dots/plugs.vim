@@ -3,7 +3,7 @@ call plug#begin('~/.vim/plugs')
 " ======================== Syntax =======================
 
 " Asynchronous lint engine
-" Plug 'w0rp/ale'
+Plug 'w0rp/ale'
 
 " Syntax highlighting for salt
 Plug 'saltstack/salt-vim'

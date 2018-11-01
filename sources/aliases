@@ -1,7 +1,8 @@
 # ============ Aliases =============
 
 # ============ FILES =============
-alias notes='cd $NOT_PUBLIC/notes && vim .'
+# alias notes='cd $NOT_PUBLIC/notes && vim .'
+# alias notes='cd /Volumes/GoogleDrive/My\ Drive/notes && vim .'
 alias crypto='cd $NOT_PUBLIC/crypto'
 alias cryp='cd $NOT_PUBLIC/crypto'
 alias dotz='vim $DOTS/zshrc'
@@ -15,7 +16,8 @@ alias soz='source ~/.zshrc'
 alias cpwd="pwd | tr -d '\n' | pbcopy"
 
 launch_todo() {
-    filepath=$NOT_PUBLIC/notes/todo/personal.taskpaper
+    # filepath=$NOT_PUBLIC/notes/todo/personal.taskpaper
+    filepath="/Volumes/GoogleDrive/My Drive/notes/todo.taskpaper"
     if [ -n "$TMUX" ]; then
         tmux new-window -a -n todo "source $HOME/.zshrc && vim $filepath"
     else
@@ -43,7 +45,26 @@ alias study_time='cd $NOT_PUBLIC/study/leetcode && ../study_time.sh'
 # ============ UNIX =============
 if which exa >/dev/null 2>&1; then
     alias ls='exa'
+    exa_tree() {
+        if [ $# -eq 0 ]; then
+            exa --tree
+        else
+            exa --tree --level=$1
+        fi
+    }
+    alias ltree='exa_tree'
+    exa_tree_long() {
+        if [ $# -eq 0 ]; then
+            exa -l --tree
+        else
+            exa -l --tree --level=$1
+        fi
+    }
+    alias lltree='exa_tree_long'
 fi
+# these are overwritten by ~/.oh-my-zsh/lib/directories.zsh
+# alias l='ls -l'
+# alias ll='ls -la'
 alias c='clear'
 alias cp='cp -iv'
 alias mv='mv -iv'
@@ -64,6 +85,7 @@ grep_filetype() {
     fi
 }
 alias g='grep_filetype'
+alias py='python'
 
 
 alias hist="rg -N '' $NOT_PUBLIC/history/*"
@@ -117,6 +139,57 @@ wttr_weather() { curl "wttr.in/${1:-}" }
 alias ww='wttr_weather'
 
 
+# ============ VENV =============
+venv_make() {
+    venv_dir=$HOME/venv
+    if [ ! -d $venv_dir ]; then
+        echo "venv directory ($venv_dir) does not exist, exiting."
+        return 0
+    fi
+    python -m venv $venv_dir/$1
+    source $venv_dir/$1/bin/activate
+}
+alias vmake='venv_make'
+alias vnew='venv_make'
+venv_source() {
+    venv_dir=$HOME/venv
+    if [ ! -d $venv_dir ]; then
+        echo "venv directory ($venv_dir) does not exist, exiting."
+        return 0
+    fi
+    if which deactivate >/dev/null 2>&1; then
+        deactivate
+    fi
+
+    if [ "$#" -ne 1 ]; then
+        project=`ls $venv_dir | fzf -0 | awk '{print $1}'`
+    else
+        project=`ls $venv_dir | fzf -0 -q $1 | awk '{print $1}'`
+    fi
+    source $venv_dir/$project/bin/activate
+}
+alias vsource='venv_source'
+alias vls='ls $HOME/venv'
+venv_remove() {
+    venv_dir=$HOME/venv
+    if [ ! -d $venv_dir ]; then
+        echo "venv directory ($venv_dir) does not exist, exiting."
+        return 0
+    fi
+    if which deactivate >/dev/null 2>&1; then
+        deactivate
+    fi
+
+    if [ "$#" -ne 1 ]; then
+        project=`ls $venv_dir | fzf -0 | awk '{print $1}'`
+    else
+        project=`ls $venv_dir | fzf -0 -q $1 | awk '{print $1}'`
+    fi
+    rm -rf $venv_dir/$project
+}
+alias vrm='venv_remove'
+
+
 # ============ LaTeX =============
 # remove unnecessary latex files in this dir
 alias rmltx='latexmk -c'
@@ -134,6 +207,7 @@ alias gpull='git pull'
 alias gpush='git push'
 alias gmm='git merge master'
 alias gpp='git pull && git push'
+alias gpo='git push origin'
 alias gitrm='git reset --hard origin/master'
 gcamp() {
     gcam $1
@@ -326,7 +400,4 @@ kube_grep_connect() {
 }
 alias ck="kube_connect"
 alias ckg="kube_grep_connect"
-
-
-
 

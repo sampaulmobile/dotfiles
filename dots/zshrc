@@ -23,9 +23,6 @@ ZSH_THEME_GIT_PROMPT_CHANGED="%{$FG[009]%}%{✚%G%}"
 # ===== PYENV =====
 [[ -d "$HOME/.pyenv" ]] && eval "$(pyenv init -)"
 
-# ===== RVM =====
-# [[ -s "$HOME/.rvm/scripts/rvm" ]] && source "$HOME/.rvm/scripts/rvm"
-
 # ===== FZF =====
 set -o vi
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
@@ -43,9 +40,6 @@ bindkey '^h' backward-delete-char
 
 # ===== ALIASES =====
 [[ -f "$SOURCES/aliases" ]] && source $SOURCES/aliases
-
-# ===== DOCURATED ALIASES =====
-# [[ -f "$SOURCES/docurated_aliases" ]] && source $SOURCES/docurated_aliases
 
 # ===== NYDIG ALIASES =====
 [[ -f "$SOURCES/nydig_aliases" ]] && source $SOURCES/nydig_aliases
