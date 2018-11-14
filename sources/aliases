@@ -3,6 +3,7 @@
 # ============ FILES =============
 # alias notes='cd $NOT_PUBLIC/notes && vim .'
 # alias notes='cd /Volumes/GoogleDrive/My\ Drive/notes && vim .'
+alias dev='cd $HOME/dev'
 alias crypto='cd $NOT_PUBLIC/crypto'
 alias cryp='cd $NOT_PUBLIC/crypto'
 alias dotz='vim $DOTS/zshrc'
@@ -10,7 +11,6 @@ alias dotv='vim $DOTS/vimrc'
 alias dotal='vim $SOURCES/aliases'
 alias dotdoc='vim $SOURCES/docurated_aliases'
 alias cdot='cd ~/dotfiles'
-alias dev='cd ~/Development/SBP'
 alias cdown='cd ~/Downloads'
 alias soz='source ~/.zshrc'
 alias cpwd="pwd | tr -d '\n' | pbcopy"
@@ -169,7 +169,7 @@ venv_source() {
     source $venv_dir/$project/bin/activate
 }
 alias vsource='venv_source'
-alias vls='ls $HOME/venv'
+alias vls='l $HOME/venv'
 venv_remove() {
     venv_dir=$HOME/venv
     if [ ! -d $venv_dir ]; then
@@ -207,7 +207,11 @@ alias gpull='git pull'
 alias gpush='git push'
 alias gmm='git merge master'
 alias gpp='git pull && git push'
-alias gpo='git push origin'
+git_push_origin() {
+    git push origin ${1:-${GIT_BRANCH}}
+}
+alias gpo='git_push_origin'
+
 alias gitrm='git reset --hard origin/master'
 gcamp() {
     gcam $1
@@ -217,6 +221,12 @@ gcamp() {
 
 # ============ GITHUB =============
 alias ghiss='open https://github.com/issues/assigned'
+
+git_pr() {
+    repo=$(basename `git rev-parse --show-toplevel`)
+    open https://github.com/NYDIG/${repo}/pull/new/${GIT_BRANCH}
+}
+alias gpr="git_pr"
 
 
 # ============ TMUX =============

@@ -172,6 +172,7 @@ function! s:find_git_root()
 endfunction
 command! ProjectFiles execute 'Files' s:find_git_root()
 nmap <Leader>t :ProjectFiles<CR>
+nmap ; :Buffers<CR>
 
 " Mappings for fugitive
 map <leader>gb :Gblame<CR>
