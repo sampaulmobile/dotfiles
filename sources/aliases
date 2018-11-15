@@ -217,6 +217,14 @@ gcamp() {
     gcam $1
     gpp
 }
+# cd to git root dir
+function cdg() {
+    topdir=$(git rev-parse --show-toplevel)
+    if [[ $? -ne 0 ]]; then
+        return 1
+    fi
+    cd "${topdir}/${1}"
+}
 
 
 # ============ GITHUB =============
