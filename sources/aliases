@@ -309,12 +309,16 @@ docker_remove() {
     docker container rm $c_id
 }
 alias drm='docker_remove'
-
 docker_logs() {
     c_id=`dgrepr $1`
     docker logs -f $c_id
 }
 alias dlogs='docker_logs'
+docker_shell() {
+    c_id=`dgrepr $1`
+    docker exec -it $c_id /bin/bash
+}
+alias dsh='docker_shell'
 
 
 # ============ CAPISTRANO =============
