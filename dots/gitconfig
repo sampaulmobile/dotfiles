@@ -34,6 +34,7 @@
 
     # git branch and remote
     b = branch -av ### Added -av parameter
+    bl = branch
     rv = remote -v
 
     # git add

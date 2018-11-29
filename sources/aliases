@@ -199,19 +199,42 @@ alias rmltx='latexmk -c'
 # alias g='git'
 # alias gs='git status'
 # alias ga='git add'
-alias gco='git checkout'
-alias gci='git commit'
-# alias gb='git branch'
+
+alias gb='git branch -av'
+alias gbl='git branch'
+
 alias gcam='git commit -a -m'
+alias gci='git commit'
+git_checkout() {
+    if [ "$#" -ne 1 ]; then
+        branch=$(git branch -av | fzf -0 | awk '{print $1}' | sed -e "s/^remotes\/origin\///")
+        git checkout "$branch"
+    else
+        git checkout "$@"
+    fi
+}
+alias gco='git_checkout'
+
+git_merge() {
+    if [ "$GIT_BRANCH" != "master" ]; then
+        echo "Not on master, exiting."
+        return 0
+    fi
+    branch=$(git branch | fzf -0 | awk '{print $1}')
+    git pull
+    git merge --no-ff "$branch"
+    git push
+}
+alias gmerge='git_merge'
+alias gmm='git merge master'
+
 alias gpull='git pull'
 alias gpush='git push'
-alias gmm='git merge master'
 alias gpp='git pull && git push'
 git_push_origin() {
     git push origin ${1:-${GIT_BRANCH}}
 }
 alias gpo='git_push_origin'
-
 alias gitrm='git reset --hard origin/master'
 gcamp() {
     gcam $1
@@ -228,13 +251,18 @@ function cdg() {
 
 
 # ============ GITHUB =============
-alias ghiss='open https://github.com/issues/assigned'
-
-git_pr() {
-    repo=$(basename `git rev-parse --show-toplevel`)
-    open https://github.com/NYDIG/${repo}/pull/new/${GIT_BRANCH}
-}
-alias gpr="git_pr"
+# alias giss='open https://github.com/issues/assigned'
+alias grev='open https://github.com/pulls/review-requested'
+# git_new_pr() {
+#     repo=$(basename `git rev-parse --show-toplevel`)
+#     open https://github.com/NYDIG/${repo}/pull/new/${GIT_BRANCH}
+# }
+# alias gnpr="git_new_pr"
+# git_new_issue() {
+#     repo=$(basename `git rev-parse --show-toplevel`)
+#     open https://github.com/NYDIG/${repo}/issues/new
+# }
+# alias gni="git_new_issue"
 
 
 # ============ TMUX =============
