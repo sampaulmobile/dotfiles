@@ -46,6 +46,3 @@ bindkey '^h' backward-delete-char
 
 # ===== EXPORTS (/PATH) =====
 [[ -f "$SOURCES/exports" ]] && source $SOURCES/exports
-
-# ===== ENV VARIABLES =====
-[[ -f "$NOT_PUBLIC/links/envvars" ]] && source $NOT_PUBLIC/links/envvars

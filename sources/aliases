@@ -2,6 +2,7 @@
 
 # ============ FILES =============
 # alias notes='cd $NOT_PUBLIC/notes && vim .'
+alias notes='cd $HOME/notes && vim .'
 # alias notes='cd /Volumes/GoogleDrive/My\ Drive/notes && vim .'
 alias dev='cd $HOME/dev'
 alias crypto='cd $NOT_PUBLIC/crypto'
@@ -17,7 +18,8 @@ alias cpwd="pwd | tr -d '\n' | pbcopy"
 
 launch_todo() {
     # filepath=$NOT_PUBLIC/notes/todo/personal.taskpaper
-    filepath="/Volumes/GoogleDrive/My Drive/notes/todo.taskpaper"
+    # filepath="/Volumes/GoogleDrive/My Drive/notes/todo.taskpaper"
+    filepath="$HOME/notes/todo.taskpaper"
     if [ -n "$TMUX" ]; then
         tmux new-window -a -n todo "source $HOME/.zshrc && vim $filepath"
     else
