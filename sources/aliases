@@ -453,3 +453,8 @@ kube_grep_connect() {
 alias ck="kube_connect"
 alias ckg="kube_grep_connect"
 
+
+# ===== OTHER ========
+alias rt_update='$HOME/dev/self/certified_fresh/run.sh'
+
+
