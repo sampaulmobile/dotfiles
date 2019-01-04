@@ -349,6 +349,8 @@ docker_shell() {
     docker exec -it $c_id /bin/bash
 }
 alias dsh='docker_shell'
+alias dcup='docker-compose up -d'
+alias dcdown='docker-compose down'
 
 
 # ============ CAPISTRANO =============
