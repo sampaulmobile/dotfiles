@@ -1,7 +1,8 @@
-NEW_USER=sampaul
-NEW_PASS=password
-NEW_HOST=sbp_dev
-PUB_KEY_URL=https://www.dropbox.com/s/rwvh7mfqwm4zx0f/id_rsa_linode.pub?dl=0
+NEW_USER=${1:-sampaul}
+NEW_PASS=${2:-password}
+NEW_HOST=${3:-sbp_dev}
+
+PUB_KEY_URL="https://www.dropbox.com/s/rwvh7mfqwm4zx0f/id_rsa_linode.pub?dl=0"
 
 # install stuff
 apt-get update
