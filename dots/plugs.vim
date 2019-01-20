@@ -47,7 +47,7 @@ Plug 'tmhedberg/SimpylFold'
 Plug 'godlygeek/tabular'
 
 " Autocomplete stuff
-Plug 'Valloric/YouCompleteMe'
+" Plug 'Valloric/YouCompleteMe'
 
 " Ultisnips + snippets + supertab to make it work with YCM
 Plug 'SirVer/ultisnips' | Plug 'honza/vim-snippets' | Plug 'ervandew/supertab'
