@@ -40,6 +40,5 @@ ENV PYTHON_CONFIGURE_OPTS --enable-shared
 RUN pyenv install 3.7.0 && \
     pyenv global 3.7.0
 
-
 WORKDIR /root
 CMD ["zsh"]
