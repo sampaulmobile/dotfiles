@@ -1,4 +1,4 @@
-PYTHON_VERSION=3.6.5
+PYTHON_VERSION=3.7.0
 
 # CFLAGS="-I$(brew --prefix openssl)/include" \
 # LDFLAGS="-L$(brew --prefix openssl)/lib" \
