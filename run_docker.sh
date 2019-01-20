@@ -10,6 +10,7 @@ fi
 docker build -t dev .
 docker run --rm -it \
     --name dev \
+    --hostname dev-docker \
     --volume "$DEV_DIR":/root/dev \
     --workdir /root/dev \
     dev:latest
