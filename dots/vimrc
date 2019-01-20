@@ -1,6 +1,7 @@
 " =============================  GENERAL CONFIG  ==============================
 let mapleader=","               "Change leader to a comma
 let maplocalleader = "\\"       "Change local leader to backslash
+set encoding=utf-8
 
 " win 120 80                    "Make window 80 wide x 45 tall
 set nocompatible                "Use vim defaults
@@ -97,7 +98,7 @@ imap jj <Esc>
 
 " Toggle fold open/closed with <S-Space> if over a fold
 " nnoremap <silent> <S-Space> @=(foldlevel('.')?'za':'zc')<CR>
-nnoremap <S-Space> zc<CR>
+nmap <S-Space> zc<CR>
 
 " Move between split windows with Ctrl + arrow keys
 nnoremap <silent> <C-h> <C-w>h
