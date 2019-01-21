@@ -2,24 +2,23 @@ NEW_USER=${1:-sampaul}
 NEW_PASS=${2:-password}
 NEW_HOST=${3:-sbp_dev}
 
-PUB_KEY_URL="https://www.dropbox.com/s/rwvh7mfqwm4zx0f/id_rsa_linode.pub?dl=0"
-
 # install stuff
 apt-get update
 apt-get upgrade -y
-apt-get install -y git vim zsh tmux wget curl make build-essential
-apt-get install -y libssl-dev zlib1g-dev libbz2-dev libreadline-dev \
-    libsqlite3-dev llvm libncurses5-dev libncursesw5-dev xz-utils tk-dev cmake
+apt-get install -y git vim jq
+
+# PUB_KEY_URL="https://www.dropbox.com/s/rwvh7mfqwm4zx0f/id_rsa_linode.pub?dl=0"
+PUB_KEY_URL=https://api.github.com/users/sampaulmobile/keys
+PUB_KEY_NAME=sampaulmobile.pub
 
 # create user and assign password
 adduser $NEW_USER --gecos "" --disabled-password
-echo "$NEW_USER:$NEW_PASS" | chpasswd
 adduser $NEW_USER sudo
 
 mkdir /home/$NEW_USER/.ssh
 cd /home/$NEW_USER/.ssh
-curl -O -J -L $PUB_KEY_URL
-cp id_rsa_linode.pub authorized_keys
+curl $PUB_KEY_URL | jq -r '.[length-1]["key"]' >> $PUB_KEY_NAME
+cp $PUB_KEY_NAME authorized_keys
 chmod 600 /home/$NEW_USER/.ssh/*
 chmod 700 /home/$NEW_USER/.ssh
 chown -R $NEW_USER:$NEW_USER /home/$NEW_USER/.ssh
