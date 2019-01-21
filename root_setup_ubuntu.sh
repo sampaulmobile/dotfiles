@@ -1,6 +1,5 @@
 NEW_USER=${1:-sampaul}
-NEW_PASS=${2:-password}
-NEW_HOST=${3:-sbp_dev}
+NEW_HOST=${2:-sbp_dev}
 
 # install stuff
 apt-get update
