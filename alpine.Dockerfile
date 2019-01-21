@@ -2,7 +2,7 @@ FROM alpine
 MAINTAINER Sam Paul <sampaulmobile@gmail.com>
 
 ENV HOME /root
-ENV PACKAGES1="\
+ENV PACKAGES="\
 bash \
 wget \
 curl \
@@ -10,14 +10,8 @@ zsh \
 vim \
 git \
 tmux \
-"
-
-ENV PACKAGES2="\
 g++ \
 make \
-"
-
-ENV PACKAGES3="\
 bzip2-dev \
 libffi-dev \
 linux-headers \
@@ -27,12 +21,8 @@ sqlite-dev \
 zlib-dev \
 "
 
-RUN apk update && \
-    apk add --update --no-cache $PACKAGES1
-RUN apk add --update --no-cache $PACKAGES2
-RUN apk add --update --no-cache $PACKAGES3
-RUN rm -f /tmp/* /etc/apk/cache/*
-
+RUN apk add --update --no-cache $PACKAGES && \
+  rm -f /tmp/* /etc/apk/cache/*
 ENV SHELL /bin/zsh
 
 # clone dotfiles
