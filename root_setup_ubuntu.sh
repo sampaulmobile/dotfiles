@@ -23,7 +23,12 @@ chmod 700 /home/$NEW_USER/.ssh
 chown -R $NEW_USER:$NEW_USER /home/$NEW_USER/.ssh
 
 hostnamectl set-hostname $NEW_HOST
-EXT_IP=`dig +short myip.opendns.com @resolver1.opendns.com`
+EXT_IP=$(curl ifconfig.me)
 echo "$EXT_IP $NEW_HOST.com $NEW_HOST" >> /etc/hosts
 
 # update /etc/ssh/sshd_config to reject root login/etc.
+
+# to allow user to sudo w/o password
+# sudo update-alternatives --config editor
+# sudo visudo
+# $USER ALL=(ALL) NOPASSWD: ALL
