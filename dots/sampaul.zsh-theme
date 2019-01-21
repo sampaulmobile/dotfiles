@@ -51,8 +51,12 @@ GIT=$'$(git_super_status)
 %(!.#.$) ' 
 fi
 
+PROMPT=$HOST$DIR$GIT
+if [ ${#PROMPTS[@]} -gt 0 ]; then
+    PROMPT=$HOST$DIR$VERS_PROMPT_$GIT
+fi
+
 # PROMPT=$HOST$DIR$GIT
-PROMPT=$HOST$DIR$VERS_PROMPT_$GIT
 #RPROMPT='!%{%B%F{cyan}%}%!%{%f%k%b%}'
 
 # Display time in rprompt
