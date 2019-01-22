@@ -43,6 +43,8 @@ RUN ~/dotfiles/bin/update_vim_plugs.sh
 # setup zsh shell/prompt
 RUN ~/dotfiles/bin/install_zsh_syntax_highlighting.sh
 # RUN ~/dotfiles/bin/zsh_git_prompt.sh
+ENV GIT_URL https://github.com/olivierverdier/zsh-git-prompt.git
+RUN git clone $GIT_URL $HOME/.zsh-git-prompt
 
 # install pyenv/python
 RUN git clone https://github.com/pyenv/pyenv.git ~/.pyenv
