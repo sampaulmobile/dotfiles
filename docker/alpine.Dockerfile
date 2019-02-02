@@ -59,5 +59,9 @@ RUN ~/dotfiles/bin/pip_installs.sh
 RUN ~/dotfiles/bin/install_tpm.sh
 RUN ~/dotfiles/bin/update_tpm_plugins.sh
 
+# install docker / docker-compose
+RUN apk add --update --no-cache docker && \
+  pip install docker-compose
+
 WORKDIR /root
 CMD ["zsh"]
