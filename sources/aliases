@@ -297,6 +297,7 @@ alias bstop='brew services stop'
 alias d='docker'
 alias dcl='docker container ls'
 alias dcla='docker container ls -a'
+alias dps='docker ps --format "table {{.ID}}  {{.Image}}\t{{.Command}}\t{{.Status}}\t{{.Size}}\t{{.Names}}"'
 docker_grep_all() {
     info=`dcla | sed 1d | awk '{print $1, "\t", $2, "\t", $NF}'`
     if [ "$#" -ne 1 ]; then
