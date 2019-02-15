@@ -210,6 +210,9 @@ alias gci='git commit'
 git_checkout() {
     if [ "$#" -ne 1 ]; then
         branch=$(git branch -av | fzf -0 | awk '{print $1}' | sed -e "s/^remotes\/origin\///")
+        if [[ "$branch" == "" ]]; then
+            return 1
+        fi
         git checkout "$branch"
     else
         git checkout "$@"
