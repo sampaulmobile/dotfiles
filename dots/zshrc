@@ -17,6 +17,7 @@ ZSH_THEME_GIT_PROMPT_CHANGED="%{$FG[009]%}%{✚%G%}"
 
 # ===== PYENV =====
 [[ -d "$HOME/.pyenv" ]] && eval "$(pyenv init -)"
+[[ $(which pyenv-virtualenv) ]] && eval "$(pyenv virtualenv-init -)"
 
 # ===== FZF =====
 set -o vi
