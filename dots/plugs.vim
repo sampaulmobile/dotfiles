@@ -70,7 +70,7 @@ Plug 'Xuyuanp/nerdtree-git-plugin'
 Plug 'airblade/vim-gitgutter'
 
 " Git wrapper - :gblame, :gbrowse, etc.
-Plug 'tpope/vim-fugitive' "| Plug 'tpope/vim-rhubarb'
+Plug 'tpope/vim-fugitive' | Plug 'tpope/vim-rhubarb'
 
 " Visualize vim undo tree
 Plug 'sjl/gundo.vim'
