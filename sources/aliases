@@ -394,7 +394,7 @@ alias fandango='open https://www.fandango.com/10003_movietimes?mode=general&q=10
 
 
 # ============ BUZZER / PUSHFOROPEN =============
-BUZZER_URL='http://buzz.linktothecode.com'
+BUZZER_URL='https://buzzer.domo.media'
 hit_buzzer() { curl "$BUZZER_URL/open/$1" }
 alias buzz='hit_buzzer'
 
