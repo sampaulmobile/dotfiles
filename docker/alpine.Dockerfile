@@ -51,8 +51,8 @@ RUN git clone https://github.com/pyenv/pyenv.git ~/.pyenv
 ENV PYENV_ROOT $HOME/.pyenv
 ENV PATH $PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH
 ENV PYTHON_CONFIGURE_OPTS --enable-shared
-RUN pyenv install 3.7.0 && \
-    pyenv global 3.7.0
+RUN pyenv install 3.7.2 && \
+    pyenv global 3.7.2
 RUN ~/dotfiles/bin/pip_installs.sh
 
 # install tpm/plugins

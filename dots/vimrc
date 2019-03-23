@@ -282,9 +282,9 @@ endfunction
 " silent! colorscheme badwolf
 " silent! colorscheme molokai
 silent! colorscheme gruvbox
+set bg=dark             "Options are 'dark' or 'light'
 hi Folded guibg=#3e3e3e
 hi Folded guifg=#b0b0b0
-" set background=light             "Options are 'dark' or 'light'
 
 " enable true colors
 set termguicolors
