@@ -21,7 +21,7 @@ launch_todo() {
     # filepath="/Volumes/GoogleDrive/My Drive/notes/todo.taskpaper"
     filepath="$HOME/notes/todo.taskpaper"
     if [ -n "$TMUX" ]; then
-        tmux new-window -a -n todo "source $HOME/.zshrc && vim $filepath"
+        tmux -u new-window -a -n todo "source $HOME/.zshrc && vim $filepath"
     else
         vim $filepath
     fi
@@ -100,7 +100,7 @@ alias m='mvim'
 launch_vim() {
     if [ -n "$TMUX" ]; then
         curr_folder=${PWD##*/}
-        tmux new-window -a -n $curr_folder "export TERM='xterm-256color' && vim $1"
+        tmux -u new-window -a -n $curr_folder "export TERM='xterm-256color' && vim $1"
     else
         vim $1
     fi
@@ -271,10 +271,10 @@ alias grev='open https://github.com/pulls/review-requested'
 
 
 # ============ TMUX =============
-alias tl='tmux ls'
-tmux_attach() { tmux a -t ${1:-base} }
+alias tl='tmux -u ls'
+tmux_attach() { tmux -u a -t ${1:-base} }
 alias ta='tmux_attach'
-tmux_new() { tmux new -A -s ${1:-base} }
+tmux_new() { tmux -u new -A -s ${1:-base} }
 alias tn='tmux_new'
 tmux_wrapper() {
     if [ $# -eq 0 ]; then
@@ -284,7 +284,7 @@ tmux_wrapper() {
             tn
         fi
     else
-        tmux "$@"
+        tmux -u "$@"
     fi
 }
 alias t='tmux_wrapper'
