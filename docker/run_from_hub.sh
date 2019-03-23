@@ -10,7 +10,7 @@ fi
 # NAME=sampaul/dev
 NAME=sampaul/dev:alpine
 
-docker run --rm -it \
+docker run -itd \
     --name dev \
     --hostname dev-docker \
     --volume "$DEV_DIR":/root/dev \

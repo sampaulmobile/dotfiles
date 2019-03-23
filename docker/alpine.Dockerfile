@@ -64,4 +64,4 @@ RUN apk add --update --no-cache docker && \
   pip install docker-compose
 
 WORKDIR /root
-CMD ["zsh"]
+# CMD ["zsh"]
