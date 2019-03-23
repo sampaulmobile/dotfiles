@@ -33,7 +33,10 @@ vim \
 git \
 tmux \ - 5.69MB
 
+# SSH
 
-
-
+```
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/sampaulmobile
+```
 
