@@ -7,10 +7,10 @@ if [ ! -d "$DEV_DIR" ]; then
     exit 1
 fi
 
-# DOCKERFILE=Dockerfile
-# NAME=dev
-DOCKERFILE=alpine.Dockerfile
-NAME=dev-alpine
+DOCKERFILE=Dockerfile
+NAME=dev
+# DOCKERFILE=alpine.Dockerfile
+# NAME=dev-alpine
 
 # build the image
 docker build -f $DOCKERFILE -t $NAME .
@@ -22,6 +22,7 @@ docker run -td \
     --volume "$DEV_DIR":/root/dev \
     --volume /var/run/docker.sock:/var/run/docker.sock \
     --volume tmux_tmp:/tmp \
+    --volume "$HOME/.ssh:/root/.ssh:ro" \
     --workdir /root/dev \
     $NAME:latest
 
