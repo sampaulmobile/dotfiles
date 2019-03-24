@@ -21,7 +21,7 @@ docker run -td \
     --hostname dev-docker \
     --volume "$DEV_DIR":/root/dev \
     --volume /var/run/docker.sock:/var/run/docker.sock \
-    --volume tmux_tmp:/tmp \
+    --volume /tmp:/tmp \
     --volume "$HOME/.ssh:/root/.ssh:ro" \
     --workdir /root/dev \
     $NAME:latest
