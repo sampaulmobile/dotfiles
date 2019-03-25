@@ -1,6 +1,12 @@
 {
-    "shorthand": "sam",
-    "url": "https://my.1password.com",
-    "email": "sampaulmobile@gmail.com",
-    "accountKey": "A3-HTBX87-9VZC73-QFFT6-9EBAV-L66V7-G33HB"
+        "latest_signin": "my",
+        "accounts": [
+                {
+                        "shorthand": "my",
+                        "url": "https://my.1password.com",
+                        "email": "sampaulmobile@gmail.com",
+                        "accountKey": "",
+                        "userUUID": ""
+                }
+        ]
 }
