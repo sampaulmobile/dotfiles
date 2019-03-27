@@ -9,9 +9,9 @@ OP_SESSION_my=$(op signin $signin_address $email --output=raw)
 export OP_SESSION_my
 
 echo "Pulling secrets"
-if [ ! -f ~/.ssh/sampaulmobile ]; then
-	op get document 'sampaulmobile' > ~/.ssh/sampaulmobile
-	chmod 0600 ~/.ssh/sampaulmobile
+if [ ! -f ~/.ssh/sampaulmobile_rsa ]; then
+	op get document 'sampaulmobile_rsa' > ~/.ssh/sampaulmobile_rsa
+	chmod 0600 ~/.ssh/sampaulmobile_rsa
 fi
 
 echo "Done!"
