@@ -141,6 +141,10 @@ wttr_weather() { curl "wttr.in/${1:-}" }
 alias ww='wttr_weather'
 
 
+# ============ SSH =============
+alias ssh_start_agent='eval "$(ssh-agent -s)"'
+
+
 # ============ VENV =============
 venv_make() {
     venv_dir=$HOME/venv
