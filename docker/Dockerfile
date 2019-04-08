@@ -60,5 +60,8 @@ RUN ~/dotfiles/bin/pip_installs.sh
 RUN ~/dotfiles/bin/install_zsh_syntax_highlighting.sh
 RUN ~/dotfiles/bin/zsh_git_prompt.sh
 
+# set docker dev ENV var
+ENV DOCKER_DEV true
+
 WORKDIR /root
 CMD ["zsh"]

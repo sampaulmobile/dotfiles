@@ -13,16 +13,20 @@ NAME=dev
 # NAME=dev-alpine
 
 # build the image
-docker build -f $DOCKERFILE -t $NAME .
+docker build -f $DOCKERFILE -t $NAME ..
+
+# create volume for zsh history
+docker volume create zsh_history
 
 # run container (in background)
 docker run -td \
-    --name $NAME \
+    --name $NAME-new \
     --hostname dev-docker \
     --volume "$DEV_DIR":/root/dev \
     --volume /var/run/docker.sock:/var/run/docker.sock \
     --volume /tmp:/tmp \
     --volume "$HOME/.ssh:/root/.ssh:ro" \
+    --volume zsh_history:/root/zsh_history \
     --workdir /root/dev \
     $NAME:latest
 

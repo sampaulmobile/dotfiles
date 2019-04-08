@@ -3,6 +3,16 @@
 
 HISTFILE=$HOME/.zsh_history
 RG_HISTFILE=$HOME/.zsh_history
+
+# if were running in docker (dev)
+if [ ! -z "$DOCKER_DEV" ]; then
+    hist_dir="$HOME/zsh_history"
+    [ ! -d $hist_dir ] && mkdir $hist_dir
+
+    HISTFILE="$hist_dir/.zsh_history"
+    RG_HISTFILE="$hist_dir/.zsh_history"
+fi
+
 if [ -d "$HOME/dropbox/!public" ]; then
     hist_dir="${HOME}/dropbox/!public/history"
     [ ! -d $hist_dir ] && mkdir $hist_dir
