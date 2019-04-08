@@ -20,7 +20,7 @@ docker volume create zsh_history
 
 # run container (in background)
 docker run -td \
-    --name $NAME-new \
+    --name $NAME \
     --hostname dev-docker \
     --volume "$DEV_DIR":/root/dev \
     --volume /var/run/docker.sock:/var/run/docker.sock \
