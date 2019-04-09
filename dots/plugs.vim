@@ -55,6 +55,9 @@ Plug 'SirVer/ultisnips' | Plug 'honza/vim-snippets' | Plug 'ervandew/supertab'
 " latex editing/compiling
 Plug 'lervag/vimtex', { 'for': 'tex' }
 
+" Reload files in vim when necessary
+Plug 'tmux-plugins/vim-tmux-focus-events'
+
 " ======================== VIM Tools =======================
 
 " NERDTree BRO!
