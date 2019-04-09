@@ -62,10 +62,13 @@ set foldmethod=syntax           "fold by syntax
 " Display tabs and trailing spaces visually
 set list listchars=tab:\ \ ,trail:·
 
-" Keep undo history across sessions, by storing in file.
-silent !mkdir ~/.vim/backups > /dev/null 2>&1
-set undodir=~/.vim/backups
-set undofile
+" Keep undo history across sessions by storing it in a file
+if has('persistent_undo')
+  set undodir=~/.vim/undodir
+  " Create dir if doesnt exist
+  silent call system('mkdir -p ' . &undodir)
+  set undofile
+endif
 
 " Auto complete stuff
 set wildmode=list:longest,full     "first list:longest then full
