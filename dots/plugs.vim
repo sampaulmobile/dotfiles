@@ -70,13 +70,13 @@ Plug 'jistr/vim-nerdtree-tabs'
 Plug 'Xuyuanp/nerdtree-git-plugin'
 
 " Show git diff in vim 'gutter'
-Plug 'airblade/vim-gitgutter'
+" Plug 'airblade/vim-gitgutter'
 
 " Git wrapper - :gblame, :gbrowse, etc.
 Plug 'tpope/vim-fugitive' | Plug 'tpope/vim-rhubarb'
 
-" Visualize vim undo tree
-Plug 'sjl/gundo.vim'
+" Visualize vim undo tree (this requires +python2 vim)
+" Plug 'sjl/gundo.vim'
 
 " Visually display indent levels in code
 Plug 'nathanaelkane/vim-indent-guides'
