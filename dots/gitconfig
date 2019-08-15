@@ -1,6 +1,5 @@
 [user]
 	name = Sam Paul
-	email = sam.paul@nydig.com
 [push]
 	default = simple
 [core]
