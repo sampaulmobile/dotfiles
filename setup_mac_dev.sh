@@ -15,6 +15,10 @@ brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_mac_dev
 # setup zsh git prompt
 $DOTFILES/bin/zsh_git_prompt.sh
 
+# install TPM/plugins
+$DOTFILES/bin/install_tpm.sh
+$DOTFILES/bin/update_tpm_plugins.sh
+
 # restart to install rvm
 # $DOTFILES/bin/install_rvm.sh
 # $DOTFILES/bin/rvm_installs.sh
