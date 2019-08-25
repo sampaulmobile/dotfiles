@@ -37,4 +37,4 @@ $DOTFILES/bin/install_oh_my_zsh.sh
 $DOTFILES/bin/symlink_files.sh
 
 # /etc/hosts (blacklist)
-$DOTFILES/bin/blacklist_hosts.sh
+# $DOTFILES/bin/blacklist_hosts.sh

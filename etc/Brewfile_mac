@@ -9,6 +9,7 @@ brew 'fzf'
 brew 'macvim'
 brew 'awscli'
 brew 'exa'
+brew 'pyenv-virtualenv'
 
 cask 'google-chrome'
 cask 'iterm2'
