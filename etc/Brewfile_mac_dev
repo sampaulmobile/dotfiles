@@ -6,6 +6,8 @@ cask 'slack'
 cask '1password'
 cask 'witch'
 cask 'divvy'
+cask 'intellij-idea'
+cask 'pycharm'
 
 # cask 'dash'
 # cask 'dropbox'
