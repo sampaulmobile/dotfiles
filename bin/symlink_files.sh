@@ -13,7 +13,7 @@ dir=$HOME/dotfiles/dots
 deldir=$HOME/DELETE_dotfiles
 
 # list of files/folders to symlink in homedir
-files="vimrc zshrc gitconfig gitignore tmux.conf tmux.remote.conf"
+files="vimrc zshrc gitconfig gitignore tmux.conf tmux.remote.conf ideavimrc"
 
 # dropbox !public folder
 NOT_PUBLIC=$HOME/Dropbox/!Public

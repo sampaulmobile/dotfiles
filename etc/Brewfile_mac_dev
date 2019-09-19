@@ -9,6 +9,10 @@ cask 'divvy'
 cask 'intellij-idea'
 cask 'pycharm'
 
+brew 'wireguard-tools'
+brew 'teleport'
+brew 'postgresql'
+
 # cask 'dash'
 # cask 'dropbox'
 # cask 'istat-menus'
