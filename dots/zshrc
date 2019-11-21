@@ -16,7 +16,7 @@ plugins=(zsh-syntax-highlighting)
 ZSH_THEME_GIT_PROMPT_CHANGED="%{$FG[009]%}%{✚%G%}"
 
 # ===== PYENV =====
-[[ -d "$HOME/.pyenv" ]] && eval "$(pyenv init -)"
+[[ -d "$HOME/.pyenv" ]] && eval "$(pyenv init - zsh --no-rehash)"
 [[ $(which pyenv-virtualenv) ]] && eval "$(pyenv virtualenv-init -)"
 
 # ===== FZF =====
