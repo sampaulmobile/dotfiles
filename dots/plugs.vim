@@ -3,7 +3,7 @@ call plug#begin('~/.vim/plugs')
 " ======================== Syntax =======================
 
 " Asynchronous lint engine
-Plug 'w0rp/ale'
+Plug 'dense-analysis/ale'
 
 " Syntax highlighting for salt
 Plug 'saltstack/salt-vim'
@@ -13,6 +13,9 @@ Plug 'davidoc/taskpaper.vim'
 
 " A collection of language packs for Vim.
 Plug 'sheerun/vim-polyglot'
+
+" Management of tag files
+Plug 'ludovicchabant/vim-gutentags'
 
 " Extra highlighting of typedefs, enumerations etc (based on ctags)
 " Plug 'vim-scripts/TagHighlight'
@@ -57,6 +60,9 @@ Plug 'lervag/vimtex', { 'for': 'tex' }
 
 " Reload files in vim when necessary
 Plug 'tmux-plugins/vim-tmux-focus-events'
+
+" Intellisense for JS, 'as smart as VSCode'
+Plug 'neoclide/coc.nvim', {'branch': 'release'}
 
 " ======================== VIM Tools =======================
 

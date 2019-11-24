@@ -228,6 +228,17 @@ let g:ale_lint_on_text_changed = 'never'
 highlight link ALEWarningSign String
 highlight link ALEErrorSign Title
 
+let g:ale_fixers = {
+\   '*': ['remove_trailing_lines', 'trim_whitespace'],
+\   'javascript': ['eslint'],
+\}
+
+" Fix files automatically on save
+let g:ale_fix_on_save = 1
+
+" enable gutentags trace for debugging
+" let g:gutentags_trace = 1
+
 " disable polyglot when using latex
 let g:polyglot_disabled = ['latex']
 
