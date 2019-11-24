@@ -157,11 +157,11 @@ let g:nerdtree_tabs_open_on_console_startup=1
 " --glob: Additional conditions for search (in this case ignore everything in the .git/ folder)
 " --color: Search color options
 let g:rg_command = "
-  \ rg --column --line-number --no-heading --fixed-strings --smart-case 
+  \ rg --column --line-number --no-heading --fixed-strings --smart-case
   \ --follow --color 'always'
   \ --glob '!{.git,node_modules,vendor}/*'
   \ --glob '!*.java' --glob '!*.class' "
-command! -bang -nargs=* Find 
+command! -bang -nargs=* Find
   \ call fzf#vim#grep(
   \     g:rg_command .shellescape(<q-args>), 1, <bang>0)
 
@@ -192,20 +192,20 @@ map <leader>u :GundoToggle<CR>
 let g:SimpylFold_docstring_preview = 1
 
 " set YouCompleteMe goto definition
-map <leader>g  :YcmCompleter GoToDefinitionElseDeclaration<CR>
-let g:ycm_autoclose_preview_window_after_completion = 1
-let g:ycm_autoclose_preview_window_after_insertion = 1
+" map <leader>g  :YcmCompleter GoToDefinitionElseDeclaration<CR>
+" let g:ycm_autoclose_preview_window_after_completion = 1
+" let g:ycm_autoclose_preview_window_after_insertion = 1
 
 " make YCM compatible with UltiSnips (using supertab)
-let g:ycm_key_list_select_completion   = ['<C-j>', '<C-n>', '<Down>']
-let g:ycm_key_list_previous_completion = ['<C-k>', '<C-p>', '<Up>']
-let g:SuperTabDefaultCompletionType    = '<C-n>'
+" let g:ycm_key_list_select_completion   = ['<C-j>', '<C-n>', '<Down>']
+" let g:ycm_key_list_previous_completion = ['<C-k>', '<C-p>', '<Up>']
+" let g:SuperTabDefaultCompletionType    = '<C-n>'
 " let g:SuperTabCrMapping                = 0
 
 " better key bindings for UltiSnipsExpandTrigger
-let g:UltiSnipsExpandTrigger = "<tab>"
-let g:UltiSnipsJumpForwardTrigger = "<tab>"
-let g:UltiSnipsJumpBackwardTrigger = "<s-tab>"
+" let g:UltiSnipsExpandTrigger = "<tab>"
+" let g:UltiSnipsJumpForwardTrigger = "<tab>"
+" let g:UltiSnipsJumpBackwardTrigger = "<s-tab>"
 
 " indent guide - minimum width, subtle highlighting
 let g:indent_guides_guide_size = 1
@@ -233,8 +233,12 @@ let g:ale_fixers = {
 \   'javascript': ['eslint'],
 \}
 
-" Fix files automatically on save
-let g:ale_fix_on_save = 1
+" only lint on save, dont fix - we will do that
+let g:ale_lint_on_save = 1
+let g:ale_fix_on_save = 0
+
+" run linting before saving to see changes
+nmap <leader>d <Plug>(ale_fix)
 
 " enable gutentags trace for debugging
 " let g:gutentags_trace = 1
@@ -292,9 +296,8 @@ function! s:MaybeUpdateLightline()
 endfunction
 
 " Need to set coloscheme after plugs are loaded
-" silent! colorscheme badwolf
-" silent! colorscheme molokai
-silent! colorscheme gruvbox
+silent! colorscheme molokai
+
 set bg=dark             "Options are 'dark' or 'light'
 hi Folded guibg=#3e3e3e
 hi Folded guifg=#b0b0b0

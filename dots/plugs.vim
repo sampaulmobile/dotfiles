@@ -5,20 +5,20 @@ call plug#begin('~/.vim/plugs')
 " Asynchronous lint engine
 Plug 'dense-analysis/ale'
 
-" Syntax highlighting for salt
-Plug 'saltstack/salt-vim'
+" A collection of language packs for Vim.
+Plug 'sheerun/vim-polyglot'
 
 " Taskpaper (todo list) helpers/syntax
 Plug 'davidoc/taskpaper.vim'
 
-" A collection of language packs for Vim.
-Plug 'sheerun/vim-polyglot'
-
 " Management of tag files
-Plug 'ludovicchabant/vim-gutentags'
+" Plug 'ludovicchabant/vim-gutentags'
 
 " Extra highlighting of typedefs, enumerations etc (based on ctags)
 " Plug 'vim-scripts/TagHighlight'
+
+" Syntax highlighting for salt
+" Plug 'saltstack/salt-vim'
 
 " ======================== Text Editing =======================
 
@@ -37,9 +37,6 @@ Plug 'vim-scripts/IndexedSearch'
 " Extended % matching for HTML, LaTeX, and many other languages
 Plug 'vim-scripts/matchit.zip'
 
-" Add 'end' for ruby
-Plug 'tpope/vim-endwise'
-
 " Auto close parens/brackets/etc.
 Plug 'raimondi/delimitmate'
 
@@ -49,12 +46,6 @@ Plug 'tmhedberg/SimpylFold'
 " Text filtering and alignment
 Plug 'godlygeek/tabular'
 
-" Autocomplete stuff
-" Plug 'Valloric/YouCompleteMe'
-
-" Ultisnips + snippets + supertab to make it work with YCM
-Plug 'SirVer/ultisnips' | Plug 'honza/vim-snippets' | Plug 'ervandew/supertab'
-
 " latex editing/compiling
 Plug 'lervag/vimtex', { 'for': 'tex' }
 
@@ -63,6 +54,15 @@ Plug 'tmux-plugins/vim-tmux-focus-events'
 
 " Intellisense for JS, 'as smart as VSCode'
 Plug 'neoclide/coc.nvim', {'branch': 'release'}
+
+" Autocomplete stuff
+" Plug 'Valloric/YouCompleteMe'
+
+" Ultisnips + snippets + supertab to make it work with YCM
+" Plug 'SirVer/ultisnips' | Plug 'honza/vim-snippets' | Plug 'ervandew/supertab'
+
+" Add 'end' for ruby
+" Plug 'tpope/vim-endwise'
 
 " ======================== VIM Tools =======================
 
@@ -75,14 +75,8 @@ Plug 'jistr/vim-nerdtree-tabs'
 " Add git status indicators to NERDTree
 Plug 'Xuyuanp/nerdtree-git-plugin'
 
-" Show git diff in vim 'gutter'
-" Plug 'airblade/vim-gitgutter'
-
 " Git wrapper - :gblame, :gbrowse, etc.
 Plug 'tpope/vim-fugitive' | Plug 'tpope/vim-rhubarb'
-
-" Visualize vim undo tree (this requires +python2 vim)
-" Plug 'sjl/gundo.vim'
 
 " Visually display indent levels in code
 Plug 'nathanaelkane/vim-indent-guides'
@@ -97,6 +91,12 @@ Plug 'junegunn/fzf.vim'
 " Switch between vim/tmux panes seamlessly
 Plug 'christoomey/vim-tmux-navigator'
 
+" Show git diff in vim 'gutter'
+" Plug 'airblade/vim-gitgutter'
+
+" Visualize vim undo tree (this requires +python2 vim)
+" Plug 'sjl/gundo.vim'
+
 " 'distraction free writing in vim'
 " Plug 'junegunn/goyo.vim'
 
@@ -105,5 +105,7 @@ Plug 'sjl/badwolf'
 Plug 'tomasr/molokai'
 Plug 'reedes/vim-colors-pencil'
 Plug 'morhetz/gruvbox'
+Plug 'nanotech/jellybeans'
+Plug 'dracula/vim', { 'as': 'dracula' }
 
 call plug#end()
