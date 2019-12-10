@@ -38,6 +38,11 @@ if [ -d ~/.oh-my-zsh ]; then
     ln -s $dir/sampaul.zsh-theme ~/.oh-my-zsh/custom/sampaul.zsh-theme
 fi
 
+if [ -d ~/.config/nvim ]; then
+    mv ~/.config/nvim/init.vim $deldir
+    ln -s $dir/init.vim ~/.config/nvim/init.vim
+fi
+
 if [ -d $NOT_PUBLIC/links ]; then
     mkdir -p ~/.aws
     mv ~/.aws/config $deldir

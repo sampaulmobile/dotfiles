@@ -3,34 +3,44 @@ let mapleader=","               "Change leader to a comma
 let maplocalleader = "\\"       "Change local leader to backslash
 set encoding=utf-8
 
-" win 120 80                    "Make window 80 wide x 45 tall
 set nocompatible                "Use vim defaults
-set ru                          "Turn on ruler
-set number                      "Line numbers are good
-set backspace=indent,eol,start  "Allow backspace in insert mode
-set history=1000                "Store lots of :cmdline history
+set ru                          "Show line, column number of cursor
+set number                      "Show line numbers
+set nowrap                      "Don't wrap lines
 set showcmd                     "Show incomplete cmds down the bottom
 set showmode                    "Show current mode down the bottom
-set gcr=a:blinkon0              "Disable cursor blink
 set visualbell                  "No sounds
 set autoread                    "Reload files changed outside vim
 set hidden                      "Buffers exist in the background
+set autochdir                   "Always set pwd to path of current file
+
 set ignorecase                  "Ignore case when searching
-set wrapscan                    "Search wrap around the EOF
 set smartcase                   "Override 'ignorecase' if search has uppercase
-set incsearch                   "Do incremental searching
+set wrapscan                    "Search wrap around the EOF
+set incsearch                   "While typing search, show matches thus far
 set hlsearch                    "Highlight searches
-set nowrap                      "Don't wrap lines
-set linebreak                   "Wrap lines at convenient points
-set scrolloff=8                 "Start scrolling 8 lines away from margins
-set sidescrolloff=15
-set sidescroll=1
-set shiftwidth=4
-set softtabstop=4
-set tabstop=4
-set expandtab
-set autochdir " always set pwd to path of current file
+
+set scrolloff=8                 "Start scrolling 8 lines away from top/bottom margins
+set sidescrolloff=15            "Start scrolling 15 lines away from left/right margins
+set sidescroll=1                "Scroll horizontally by 1 character at time
+
+set backspace=indent,eol,start  "Allow backspace in insert mode
+set history=1000                "Store lots of :cmdline history
+set gcr=a:blinkon0              "Disable cursor blink
 set clipboard=unnamed           "Allow vim to access OS clipboard
+
+set foldnestmax=5               "deepest fold is 5 levels
+set foldmethod=syntax           "fold by syntax
+
+" Display tabs and trailing spaces visually
+set list listchars=tab:\ \ ,trail:·
+
+" these should be covered with vim-sleuth
+" set shiftwidth=4
+" set softtabstop=4
+" set tabstop=4
+" set expandtab
+
 " set cin
 " set autoindent
 " set smartindent
@@ -53,14 +63,6 @@ augroup vimrc_autocmds
   autocmd BufEnter * highlight OverLength ctermbg=darkgrey guibg=#592929
   autocmd BufEnter * match OverLength /\%80v.*/
 augroup END
-
-set foldnestmax=5               "deepest fold is 5 levels
-set foldmethod=syntax           "fold by syntax
-" set foldmethod=indent          "fold based on indent
-" set nofoldenable               "dont fold by default
-
-" Display tabs and trailing spaces visually
-set list listchars=tab:\ \ ,trail:·
 
 " Keep undo history across sessions by storing it in a file
 if has('persistent_undo')
