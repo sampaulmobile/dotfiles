@@ -187,6 +187,7 @@ map <leader>/ <c-_><c-_>
 
 " Gundo - GUI Undo Tree (visualized)
 map <leader>u :GundoToggle<CR>
+let g:gundo_prefer_python3 = 1
 
 " python folding - preview docstring in fold text
 let g:SimpylFold_docstring_preview = 1

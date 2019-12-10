@@ -91,11 +91,11 @@ Plug 'junegunn/fzf.vim'
 " Switch between vim/tmux panes seamlessly
 Plug 'christoomey/vim-tmux-navigator'
 
+" Visualize vim undo tree
+Plug 'sjl/gundo.vim'
+
 " Show git diff in vim 'gutter'
 " Plug 'airblade/vim-gitgutter'
-
-" Visualize vim undo tree (this requires +python2 vim)
-" Plug 'sjl/gundo.vim'
 
 " 'distraction free writing in vim'
 " Plug 'junegunn/goyo.vim'
