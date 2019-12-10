@@ -191,6 +191,17 @@ map <leader>u :GundoToggle<CR>
 " python folding - preview docstring in fold text
 let g:SimpylFold_docstring_preview = 1
 
+" use <tab> for trigger completion and navigate to the next complete item
+function! s:check_back_space() abort
+  let col = col('.') - 1
+  return !col || getline('.')[col - 1]  =~ '\s'
+endfunction
+
+inoremap <silent><expr> <Tab>
+      \ pumvisible() ? "\<C-n>" :
+      \ <SID>check_back_space() ? "\<Tab>" :
+      \ coc#refresh()
+
 " set YouCompleteMe goto definition
 " map <leader>g  :YcmCompleter GoToDefinitionElseDeclaration<CR>
 " let g:ycm_autoclose_preview_window_after_completion = 1
