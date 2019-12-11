@@ -20,14 +20,14 @@ set wrapscan                    "Search wrap around the EOF
 set incsearch                   "While typing search, show matches thus far
 set hlsearch                    "Highlight searches
 
-set scrolloff=8                 "Start scrolling 8 lines away from top/bottom margins
-set sidescrolloff=15            "Start scrolling 15 lines away from left/right margins
+set scrolloff=8                 "Start scrolling 8 lines from top/bottom margin
+set sidescrolloff=15            "Start scrolling 15 lines from left/right margin
 set sidescroll=1                "Scroll horizontally by 1 character at time
 
 set backspace=indent,eol,start  "Allow backspace in insert mode
-set history=1000                "Store lots of :cmdline history
-set gcr=a:blinkon0              "Disable cursor blink
 set clipboard=unnamed           "Allow vim to access OS clipboard
+set history=100                 "Store 100 lines of :cmdline history
+set gcr=a:blinkon0              "Disable cursor blink
 
 set foldnestmax=5               "deepest fold is 5 levels
 set foldmethod=syntax           "fold by syntax
@@ -35,28 +35,16 @@ set foldmethod=syntax           "fold by syntax
 " Display tabs and trailing spaces visually
 set list listchars=tab:\ \ ,trail:·
 
-" these should be covered with vim-sleuth
-" set shiftwidth=4
-" set softtabstop=4
-" set tabstop=4
-" set expandtab
-
-" set cin
-" set autoindent
-" set smartindent
-" set smarttab
-
 " Disable scrollbars
 set guioptions-=r
 set guioptions-=R
 set guioptions-=l
 set guioptions-=L
 
-" =============================  INIT PLUGS  ==============================
+" init plugs
 if filereadable(expand("~/.vim/plugs.vim"))
   source ~/.vim/plugs.vim
 endif
-
 
 " highlight characters past 80 columns
 augroup vimrc_autocmds
@@ -93,10 +81,10 @@ set wildignore+=*.png,*.jpg,*.gif
 imap jj <Esc>
 
 " Toggle fold open/closed with <S-Space> if over a fold
+" (this does not work in vim terminal)
 " nnoremap <silent> <S-Space> @=(foldlevel('.')?'za':'zc')<CR>
-" nmap <S-Space> zc<CR>
 
-" Move between split windows with Ctrl + arrow keys
+" Move between split windows with Ctrl + hlkj keys
 nnoremap <silent> <C-h> <C-w>h
 nnoremap <silent> <C-l> <C-w>l
 nnoremap <silent> <C-k> <C-w>k
@@ -114,6 +102,7 @@ nnoremap g# g#zz
 nnoremap <esc> :noh<return><esc>
 nnoremap <esc>^[ <esc>^[
 
+" Misc <leader> mappings
 nmap <Leader>vs :vsplit<CR>
 nmap <Leader>s :split<CR>
 nmap <Leader>c :close<CR>
@@ -130,7 +119,8 @@ nnoremap <Leader>ww :let _s=@/
   \<Bar>:%s/" }/"}/e
   \<Bar>:let @/=_s<Bar><CR>
 
-" ========================  VUNDLE/PLUGIN MAPPINGS  =========================
+
+" ========================  PLUG SETTINGS/MAPPINGS  =========================
 
 " Set some shortcuts for Tabularize
 nmap <Leader>a= :Tabularize /=<CR>
@@ -254,9 +244,6 @@ let g:ale_fix_on_save = 0
 " run linting before saving to see changes
 nmap <leader>d <Plug>(ale_fix)
 
-" enable gutentags trace for debugging
-" let g:gutentags_trace = 1
-
 " disable polyglot when using latex
 let g:polyglot_disabled = ['latex']
 
@@ -318,14 +305,3 @@ hi Folded guifg=#b0b0b0
 
 " enable true colors
 set termguicolors
-
-function! s:goyo_enter()
-    colorscheme pencil
-endfunction
-
-function! s:goyo_leave()
-    colorscheme molokai
-endfunction
-
-autocmd! User GoyoEnter nested call <SID>goyo_enter()
-autocmd! User GoyoLeave nested call <SID>goyo_leave()
