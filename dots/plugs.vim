@@ -34,9 +34,6 @@ Plug 'tomtom/tcomment_vim'
 " Shows 'Nth match out of M' at every search
 Plug 'vim-scripts/IndexedSearch'
 
-" Extended % matching for HTML, LaTeX, and many other languages
-Plug 'vim-scripts/matchit.zip'
-
 " Auto close parens/brackets/etc.
 Plug 'raimondi/delimitmate'
 
@@ -46,14 +43,17 @@ Plug 'tmhedberg/SimpylFold'
 " Text filtering and alignment
 Plug 'godlygeek/tabular'
 
-" latex editing/compiling
-Plug 'lervag/vimtex', { 'for': 'tex' }
-
 " Reload files in vim when necessary
 Plug 'tmux-plugins/vim-tmux-focus-events'
 
 " Intellisense for JS, 'as smart as VSCode'
 Plug 'neoclide/coc.nvim', {'branch': 'release'}
+
+" Extended % matching for HTML, LaTeX, and many other languages
+Plug 'vim-scripts/matchit.zip'
+
+" latex editing/compiling
+Plug 'lervag/vimtex', { 'for': 'tex' }
 
 " Autocomplete stuff
 " Plug 'Valloric/YouCompleteMe'

@@ -1,7 +1,6 @@
 " =============================  GENERAL CONFIG  ==============================
 let mapleader=","               "Change leader to a comma
 let maplocalleader = "\\"       "Change local leader to backslash
-set encoding=utf-8
 
 set nocompatible                "Use vim defaults
 set ru                          "Show line, column number of cursor
@@ -24,6 +23,7 @@ set scrolloff=8                 "Start scrolling 8 lines from top/bottom margin
 set sidescrolloff=15            "Start scrolling 15 lines from left/right margin
 set sidescroll=1                "Scroll horizontally by 1 character at time
 
+set encoding=utf-8              "Set encoding to UTF-8
 set backspace=indent,eol,start  "Allow backspace in insert mode
 set clipboard=unnamed           "Allow vim to access OS clipboard
 set history=100                 "Store 100 lines of :cmdline history

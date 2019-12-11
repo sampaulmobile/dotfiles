@@ -41,6 +41,7 @@ fi
 if [ -d ~/.config/nvim ]; then
     mv ~/.config/nvim/init.vim $deldir
     ln -s $dir/init.vim ~/.config/nvim/init.vim
+    ln -s $dir/plugs_neo.vim ~/.config/nvim/plugs_neo.vim
 fi
 
 if [ -d $NOT_PUBLIC/links ]; then
