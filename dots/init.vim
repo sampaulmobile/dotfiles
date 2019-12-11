@@ -122,4 +122,6 @@ if filereadable(expand("~/.config/nvim/plugs_neo.vim"))
   source ~/.config/nvim/plugs_neo.vim
 endif
 
+" Set colorscheme
+silent! colorscheme molokai
 

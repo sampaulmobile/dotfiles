@@ -28,5 +28,7 @@ Plug 'godlygeek/tabular'
 
 " ======================== VIM Tools =======================
 
+" colorschemes
+Plug 'tomasr/molokai'
 
 call plug#end()

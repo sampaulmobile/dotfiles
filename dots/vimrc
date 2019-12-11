@@ -296,7 +296,7 @@ function! s:MaybeUpdateLightline()
   end
 endfunction
 
-" Need to set coloscheme after plugs are loaded
+" Need to set colorscheme after plugs are loaded
 silent! colorscheme molokai
 
 set bg=dark             "Options are 'dark' or 'light'
