@@ -28,6 +28,12 @@ Plug 'godlygeek/tabular'
 
 " ======================== VIM Tools =======================
 
+" Visually display indent levels in code
+Plug 'nathanaelkane/vim-indent-guides'
+
+" Visualize vim undo tree
+Plug 'sjl/gundo.vim'
+
 " colorschemes
 Plug 'tomasr/molokai'
 

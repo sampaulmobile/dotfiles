@@ -125,3 +125,28 @@ endif
 " Set colorscheme
 silent! colorscheme molokai
 
+" Set some shortcuts for Tabularize
+nmap <Leader>a= :Tabularize /=<CR>
+vmap <Leader>a= :Tabularize /=<CR>
+nmap <Leader>a: :Tabularize /:\zs<CR>
+vmap <Leader>a: :Tabularize /:\zs<CR>
+
+" TComment remap to c key
+map <leader>/ <c-_><c-_>
+
+" Mappings for fugitive
+map <leader>gb :Gblame<CR>
+map <leader>gh :Gbrowse<CR>
+
+" Gundo mappings
+map <leader>u :GundoToggle<CR>
+let g:gundo_prefer_python3 = 1
+
+" python folding - preview docstring in fold text
+let g:SimpylFold_docstring_preview = 1
+
+" indent guide - minimum width, subtle highlighting
+let g:indent_guides_guide_size = 1
+let g:indent_guides_color_change_percent = 3
+let g:indent_guides_enable_on_vim_startup = 1
+
