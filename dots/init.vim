@@ -150,6 +150,14 @@ let g:indent_guides_guide_size = 1
 let g:indent_guides_color_change_percent = 3
 let g:indent_guides_enable_on_vim_startup = 1
 
+" NERDTree settings
+map T :NERDTreeToggle<CR>
+let g:NERDTreeWinSize = 20
+let NERDTreeIgnore = ['\.pyc$','\.pyo$', '\.db$', '__pycache__']
+
+" NERDtree-tabs settings
+let g:nerdtree_tabs_open_on_console_startup=1
+
 " coc.nvim configuration
 set cmdheight=2         " Better display for messages
 set updatetime=300      " Bad experience with diagnostic messages when it's default 4000

@@ -41,6 +41,15 @@ Plug 'nathanaelkane/vim-indent-guides'
 " Visualize vim undo tree
 Plug 'sjl/gundo.vim'
 
+" NERDTree BRO!
+Plug 'scrooloose/nerdtree'
+
+" NERDTree and tabs together in Vim
+Plug 'jistr/vim-nerdtree-tabs'
+
+" Add git status indicators to NERDTree
+Plug 'Xuyuanp/nerdtree-git-plugin'
+
 " colorschemes
 Plug 'tomasr/molokai'
 
