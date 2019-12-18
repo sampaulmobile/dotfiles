@@ -29,6 +29,10 @@ Plug 'godlygeek/tabular'
 " Intellisense for (N)VIM, 'as smart as VSCode'
 Plug 'neoclide/coc.nvim', {'branch': 'release'}
 
+" Modern generic interactive finder/dispatcher for (N)VIM
+Plug 'liuchengxu/vim-clap'
+
+
 " ======================== VIM Tools =======================
 
 " Visually display indent levels in code

@@ -172,3 +172,12 @@ nmap <silent> gd <Plug>(coc-definition)
 nmap <silent> gy <Plug>(coc-type-definition)
 nmap <silent> gi <Plug>(coc-implementation)
 nmap <silent> gr <Plug>(coc-references)
+
+" vim-clap settings
+let g:clap_open_action = {'ctrl-t': 'tab split', 'ctrl-s': 'split', 'ctrl-v': 'vsplit'}
+nmap <Leader>t :Clap files ++ef=fzf<CR>
+nmap <Leader>f :Clap grep ++ef=fzf<CR>
+
+" Use <C-n>/<C-p> instead of <C-j>/<C-k>
+autocmd FileType clap_input inoremap <silent> <buffer> <C-n> <C-R>=clap#handler#navigate_result('down')<CR>
+autocmd FileType clap_input inoremap <silent> <buffer> <C-p> <C-R>=clap#handler#navigate_result('up')<CR>
