@@ -26,6 +26,9 @@ Plug 'tmhedberg/SimpylFold'
 " Text filtering and alignment
 Plug 'godlygeek/tabular'
 
+" Intellisense for (N)VIM, 'as smart as VSCode'
+Plug 'neoclide/coc.nvim', {'branch': 'release'}
+
 " ======================== VIM Tools =======================
 
 " Visually display indent levels in code
