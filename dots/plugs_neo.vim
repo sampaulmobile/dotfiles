@@ -2,6 +2,12 @@ call plug#begin('~/.vim/plugged_neo')
 
 " ======================== Syntax =======================
 
+" Asynchronous lint engine
+Plug 'dense-analysis/ale'
+
+" A collection of language packs for Vim
+Plug 'sheerun/vim-polyglot'
+
 " Taskpaper (todo list) helpers/syntax
 Plug 'davidoc/taskpaper.vim'
 

@@ -82,6 +82,7 @@ nmap <Leader>c :close<CR>
 nmap <Leader>w :w<CR>
 nmap <Leader>wq :wq<CR>
 nmap <Leader>q :q<CR>
+nmap <Leader>r :so $MYVIMRC<CR>
 
 " Move between split windows with Ctrl + hlkj keys
 nnoremap <silent> <C-h> <C-w>h
@@ -189,3 +190,18 @@ nmap <Leader>f :Clap grep ++ef=fzf<CR>
 " Use <C-n>/<C-p> instead of <C-j>/<C-k>
 autocmd FileType clap_input inoremap <silent> <buffer> <C-n> <C-R>=clap#handler#navigate_result('down')<CR>
 autocmd FileType clap_input inoremap <silent> <buffer> <C-p> <C-R>=clap#handler#navigate_result('up')<CR>
+
+" ALE
+let g:ale_fixers = {
+\   '*': ['remove_trailing_lines', 'trim_whitespace'],
+\   'javascript': ['eslint'],
+\}
+let g:ale_lint_on_save = 1
+let g:ale_fix_on_save = 0
+let g:ale_lint_on_text_changed = 'never'
+let g:ale_sign_warning = '▲'
+let g:ale_sign_error = '✗'
+let g:ale_echo_msg_format = '[%linter%] %s [%severity%]'
+
+" run linting before saving to see changes
+nmap <leader>d <Plug>(ale_fix)
