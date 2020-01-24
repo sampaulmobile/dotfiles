@@ -14,7 +14,6 @@ Plug 'davidoc/taskpaper.vim'
 " Visually display indent levels in code
 Plug 'nathanaelkane/vim-indent-guides'
 
-
 " ======================== Text Editing =======================
 
 " Automatically adjust 'shiftwidth' and 'expandtab' heuristically
@@ -38,6 +37,11 @@ Plug 'godlygeek/tabular'
 " Intellisense for (N)VIM, 'as smart as VSCode'
 Plug 'neoclide/coc.nvim', {'branch': 'release'}
 
+" Minimal airline
+" Plug 'itchyny/lightline.vim'
+
+" Reload files in vim when necessary
+" Plug 'tmux-plugins/vim-tmux-focus-events'
 
 " ======================== VIM Tools =======================
 
@@ -58,6 +62,9 @@ Plug 'Xuyuanp/nerdtree-git-plugin'
 
 " Modern generic interactive finder/dispatcher for (N)VIM
 Plug 'liuchengxu/vim-clap'
+
+" Switch between vim/tmux panes seamlessly
+" Plug 'christoomey/vim-tmux-navigator'
 
 " colorschemes
 Plug 'tomasr/molokai'
