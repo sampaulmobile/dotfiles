@@ -82,6 +82,7 @@ nmap <Leader>c :close<CR>
 nmap <Leader>w :w<CR>
 nmap <Leader>wq :wq<CR>
 nmap <Leader>q :q<CR>
+nmap <Leader>r :so $MYVIMRC<CR>
 
 " Move between split windows with Ctrl + hlkj keys
 nnoremap <silent> <C-h> <C-w>h
@@ -125,3 +126,82 @@ endif
 " Set colorscheme
 silent! colorscheme molokai
 
+" Set some shortcuts for Tabularize
+nmap <Leader>a= :Tabularize /=<CR>
+vmap <Leader>a= :Tabularize /=<CR>
+nmap <Leader>a: :Tabularize /:\zs<CR>
+vmap <Leader>a: :Tabularize /:\zs<CR>
+
+" TComment remap to c key
+map <leader>/ <c-_><c-_>
+
+" Mappings for fugitive
+map <leader>gb :Gblame<CR>
+map <leader>gh :Gbrowse<CR>
+
+" Gundo mappings
+map <leader>u :GundoToggle<CR>
+let g:gundo_prefer_python3 = 1
+
+" python folding - preview docstring in fold text
+let g:SimpylFold_docstring_preview = 1
+
+" indent guide - minimum width, subtle highlighting
+let g:indent_guides_guide_size = 1
+let g:indent_guides_color_change_percent = 3
+let g:indent_guides_enable_on_vim_startup = 1
+
+" NERDTree settings
+map T :NERDTreeToggle<CR>
+let g:NERDTreeWinSize = 20
+let NERDTreeIgnore = ['\.pyc$','\.pyo$', '\.db$', '__pycache__']
+
+" NERDtree-tabs settings
+let g:nerdtree_tabs_open_on_console_startup=1
+
+" coc.nvim configuration
+set cmdheight=2         " Better display for messages
+set updatetime=300      " Bad experience with diagnostic messages when it's default 4000
+set shortmess+=c        " don't give |ins-completion-menu| messages
+
+" Use tab for trigger completion with characters ahead and navigate.
+inoremap <silent><expr> <TAB>
+      \ pumvisible() ? "\<C-n>" :
+      \ <SID>check_back_space() ? "\<TAB>" :
+      \ coc#refresh()
+inoremap <expr><S-TAB> pumvisible() ? "\<C-p>" : "\<C-h>"
+
+function! s:check_back_space() abort
+  let col = col('.') - 1
+  return !col || getline('.')[col - 1]  =~# '\s'
+endfunction
+
+" Remap keys for gotos
+nmap <silent> gd <Plug>(coc-definition)
+nmap <silent> gy <Plug>(coc-type-definition)
+nmap <silent> gi <Plug>(coc-implementation)
+nmap <silent> gr <Plug>(coc-references)
+
+" vim-clap settings
+let g:clap_open_action = {'ctrl-t': 'tab split', 'ctrl-s': 'split', 'ctrl-v': 'vsplit'}
+nmap <Leader>t :Clap files ++ef=fzf<CR>
+nmap <Leader>f :Clap grep ++ef=fzf<CR>
+
+" Use <C-n>/<C-p> instead of <C-j>/<C-k>
+autocmd FileType clap_input inoremap <silent> <buffer> <C-n> <C-R>=clap#handler#navigate_result('down')<CR>
+autocmd FileType clap_input inoremap <silent> <buffer> <C-p> <C-R>=clap#handler#navigate_result('up')<CR>
+
+" ALE
+let g:ale_fixers = {
+\   '*': ['remove_trailing_lines', 'trim_whitespace'],
+\   'javascript': ['eslint'],
+\}
+let g:ale_lint_on_save = 1
+let g:ale_fix_on_save = 0
+let g:ale_lint_on_text_changed = 'never'
+let g:ale_sign_warning = '▲'
+let g:ale_sign_error = '✗'
+let g:ale_echo_msg_format = '[%linter%] %s [%severity%]'
+
+" run linting before saving to see changes
+nmap <leader>d <Plug>(ale_fix)

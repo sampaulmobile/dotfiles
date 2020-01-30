@@ -2,8 +2,17 @@ call plug#begin('~/.vim/plugged_neo')
 
 " ======================== Syntax =======================
 
+" Asynchronous lint engine
+Plug 'dense-analysis/ale'
+
+" A collection of language packs for Vim
+Plug 'sheerun/vim-polyglot'
+
 " Taskpaper (todo list) helpers/syntax
 Plug 'davidoc/taskpaper.vim'
+
+" Visually display indent levels in code
+Plug 'nathanaelkane/vim-indent-guides'
 
 
 " ======================== Text Editing =======================
@@ -17,8 +26,8 @@ Plug 'tomtom/tcomment_vim'
 " Shows 'Nth match out of M' at every search
 Plug 'vim-scripts/IndexedSearch'
 
-" Auto close parens/brackets/etc.
-Plug 'raimondi/delimitmate'
+" Insert or delete brackets, parens, quotes in pair
+Plug 'jiangmiao/auto-pairs'
 
 " Python folding
 Plug 'tmhedberg/SimpylFold'
@@ -26,7 +35,29 @@ Plug 'tmhedberg/SimpylFold'
 " Text filtering and alignment
 Plug 'godlygeek/tabular'
 
+" Intellisense for (N)VIM, 'as smart as VSCode'
+Plug 'neoclide/coc.nvim', {'branch': 'release'}
+
+
 " ======================== VIM Tools =======================
+
+" Git(hub) wrapper - :gblame, :gbrowse, etc.
+Plug 'tpope/vim-fugitive' | Plug 'tpope/vim-rhubarb'
+
+" Visualize vim undo tree
+Plug 'sjl/gundo.vim'
+
+" NERDTree BRO!
+Plug 'scrooloose/nerdtree'
+
+" NERDTree and tabs together in Vim
+Plug 'jistr/vim-nerdtree-tabs'
+
+" Add git status indicators to NERDTree
+Plug 'Xuyuanp/nerdtree-git-plugin'
+
+" Modern generic interactive finder/dispatcher for (N)VIM
+Plug 'liuchengxu/vim-clap'
 
 " colorschemes
 Plug 'tomasr/molokai'
