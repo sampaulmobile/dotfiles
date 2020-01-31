@@ -257,6 +257,11 @@ function cdg() {
     fi
     cd "${topdir}/${1}"
 }
+git_clean_branches() {
+    git checkout master
+    git pull
+    git branch --merged | egrep -v "(^\*|master)" | xargs git branch -d
+}
 
 
 # ============ GITHUB =============
