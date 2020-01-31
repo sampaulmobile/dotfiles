@@ -14,6 +14,9 @@ Plug 'davidoc/taskpaper.vim'
 " Visually display indent levels in code
 Plug 'nathanaelkane/vim-indent-guides'
 
+" Rainbow parens
+" Plug 'luochen1990/rainbow'
+
 " ======================== Text Editing =======================
 
 " Automatically adjust 'shiftwidth' and 'expandtab' heuristically
@@ -68,5 +71,7 @@ Plug 'liuchengxu/vim-clap'
 
 " colorschemes
 Plug 'tomasr/molokai'
+" Plug 'AlessandroYorba/Alduin'
+" Plug 'hzchirs/vim-material'
 
 call plug#end()
