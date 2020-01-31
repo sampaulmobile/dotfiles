@@ -38,7 +38,7 @@ Plug 'godlygeek/tabular'
 Plug 'neoclide/coc.nvim', {'branch': 'release'}
 
 " Minimal airline
-" Plug 'itchyny/lightline.vim'
+Plug 'itchyny/lightline.vim'
 
 " Reload files in vim when necessary
 " Plug 'tmux-plugins/vim-tmux-focus-events'
