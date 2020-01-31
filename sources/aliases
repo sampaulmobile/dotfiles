@@ -96,7 +96,6 @@ hist_g() {
     LC_ALL='C' sed -E 's/^\: [0-9]+\:[0-9]\;//g' | grep "$1"
 }
 alias h='hist_g'
-alias m='mvim'
 launch_vim() {
     if [ -n "$TMUX" ]; then
         curr_folder=${PWD##*/}
@@ -106,6 +105,16 @@ launch_vim() {
     fi
 }
 alias v='launch_vim'
+alias m='mvim'
+launch_nvim() {
+    if [ -n "$TMUX" ]; then
+        curr_folder=${PWD##*/}
+        tmux -u new-window -a -n $curr_folder "nvim $1"
+    else
+        nvim $1
+    fi
+}
+alias n='launch_nvim'
 
 psgrep() { ps aux | grep -v grep | fzf -0 -q $1 }
 alias psg=psgrep
