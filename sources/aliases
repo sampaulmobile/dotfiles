@@ -223,6 +223,7 @@ git_checkout() {
     fi
 }
 alias gco='git_checkout'
+alias gcom='git checkout master'
 
 git_merge() {
     if [ "$GIT_BRANCH" != "master" ]; then
