@@ -188,8 +188,8 @@ nmap <Leader>t :Clap files ++ef=fzf<CR>
 nmap <Leader>f :Clap grep ++ef=fzf<CR>
 
 " Use <C-n>/<C-p> instead of <C-j>/<C-k>
-autocmd FileType clap_input inoremap <silent> <buffer> <C-n> <C-R>=clap#handler#navigate_result('down')<CR>
-autocmd FileType clap_input inoremap <silent> <buffer> <C-p> <C-R>=clap#handler#navigate_result('up')<CR>
+autocmd FileType clap_input inoremap <silent> <buffer> <C-n> <C-R>=clap#navigation#linewise('down')<CR>
+autocmd FileType clap_input inoremap <silent> <buffer> <C-p> <C-R>=clap#navigation#linewise('up')<CR>
 
 " ALE
 let g:ale_fixers = {
