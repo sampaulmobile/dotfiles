@@ -44,7 +44,7 @@ Plug 'neoclide/coc.nvim', {'branch': 'release'}
 Plug 'itchyny/lightline.vim'
 
 " Reload files in vim when necessary
-" Plug 'tmux-plugins/vim-tmux-focus-events'
+Plug 'tmux-plugins/vim-tmux-focus-events'
 
 " ======================== VIM Tools =======================
 
@@ -67,7 +67,7 @@ Plug 'Xuyuanp/nerdtree-git-plugin'
 Plug 'liuchengxu/vim-clap'
 
 " Switch between vim/tmux panes seamlessly
-" Plug 'christoomey/vim-tmux-navigator'
+Plug 'christoomey/vim-tmux-navigator'
 
 " colorschemes
 Plug 'tomasr/molokai'

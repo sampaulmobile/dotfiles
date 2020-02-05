@@ -11,6 +11,7 @@ brew 'awscli'
 brew 'exa'
 brew 'pyenv-virtualenv'
 brew 'tmux'
+brew 'neovim'
 
 cask 'google-chrome'
 cask 'iterm2'
