@@ -12,6 +12,7 @@ brew 'exa'
 brew 'pyenv-virtualenv'
 brew 'tmux'
 brew 'neovim'
+# brew 'node'
 
 cask 'google-chrome'
 cask 'iterm2'

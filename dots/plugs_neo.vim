@@ -64,7 +64,7 @@ Plug 'jistr/vim-nerdtree-tabs'
 Plug 'Xuyuanp/nerdtree-git-plugin'
 
 " Modern generic interactive finder/dispatcher for (N)VIM
-Plug 'liuchengxu/vim-clap'
+Plug 'liuchengxu/vim-clap', { 'do': ':Clap install-binary!' }
 
 " Switch between vim/tmux panes seamlessly
 Plug 'christoomey/vim-tmux-navigator'
