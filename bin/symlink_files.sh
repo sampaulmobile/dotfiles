@@ -42,6 +42,8 @@ if [ $(which nvim) ]; then
     mkdir -p ~/.config/nvim
     mv ~/.config/nvim/init.vim $deldir
     ln -s $dir/init.vim ~/.config/nvim/init.vim
+
+    mv ~/.config/nvim/plugs_neo.vim $deldir
     ln -s $dir/plugs_neo.vim ~/.config/nvim/plugs_neo.vim
 fi
 
