@@ -38,7 +38,8 @@ if [ -d ~/.oh-my-zsh ]; then
     ln -s $dir/sampaul.zsh-theme ~/.oh-my-zsh/custom/sampaul.zsh-theme
 fi
 
-if [ -d ~/.config/nvim ]; then
+if [ $(which nvim) ]; then
+    mkdir -p ~/.config/nvim
     mv ~/.config/nvim/init.vim $deldir
     ln -s $dir/init.vim ~/.config/nvim/init.vim
     ln -s $dir/plugs_neo.vim ~/.config/nvim/plugs_neo.vim
