@@ -42,6 +42,10 @@ make_note() {
 }
 alias note='make_note'
 alias study_time='cd $NOT_PUBLIC/study/leetcode && ../study_time.sh'
+wifi_restart() {
+    networksetup -setairportpower airport off
+    networksetup -setairportpower airport on
+}
 
 
 # ============ UNIX =============
