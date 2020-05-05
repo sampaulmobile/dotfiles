@@ -92,6 +92,7 @@ grep_filetype() {
 }
 alias g='grep_filetype'
 alias py='python'
+alias pv='pyenv virtualenv'
 
 
 alias hist="rg -N '' $NOT_PUBLIC/history/*"
