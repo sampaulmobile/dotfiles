@@ -12,6 +12,7 @@ alias dotv='vim $DOTS/vimrc'
 alias dotal='vim $SOURCES/aliases'
 alias dotdoc='vim $SOURCES/docurated_aliases'
 alias cdot='cd ~/dotfiles'
+alias ndot='cdot && nvim'
 alias cdown='cd ~/Downloads'
 alias soz='source ~/.zshrc'
 alias cpwd="pwd | tr -d '\n' | pbcopy"
@@ -93,6 +94,11 @@ grep_filetype() {
 alias g='grep_filetype'
 alias py='python'
 alias pv='pyenv virtualenv'
+pv_local() {
+    pv 3.7.2 $1
+    pyenv local 3.7.2/envs/$1
+}
+alias pvlocal='pv_local'
 
 
 alias hist="rg -N '' $NOT_PUBLIC/history/*"
