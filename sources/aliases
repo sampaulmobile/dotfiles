@@ -283,6 +283,9 @@ git_clean_branches() {
     git pull
     git branch --merged | egrep -v "(^\*|master)" | xargs git branch -d
 }
+git_undo_last_commit() {
+    git reset --soft HEAD~1
+}
 
 
 # ============ GITHUB =============
