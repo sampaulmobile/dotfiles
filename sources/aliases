@@ -92,6 +92,11 @@ grep_filetype() {
     fi
 }
 alias g='grep_filetype'
+grep_and_replace() {
+    grep -rl "$1" . | xargs sed -i '' -e "s/$1/$2/g"
+}
+
+
 alias py='python'
 alias pv='pyenv virtualenv'
 pv_local() {
@@ -156,6 +161,7 @@ alias pscpu10='ps auxf | sort -nr -k 3 | head -10'
  
 ## Get server cpu info ##
 alias cpuinfo='lscpu'
+alias top_cpu='top -F -R -o cpu'
 
 wttr_weather() { curl "wttr.in/${1:-}" }
 alias ww='wttr_weather'
