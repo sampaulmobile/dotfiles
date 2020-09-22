@@ -1,4 +1,5 @@
 # ============ Aliases =============
+DEFAULT_PYTHON_VERSION='3.7.2'
 
 # ============ FILES =============
 # alias notes='cd $NOT_PUBLIC/notes && vim .'
@@ -100,8 +101,8 @@ grep_and_replace() {
 alias py='python'
 alias pv='pyenv virtualenv'
 pv_local() {
-    pv 3.7.2 $1
-    pyenv local 3.7.2/envs/$1
+    pv $DEFAULT_PYTHON_VERSION $1
+    pyenv local $DEFAULT_PYTHON_VERSION/envs/$1
 }
 alias pvlocal='pv_local'
 
