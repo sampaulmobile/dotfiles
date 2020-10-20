@@ -293,6 +293,8 @@ git_clean_branches() {
 git_undo_last_commit() {
     git reset --soft HEAD~1
 }
+alias git_reset_to_master='git reset --hard origin/master'
+
 
 
 # ============ GITHUB =============
