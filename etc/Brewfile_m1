@@ -1,0 +1,25 @@
+# update install location
+cask_args appdir: '/Applications'
+
+brew 'zsh'
+brew 'tmux'
+brew 'exa'
+brew 'jq'
+brew 'fzf'
+brew 'ripgrep'
+
+brew 'pyenv'
+brew 'pyenv-virtualenv'
+
+brew 'nvm'
+brew 'neovim'
+brew 'awscli'
+brew 'flake8'
+
+cask 'iterm2'
+cask '1password'
+cask 'slack'
+# cask 'deluge'
+# cask 'google-chrome'
+# cask 'docker'
+# cask 'divvy'

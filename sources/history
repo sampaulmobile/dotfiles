@@ -1,6 +1,5 @@
 # ===== HISTORY =====
 
-
 HISTFILE=$HOME/.zsh_history
 RG_HISTFILE=$HOME/.zsh_history
 

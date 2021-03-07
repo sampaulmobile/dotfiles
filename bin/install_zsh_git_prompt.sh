@@ -1,4 +1,5 @@
 if [ $# -eq 0 ] && [ -d $HOME/.zsh-git-prompt ]; then
+	echo "zsh git prompt already installed, exiting"
 	exit 1
 fi
 

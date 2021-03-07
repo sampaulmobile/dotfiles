@@ -2,6 +2,7 @@
 keyRepeat=$(defaults read NSGlobalDomain KeyRepeat)
 initKeyRepeat=$(defaults read NSGlobalDomain InitialKeyRepeat)
 if [ $# -eq 0 ] && [ $keyRepeat -eq 1 ] && [ $initKeyRepeat -eq 15 ]; then
+	echo "macOS defaults already set, exiting"
 	exit 1
 fi
 
@@ -47,7 +48,7 @@ defaults write com.apple.universalaccess HIDScrollZoomModifierMask -int 262144
 # Stop iTunes from responding to the keyboard media keys
 launchctl unload -w /System/Library/LaunchAgents/com.apple.rcd.plist 2> /dev/null
 
-# Save screenshots in PNG format (other options: BMP, GIF, JPG, PDF, TIFF)
+# Save screenshots in JPG format (other options: BMP, GIF, PNG, PDF, TIFF)
 defaults write com.apple.screencapture type -string "jpg"
 
 # Set $Home as the default location for new Finder windows
@@ -107,7 +108,7 @@ defaults write com.apple.dock wvous-tl-modifier -int 0
 # Top right screen corner → Desktop
 defaults write com.apple.dock wvous-tr-corner -int 4
 defaults write com.apple.dock wvous-tr-modifier -int 0
-# Bottom left screen corner → Start screen saver
+# Bottom left screen corner → Application Windows
 defaults write com.apple.dock wvous-bl-corner -int 3
 defaults write com.apple.dock wvous-bl-modifier -int 0
 # Bottom right screen corner → Mission Control

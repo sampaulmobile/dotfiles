@@ -1,5 +1,6 @@
-if [ $# -eq 0 ] && [ -f ~/.vim/autoload/plug.vim ]; then
-    exit 1
+if [ $# -eq 0 ] && [ -f ~/.local/share/nvim/site/autoload/plug.vim ]; then
+	echo "vim plug already installed for nvim, exiting"
+	exit 1
 fi
 
 curl -fLo ~/.local/share/nvim/site/autoload/plug.vim --create-dirs \

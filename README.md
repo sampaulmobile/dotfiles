@@ -1,37 +1,19 @@
 
+- check out asdf
 
-Notes on docker images
+- added flake8 to brewfile
+- had to pip install pynvim
+- had to :CocInstall coc-python
+	- and hit yes to install pylint
+- had to :CocUninstall coc-python
+- had to :CocInstall coc-jedi
 
-alpine w/ all - 461MB
+- need to turn off auto cap/spell correction/double space = '.'
 
-alpine w/o python - 290MB
+# hex codes for next/prev window
+# next        0x02 0x6E
+# previous    0x02 0x70
 
-alpine w/o python - 290MB
-
-alpine w/o python, zsh_syntax_highlighting  - 288MB
-
-... w/o vim/plugs - 239MB
-
-... w/o tpm/plugins - 238MB
-
-... w/o oh-my-zsh - 230MB
-
-... w/o dev apks - 206MB
-
-... w/o 
-gcc \
-make \
-g++ \
-linux-headers \ - 55.4MB
-
-... w/0
-bash \
-wget \
-curl \
-zsh \
-vim \
-git \
-tmux \ - 5.69MB
 
 # SSH
 
@@ -39,4 +21,3 @@ tmux \ - 5.69MB
 eval "$(ssh-agent -s)"
 ssh-add ~/.ssh/sampaulmobile
 ```
-
