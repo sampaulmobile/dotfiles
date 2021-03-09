@@ -5,7 +5,7 @@ NOT_PUBLIC=$HOME/Dropbox/!Public
 typeset -U path
 
 # ===== HOMBREW ========
-eval $(/opt/homebrew/bin/brew shellenv)
+[[ -f "/opt/homebrew/bin/brew" ]] && eval $(/opt/homebrew/bin/brew shellenv)
 
 # ===== OH-MY-ZSH ========
 ZSH=$HOME/.oh-my-zsh
