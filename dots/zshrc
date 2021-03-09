@@ -40,8 +40,8 @@ bindkey '^h' backward-delete-char
 # ===== ALIASES =====
 [[ -f "$SOURCES/aliases" ]] && source $SOURCES/aliases
 
-# ===== NYDIG ALIASES =====
-[[ -f "$SOURCES/nydig_aliases" ]] && source $SOURCES/nydig_aliases
+# ===== OTHER ALIASES =====
+[[ -f "$SOURCES/other_aliases" ]] && source $SOURCES/other_aliases
 
 # ===== EXPORTS (/PATH) =====
 # [[ -f "$SOURCES/exports" ]] && source $SOURCES/exports

@@ -299,10 +299,12 @@ alias git_reset_to_master='git reset --hard origin/master'
 # ============ GITHUB =============
 # alias giss='open https://github.com/issues/assigned'
 alias grev='open https://github.com/pulls/review-requested'
+# $1 = github org/user name
 git_new_pr() {
     repo=$(basename $(git rev-parse --show-toplevel))
     open https://github.com/$1/$repo/pull/new/$GIT_BRANCH
 }
+# $1 = github org/user name
 git_new_issue() {
     repo=$(basename `git rev-parse --show-toplevel`)
     open https://github.com/$1/$repo/issues/new
