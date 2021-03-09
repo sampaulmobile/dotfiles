@@ -19,7 +19,16 @@ brew 'flake8'
 cask 'iterm2'
 cask '1password'
 cask 'slack'
-# cask 'deluge'
+
 # cask 'google-chrome'
 # cask 'docker'
 # cask 'divvy'
+# cask 'deluge'
+
+# work/dev tools
+# cask 'java8'
+# cask 'intellij-idea'
+# cask 'pycharm'
+# brew 'teleport'
+# brew 'gradle'
+# brew 'postgresql'

@@ -296,20 +296,17 @@ git_undo_last_commit() {
 alias git_reset_to_master='git reset --hard origin/master'
 
 
-
 # ============ GITHUB =============
 # alias giss='open https://github.com/issues/assigned'
 alias grev='open https://github.com/pulls/review-requested'
-# git_new_pr() {
-#     repo=$(basename `git rev-parse --show-toplevel`)
-#     open https://github.com/NYDIG/${repo}/pull/new/${GIT_BRANCH}
-# }
-# alias gnpr="git_new_pr"
-# git_new_issue() {
-#     repo=$(basename `git rev-parse --show-toplevel`)
-#     open https://github.com/NYDIG/${repo}/issues/new
-# }
-# alias gni="git_new_issue"
+git_new_pr() {
+    repo=$(basename $(git rev-parse --show-toplevel))
+    open https://github.com/$1/$repo/pull/new/$GIT_BRANCH
+}
+git_new_issue() {
+    repo=$(basename `git rev-parse --show-toplevel`)
+    open https://github.com/$1/$repo/issues/new
+}
 
 
 # ============ TMUX =============
