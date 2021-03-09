@@ -13,11 +13,3 @@
 # hex codes for next/prev window
 # next        0x02 0x6E
 # previous    0x02 0x70
-
-
-# SSH
-
-```
-eval "$(ssh-agent -s)"
-ssh-add ~/.ssh/sampaulmobile
-```
