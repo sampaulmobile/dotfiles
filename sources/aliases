@@ -1,5 +1,5 @@
 # ============ Aliases =============
-DEFAULT_PYTHON_VERSION='3.9.1'
+DEFAULT_PYTHON_VERSION='3.8.0'
 
 # ============ FILES =============
 # alias notes='cd $NOT_PUBLIC/notes && vim .'
