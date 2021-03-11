@@ -2,7 +2,6 @@
 
 # get dotfiles dir
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-# DOTFILES="$HOME/dotfiles"
 
 # get sudo privs upfront
 sudo -v
