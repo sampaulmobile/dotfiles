@@ -24,6 +24,7 @@ cask 'slack'
 # cask 'docker'
 # cask 'divvy'
 # cask 'deluge'
+# cask 'spectacle'
 
 # work/dev tools
 # cask 'java8'

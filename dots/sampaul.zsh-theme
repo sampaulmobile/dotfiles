@@ -13,10 +13,10 @@ if which pyenv >/dev/null 2>&1; then
 fi
 
 # get the current kube context
-# if which kubectl >/dev/null 2>&1; then
-#     KUBE_PROMPT_="%{$FG[140]%}\$(kcc)%{$reset_color%}"
-#     PROMPTS+=$KUBE_PROMPT_
-# fi
+if which kubectl >/dev/null 2>&1; then
+    KUBE_PROMPT_="%{$FG[140]%}\$(kcc)%{$reset_color%}"
+    PROMPTS+=$KUBE_PROMPT_
+fi
 
 VERS_PROMPT_="%{$fg_bold[blue]%}("
 for i in $PROMPTS; do 

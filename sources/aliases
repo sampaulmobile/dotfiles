@@ -1,5 +1,5 @@
 # ============ Aliases =============
-DEFAULT_PYTHON_VERSION='3.8.0'
+DEFAULT_PYTHON_VERSION='3.9.0'
 
 # ============ FILES =============
 # alias notes='cd $NOT_PUBLIC/notes && vim .'
@@ -29,25 +29,6 @@ launch_todo() {
     fi
 }
 alias todo='launch_todo'
-
-creds() {
-    grep -i $1 --exclude=ssh_known_hosts $NOT_PUBLIC/links/*
-}
-
-make_note() {
-    if [ $# -eq 1 ]
-    then
-        mvim $NOT_PUBLIC/notes/$1.md
-    else
-        mvim $NOT_PUBLIC/notes/$2/$1.md
-    fi
-}
-alias note='make_note'
-alias study_time='cd $NOT_PUBLIC/study/leetcode && ../study_time.sh'
-wifi_restart() {
-    networksetup -setairportpower airport off
-    networksetup -setairportpower airport on
-}
 
 
 # ============ UNIX =============
@@ -93,29 +74,47 @@ grep_filetype() {
     fi
 }
 alias g='grep_filetype'
-grep_and_replace() {
-    grep -rl "$1" . | xargs sed -i '' -e "s/$1/$2/g"
+grep_and_replace() { grep -rl "$1" . | LC_ALL=C xargs sed -i '' -e "s/$1/$2/g" }
+
+psgrep() { ps aux | grep -v grep | fzf -0 -q $1 }
+alias psg=psgrep
+
+psgrep_kill() {
+    local ps_id=`psgrep $1 | awk '{print $2}'`
+    echo "killing process ${ps_id}"
+    kill $ps_id
 }
-
-
-alias py='python'
-alias pv='pyenv virtualenv'
-pv_local() {
-    pv $DEFAULT_PYTHON_VERSION $1
-    pyenv local $DEFAULT_PYTHON_VERSION/envs/$1
+alias psgkill='psgrep_kill'
+psgrep_kill9() { 
+    local ps_id=`psgrep $1 | awk '{print $2}'`
+    echo "killing process ${ps_id}"
+    kill -9 $ps_id
 }
-alias pvlocal='pv_local'
+alias psgkill9='psgrep_kill9'
+
+## pass options to free ##
+alias meminfo='free -m -l -t'
+
+## get top process eating memory
+alias psmem='ps auxf | sort -nr -k 4'
+alias psmem10='ps auxf | sort -nr -k 4 | head -10'
+
+## get top process eating cpu ##
+alias pscpu='ps auxf | sort -nr -k 3'
+alias pscpu10='ps auxf | sort -nr -k 3 | head -10'
+
+## Get server cpu info ##
+alias cpuinfo='lscpu'
+alias top_cpu='top -F -R -o cpu'
+
+wttr_weather() { curl "wttr.in/${1:-}" }
+alias ww='wttr_weather'
 
 
-alias hist="rg -N '' $NOT_PUBLIC/history/*"
-hist_g() {
-    rg -e "^[^#]" -N --no-filename $NOT_PUBLIC/history/* |
-    LC_ALL='C' sed -E 's/^\: [0-9]+\:[0-9]\;//g' | grep "$1"
-}
-alias h='hist_g'
+# ============ VIM/MVIM/NEOVIM =============
 launch_vim() {
     if [ -n "$TMUX" ]; then
-        curr_folder=${PWD##*/}
+        local curr_folder=${PWD##*/}
         tmux -u new-window -a -n $curr_folder "export TERM='xterm-256color' && vim $1"
     else
         vim $1
@@ -125,7 +124,7 @@ alias v='launch_vim'
 alias m='mvim'
 launch_nvim() {
     if [ -n "$TMUX" ]; then
-        curr_folder=${PWD##*/}
+        local curr_folder=${PWD##*/}
         tmux -u new-window -a -n $curr_folder "nvim $1"
     else
         nvim $1
@@ -133,94 +132,15 @@ launch_nvim() {
 }
 alias n='launch_nvim'
 
-psgrep() { ps aux | grep -v grep | fzf -0 -q $1 }
-alias psg=psgrep
 
-psgrep_kill() { 
-    ps_id=`psgrep $1 | awk '{print $2}'`
-    echo "killing process ${ps_id}"
-    kill $ps_id
+# ============ PYTHON =============
+alias py='python'
+alias pv='pyenv virtualenv'
+pv_local() {
+    pv $DEFAULT_PYTHON_VERSION $1
+    pyenv local $DEFAULT_PYTHON_VERSION/envs/$1
 }
-alias psgkill='psgrep_kill'
-psgrep_kill9() { 
-    ps_id=`psgrep $1 | awk '{print $2}'`
-    echo "killing process ${ps_id}"
-    kill -9 $ps_id
-}
-alias psgkill9='psgrep_kill9'
-
-## pass options to free ##
-alias meminfo='free -m -l -t'
- 
-## get top process eating memory
-alias psmem='ps auxf | sort -nr -k 4'
-alias psmem10='ps auxf | sort -nr -k 4 | head -10'
- 
-## get top process eating cpu ##
-alias pscpu='ps auxf | sort -nr -k 3'
-alias pscpu10='ps auxf | sort -nr -k 3 | head -10'
- 
-## Get server cpu info ##
-alias cpuinfo='lscpu'
-alias top_cpu='top -F -R -o cpu'
-
-wttr_weather() { curl "wttr.in/${1:-}" }
-alias ww='wttr_weather'
-
-
-# ============ SSH =============
-alias ssh_start_agent='eval "$(ssh-agent -s)"'
-
-
-# ============ VENV =============
-venv_make() {
-    venv_dir=$HOME/venv
-    if [ ! -d $venv_dir ]; then
-        echo "venv directory ($venv_dir) does not exist, exiting."
-        return 0
-    fi
-    python -m venv $venv_dir/$1
-    source $venv_dir/$1/bin/activate
-}
-alias vmake='venv_make'
-alias vnew='venv_make'
-venv_source() {
-    venv_dir=$HOME/venv
-    if [ ! -d $venv_dir ]; then
-        echo "venv directory ($venv_dir) does not exist, exiting."
-        return 0
-    fi
-    if which deactivate >/dev/null 2>&1; then
-        deactivate
-    fi
-
-    if [ "$#" -ne 1 ]; then
-        project=`ls $venv_dir | fzf -0 | awk '{print $1}'`
-    else
-        project=`ls $venv_dir | fzf -0 -q $1 | awk '{print $1}'`
-    fi
-    source $venv_dir/$project/bin/activate
-}
-alias vsource='venv_source'
-alias vls='l $HOME/venv'
-venv_remove() {
-    venv_dir=$HOME/venv
-    if [ ! -d $venv_dir ]; then
-        echo "venv directory ($venv_dir) does not exist, exiting."
-        return 0
-    fi
-    if which deactivate >/dev/null 2>&1; then
-        deactivate
-    fi
-
-    if [ "$#" -ne 1 ]; then
-        project=`ls $venv_dir | fzf -0 | awk '{print $1}'`
-    else
-        project=`ls $venv_dir | fzf -0 -q $1 | awk '{print $1}'`
-    fi
-    rm -rf $venv_dir/$project
-}
-alias vrm='venv_remove'
+alias pvlocal='pv_local'
 
 
 # ============ LaTeX =============
@@ -229,10 +149,6 @@ alias rmltx='latexmk -c'
 
 
 # ============ GIT =============
-# alias g='git'
-# alias gs='git status'
-# alias ga='git add'
-
 alias gb='git branch -av'
 alias gbl='git branch'
 
@@ -240,7 +156,7 @@ alias gcam='git commit -a -m'
 alias gci='git commit'
 git_checkout() {
     if [ "$#" -ne 1 ]; then
-        branch=$(git branch -av | fzf -0 | awk '{print $1}' | sed -e "s/^remotes\/origin\///")
+        local branch=$(git branch -av | fzf -0 | awk '{print $1}' | sed -e "s/^remotes\/origin\///")
         if [[ "$branch" == "" ]]; then
             return 1
         fi
@@ -251,13 +167,14 @@ git_checkout() {
 }
 alias gco='git_checkout'
 alias gcom='git checkout master'
+alias gcob='git checkout -b'
 
 git_merge() {
     if [ "$GIT_BRANCH" != "master" ]; then
         echo "Not on master, exiting."
         return 0
     fi
-    branch=$(git branch | fzf -0 | awk '{print $1}')
+    local branch=$(git branch | fzf -0 | awk '{print $1}')
     git pull
     git merge --no-ff "$branch"
     git push
@@ -279,7 +196,7 @@ gcamp() {
 }
 # cd to git root dir
 function cdg() {
-    topdir=$(git rev-parse --show-toplevel)
+    local topdir=$(git rev-parse --show-toplevel)
     if [[ $? -ne 0 ]]; then
         return 1
     fi
@@ -301,12 +218,12 @@ alias git_reset_to_master='git reset --hard origin/master'
 alias grev='open https://github.com/pulls/review-requested'
 # $1 = github org/user name
 git_new_pr() {
-    repo=$(basename $(git rev-parse --show-toplevel))
+    local repo=$(basename $(git rev-parse --show-toplevel))
     open https://github.com/$1/$repo/pull/new/$GIT_BRANCH
 }
 # $1 = github org/user name
 git_new_issue() {
-    repo=$(basename `git rev-parse --show-toplevel`)
+    local repo=$(basename `git rev-parse --show-toplevel`)
     open https://github.com/$1/$repo/issues/new
 }
 
@@ -343,7 +260,7 @@ alias dcl='docker container ls'
 alias dcla='docker container ls -a'
 alias dps='docker ps --format "table {{.ID}}  {{.Image}}\t{{.Command}}\t{{.Status}}\t{{.Size}}\t{{.Names}}"'
 docker_grep_all() {
-    info=`dcla | sed 1d | awk '{print $1, "\t", $2, "\t", $NF}'`
+    local info=`dcla | sed 1d | awk '{print $1, "\t", $2, "\t", $NF}'`
     if [ "$#" -ne 1 ]; then
         echo $info | fzf -0 | awk '{print $1}'
     else
@@ -352,7 +269,7 @@ docker_grep_all() {
 }
 alias dgrep="docker_grep_all"
 docker_grep_running() {
-    info=`dcl | sed 1d | awk '{print $1, "\t", $2, "\t", $NF}'`
+    local info=`dcl | sed 1d | awk '{print $1, "\t", $2, "\t", $NF}'`
     if [ "$#" -ne 1 ]; then
         echo $info | fzf -0 | awk '{print $1}'
     else
@@ -361,22 +278,22 @@ docker_grep_running() {
 }
 alias dgrepr='docker_grep_running'
 docker_start() {
-    c_id=`dgrep $1`
+    local c_id=`dgrep $1`
     docker container start $c_id
 }
 alias dstart='docker_start'
 docker_stop() {
-    c_id=`dgrepr $1`
+    local c_id=`dgrepr $1`
     docker container stop $c_id
 }
 alias dstop='docker_stop'
 docker_restart() {
-    c_id=`dgrepr $1`
+    local c_id=`dgrepr $1`
     docker container restart $c_id
 }
 alias drestart='docker_restart'
 docker_remove() {
-    c_id=`dgrep $1`
+    local c_id=`dgrep $1`
     if [[ $(dcl) == *"${c_id}"* ]]; then
         echo "${c_id} running, stopping first..."
         docker stop $c_id > /dev/null 2>&1
@@ -385,12 +302,12 @@ docker_remove() {
 }
 alias drm='docker_remove'
 docker_logs() {
-    c_id=`dgrepr $1`
+    local c_id=`dgrepr $1`
     docker logs -f $c_id
 }
 alias dlogs='docker_logs'
 docker_shell() {
-    c_id=`dgrepr $1`
+    local c_id=`dgrepr $1`
     docker exec -it $c_id /bin/bash
 }
 alias dsh='docker_shell'
@@ -450,29 +367,41 @@ alias rmpy=rmpython
 
 
 # ===== KUBE ========
+alias k='kubectl'
+
+kube_set_namespace() {
+    kubectl config set-context --current --namespace=$1
+}
+alias kn='kube_set_namespace'
+alias kcn='kubectl config view --minify | grep namespace:'
+
 alias kc='kubectl config use-context'
-alias kcont='kubectl config use-context'
 alias kcc='kubectl config current-context'
 
-kube_pods_grep() {
-    kubectl get pods | grep "$1"
+kube_get_fzf() {
+    local k_id=$(kubectl get $2 | tail +2 | fzf -0 | awk '{print $1}')
+    if [ -n "$k_id" ]; then
+        kubectl $1 $2/$k_id
+    fi
 }
-alias kpods='kube_pods_grep'
+alias kgp='kube_get_fzf get pods'
+alias kdp='kube_get_fzf describe pods'
+alias klp='kube_get_fzf logs pods'
 
-kube_jobs_grep() {
-    kubectl get jobs | grep "$1"
-}
-alias kjobs='kube_jobs_grep'
+alias kgj='kube_get_fzf get jobs'
+alias kdj='kube_get_fzf describe jobs'
+alias klj='kube_get_fzf logs jobs'
 
-kube_deployments_grep() {
-    kubectl get deployments | grep "$1"
-}
-alias kdeps='kube_deployments_grep'
+alias kgd='kube_get_fzf get deployments'
+alias kdd='kube_get_fzf describe deployments'
+alias kld='kube_get_fzf logs deployments'
 
-alias kdes='kubectl describe'
-alias kdesp='kubectl describe pod'
-alias kdesj='kubectl describe job'
-alias kdesd='kubectl describe deployment'
+alias kgs='kube_get_fzf get services'
+alias kds='kube_get_fzf describe services'
+alias kls='kube_get_fzf logs services'
+
+alias kgn='kube_get_fzf get nodes'
+alias kdn='kube_get_fzf describe nodes'
 
 alias kdel='kubectl delete'
 alias kdelp='kubectl delete pod'
@@ -482,26 +411,53 @@ alias kdeld='kubectl delete deployment'
 alias kprox='kubectl proxy &'
 alias killkprox="pkill -f 'kubectl proxy'"
 
+kube_connect_fzf() {
+    local k_id=$(kubectl get pods --field-selector=status.phase=Running | tail +2 | fzf -0 | awk '{print $1}')
+    if [ -n "$k_id" ]; then
+        kubectl exec -it $k_id -- bash
+    fi
+}
+alias kconn="kube_connect_fzf"
+
+alias mk='minikube'
 alias hvals='helm get values'
 
-kube_pod_grep() {
-    kubectl get pods | grep "$1" | awk '{print $1}'
+
+# ======= ARGO ========
+alias a='argo'
+
+argo_list_fzf() {
+    local wf_id=$(argo list | tail +2 | fzf -0 | awk '{print $1}')
+    if [ -n "$wf_id" ]; then
+        argo $1 $wf_id
+    fi
 }
-alias kpodg="kube_pod_grep"
+alias aget='argo_list_fzf get'
+alias alogs='argo_list_fzf logs'
 
-kube_connect() {
-    kubectl exec -it $1 bash
+
+# ===== AWS / Localstack ========
+alias laws="aws --profile localstack --endpoint-url=http://localhost:4566"
+
+function aws-sso() {
+  if [ $# -eq 0 ]; then
+    echo "Existing profiles (you can always add a new one):"
+    grep source_profile ~/.okta/profiles | awk '{ print " ", $3 }'
+    return
+  fi
+  aws-assume-role -p $1
+  export AWS_PROFILE=$1
 }
-alias kube_conn="kube_connect"
-
-kube_grep_connect() {
-    kube_conn `kpodg $1`
-}
-alias ck="kube_connect"
-alias ckg="kube_grep_connect"
 
 
-# ===== OTHER ========
-alias rt_update='$HOME/dev/self/certified_fresh/run.sh'
+# ===== JAVA ========
+export JAVA_8_HOME=$(/usr/libexec/java_home -v1.8)
+export JAVA_11_HOME=$(/usr/libexec/java_home -v11)
+export JAVA_13_HOME=$(/usr/libexec/java_home -v13)
 
+alias java8='export JAVA_HOME=$JAVA_8_HOME'
+alias java11='export JAVA_HOME=$JAVA_11_HOME'
+alias java13='export JAVA_HOME=$JAVA_13_HOME'
 
+# default to Java 11
+java11

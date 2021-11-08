@@ -2,10 +2,12 @@
 
 - added flake8 to brewfile
 - had to pip install pynvim
-- had to :CocInstall coc-python
-	- and hit yes to install pylint
-- had to :CocUninstall coc-python
-- had to :CocInstall coc-jedi
+- had to update NVM brew paths
+
+- install coc-jedi (for python)
+	- Plug 'pappasam/coc-jedi', { 'do': 'yarn install --frozen-lockfile && yarn build' }
+	- nvim +'CocInstall -sync coc-jedi' +qall
+	- nvim +CocUpdateSync +qall
 
 - need to turn off auto cap/spell correction/double space = '.'
 

@@ -41,6 +41,9 @@ set guioptions-=R
 set guioptions-=l
 set guioptions-=L
 
+" Allow mouse to drag/adjust window splits
+set mouse+=a
+
 " init plugs
 if filereadable(expand("~/.vim/plugs.vim"))
   source ~/.vim/plugs.vim
@@ -118,6 +121,9 @@ nnoremap <Leader>ww :let _s=@/
   \<Bar>:%s/{ "/{"/e
   \<Bar>:%s/" }/"}/e
   \<Bar>:let @/=_s<Bar><CR>
+
+" format json
+nmap =j :%!python -m json.tool<CR>
 
 
 " ========================  PLUG SETTINGS/MAPPINGS  =========================

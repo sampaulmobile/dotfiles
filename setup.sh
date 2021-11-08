@@ -27,7 +27,8 @@ echo "Running brew bundle"
 brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_m1
 
 # install node
-source /opt/homebrew/opt/nvm/nvm.sh  # This loads nvm
+# source /opt/homebrew/opt/nvm/nvm.sh  # This loads nvm
+source /usr/local/opt/nvm/nvm.sh  # This loads nvm
 echo "installing node"
 nvm install --lts
 

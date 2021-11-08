@@ -41,6 +41,9 @@ set guioptions-=R
 set guioptions-=l
 set guioptions-=L
 
+" Allow mouse to drag/adjust window splits
+set mouse+=a
+
 " Auto complete stuff
 set wildmode=list:longest,full     "first list:longest then full
 set wildmenu                       "enable ctrl-n and ctrl-p to scroll thru matches
@@ -64,10 +67,10 @@ if has('persistent_undo')
 endif
 
 " highlight characters past 80 columns
-augroup vimrc_autocmds
-  autocmd BufEnter * highlight OverLength ctermbg=darkgrey guibg=#592929
-  autocmd BufEnter * match OverLength /\%80v.*/
-augroup END
+" augroup vimrc_autocmds
+"   autocmd BufEnter * highlight OverLength ctermbg=darkgrey guibg=#592929
+"   autocmd BufEnter * match OverLength /\%80v.*/
+" augroup END
 
 
 " ================================  MAPPINGS  ==================================
