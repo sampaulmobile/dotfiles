@@ -27,7 +27,8 @@ echo "Running brew bundle"
 brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_m1
 
 # install node
-source /usr/local/opt/nvm/nvm.sh  # This loads nvm
+brew_prefix=$(brew --prefix)
+source $brew_prefix/opt/nvm/nvm.sh  # This loads nvm
 echo "installing node"
 nvm install --lts
 
@@ -54,7 +55,7 @@ echo "Installing oh-my-zsh"
 $DOTFILES/bin/install_oh_my_zsh.sh
 
 # link .oh-my-zsh theme
-echo "Symlinking dotfiles again"
+echo "Symlinking dotfiles"
 $DOTFILES/bin/symlink_files.sh
 
 # setup zsh

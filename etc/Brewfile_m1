@@ -9,17 +9,17 @@ brew 'jq'
 brew 'fzf'
 brew 'ripgrep'
 
-# python
-brew 'pyenv'
-brew 'flake8'
-# brew 'pyenv-virtualenv'
-
 # utilities
 brew 'nvm'
 brew 'neovim'
 brew 'awscli'
 brew 'postgresql'
 brew 'teleport'
+
+# python
+brew 'pyenv'
+brew 'flake8'
+# brew 'pyenv-virtualenv'
 
 # apps
 cask 'iterm2'

@@ -50,5 +50,6 @@ bindkey '^h' backward-delete-char
 
 # ===== NVM =====
 export NVM_DIR="$HOME/.nvm"
-[ -s "/usr/local/opt/nvm/nvm.sh" ] && . "/usr/local/opt/nvm/nvm.sh"  # This loads nvm
-[ -s "/usr/local/opt/nvm/etc/bash_completion.d/nvm" ] && . "/usr/local/opt/nvm/etc/bash_completion.d/nvm"  # This loads nvm bash_completion
+brew_prefix=$(brew --prefix)
+[ -s "$brew_prefix/opt/nvm/nvm.sh" ] && . "$brew_prefix/opt/nvm/nvm.sh"  # This loads nvm
+[ -s "$brew_prefix/opt/nvm/etc/bash_completion.d/nvm" ] && . "$brew_prefix/opt/nvm/etc/bash_completion.d/nvm"  # This loads nvm bash_completion
