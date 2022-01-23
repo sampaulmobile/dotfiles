@@ -219,12 +219,12 @@ alias grev='open https://github.com/pulls/review-requested'
 # $1 = github org/user name
 git_new_pr() {
     local repo=$(basename $(git rev-parse --show-toplevel))
-    open https://github.com/$1/$repo/pull/new/$GIT_BRANCH
+    open -n https://github.com/$1/$repo/pull/new/$GIT_BRANCH
 }
 # $1 = github org/user name
 git_new_issue() {
     local repo=$(basename `git rev-parse --show-toplevel`)
-    open https://github.com/$1/$repo/issues/new
+    open -n https://github.com/$1/$repo/issues/new
 }
 
 

@@ -16,7 +16,7 @@
 *.iso
 *.rar
 *.tar
-*.zip
+# *.zip
 
 # Temp Files #
 ##############

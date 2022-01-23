@@ -114,6 +114,10 @@ nnoremap <Leader>ww :let _s=@/
   \<Bar>:%s/" }/"}/e
   \<Bar>:let @/=_s<Bar><CR>
 
+" format json
+nmap fj :%!python -m json.tool<CR>
+
+
 " Toggle fold open/closed with <S-Space> if over a fold
 " (this does not work in vim terminal)
 " nnoremap <silent> <S-Space> @=(foldlevel('.')?'za':'zc')<CR>
