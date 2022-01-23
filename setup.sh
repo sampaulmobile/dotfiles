@@ -33,8 +33,8 @@ echo "installing node"
 nvm install --lts
 
 # pyenv/pip (and installs)
-# $DOTFILES/bin/pyenv_installs_mac.sh
-# eval "$(pyenv init -)"
+$DOTFILES/bin/pyenv_installs_mac.sh
+eval "$(pyenv init -)"
 # $DOTFILES/bin/install_pip.sh
 # $DOTFILES/bin/pip_installs.sh
 
