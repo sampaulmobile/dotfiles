@@ -29,7 +29,7 @@ Plug 'tomtom/tcomment_vim'
 Plug 'vim-scripts/IndexedSearch'
 
 " Insert or delete brackets, parens, quotes in pair
-Plug 'jiangmiao/auto-pairs'
+Plug 'Raimondi/delimitMate'
 
 " Python folding
 Plug 'tmhedberg/SimpylFold'
