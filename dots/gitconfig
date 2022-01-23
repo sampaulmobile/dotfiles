@@ -53,3 +53,5 @@
 
     # git status
     s = status
+[pull]
+	rebase = false
