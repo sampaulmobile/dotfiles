@@ -31,6 +31,7 @@ brew_prefix=$(brew --prefix)
 source $brew_prefix/opt/nvm/nvm.sh  # This loads nvm
 echo "installing node"
 nvm install --lts
+nvm use default
 
 # pyenv/pip (and installs)
 $DOTFILES/bin/pyenv_installs_mac.sh
