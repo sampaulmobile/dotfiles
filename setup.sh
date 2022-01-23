@@ -11,7 +11,7 @@ echo "Accepting xcode command line tools terms"
 xcode-select --install
 
 # install rosetta (for intel based apps)
-echo "Installing rosetta"
+# echo "Installing rosetta"
 # softwareupdate --install-rosetta
 
 # change macOS configs/defaults
@@ -27,7 +27,6 @@ echo "Running brew bundle"
 brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_m1
 
 # install node
-# source /opt/homebrew/opt/nvm/nvm.sh  # This loads nvm
 source /usr/local/opt/nvm/nvm.sh  # This loads nvm
 echo "installing node"
 nvm install --lts
@@ -55,7 +54,7 @@ echo "Installing oh-my-zsh"
 $DOTFILES/bin/install_oh_my_zsh.sh
 
 # link .oh-my-zsh theme
-echo "Symlinking dotfiles"
+echo "Symlinking dotfiles again"
 $DOTFILES/bin/symlink_files.sh
 
 # setup zsh

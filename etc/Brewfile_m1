@@ -1,6 +1,7 @@
 # update install location
 cask_args appdir: '/Applications'
 
+# shell stuff
 brew 'zsh'
 brew 'tmux'
 brew 'exa'
@@ -8,28 +9,29 @@ brew 'jq'
 brew 'fzf'
 brew 'ripgrep'
 
+# python
 brew 'pyenv'
-brew 'pyenv-virtualenv'
+brew 'flake8'
+# brew 'pyenv-virtualenv'
 
+# utilities
 brew 'nvm'
 brew 'neovim'
 brew 'awscli'
-brew 'flake8'
+brew 'postgresql'
+brew 'teleport'
 
+# apps
 cask 'iterm2'
+cask 'spectacle'
+cask 'google-chrome'
 cask '1password'
 cask 'slack'
 
-# cask 'google-chrome'
 # cask 'docker'
 # cask 'divvy'
 # cask 'deluge'
-# cask 'spectacle'
-
-# work/dev tools
 # cask 'java8'
 # cask 'intellij-idea'
 # cask 'pycharm'
-# brew 'teleport'
 # brew 'gradle'
-# brew 'postgresql'
