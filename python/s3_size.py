@@ -18,6 +18,7 @@ def list_objects(bucket, prefix: str = ""):
     file_list = []
     for file in s3_result['Contents']:
         file_list.append(file)
+    print(f"{len(file_list)}", end='', flush=True)
 
     while s3_result['IsTruncated']:
         continuation_key = s3_result['NextContinuationToken']
@@ -28,8 +29,9 @@ def list_objects(bucket, prefix: str = ""):
         )
         for file in s3_result['Contents']:
             file_list.append(file)
-        print(f"{len(file_list)}...", end='', flush=True)
-    print('\n')
+        print(f"...{len(file_list)}", end='', flush=True)
+
+    print(' total objects\n')
     return file_list
 
 
@@ -60,7 +62,7 @@ def get_size(bucket, prefix: str = "", regex: str = None, top_num: int = None):
             print(o)
 
     size_fmt = sizeof_fmt(total_size)
-    print(f'{count} files - {size_fmt}')
+    print(f'{count} matching objects - {size_fmt}')
     return count, size_fmt
 
 
