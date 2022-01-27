@@ -143,7 +143,7 @@ vmap <Leader>a: :Tabularize /:\zs<CR>
 map <leader>/ <c-_><c-_>
 
 " Mappings for fugitive
-map <leader>gb :Gblame<CR>
+map <leader>gb :Git blame<CR>
 map <leader>gh :Gbrowse<CR>
 
 " Gundo mappings
@@ -191,6 +191,7 @@ nmap <silent> gr <Plug>(coc-references)
 
 " vim-clap settings
 let g:clap_open_action = {'ctrl-t': 'tab split', 'ctrl-s': 'split', 'ctrl-v': 'vsplit'}
+let g:clap_preview_direction = 'UD'
 nmap <Leader>t :Clap files ++ef=fzf<CR>
 nmap <Leader>f :Clap grep ++ef=fzf<CR>
 

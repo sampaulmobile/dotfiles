@@ -1,6 +1,7 @@
 ###### ===== THE BEST ZSHRC FILE EVER by Sam Paul ===== ######
-DOTS=$HOME/dotfiles/dots
-SOURCES=$HOME/dotfiles/sources
+DOTFILES=$HOME/dotfiles
+DOTS=$DOTFILES/dots
+SOURCES=$DOTFILES/sources
 NOT_PUBLIC=$HOME/Dropbox/!Public
 typeset -U path
 

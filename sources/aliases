@@ -438,26 +438,4 @@ alias alogs='argo_list_fzf logs'
 
 # ===== AWS / Localstack ========
 alias laws="aws --profile localstack --endpoint-url=http://localhost:4566"
-
-function aws-sso() {
-  if [ $# -eq 0 ]; then
-    echo "Existing profiles (you can always add a new one):"
-    grep source_profile ~/.okta/profiles | awk '{ print " ", $3 }'
-    return
-  fi
-  aws-assume-role -p $1
-  export AWS_PROFILE=$1
-}
-
-
-# ===== JAVA ========
-# export JAVA_8_HOME=$(/usr/libexec/java_home -v1.8)
-# export JAVA_11_HOME=$(/usr/libexec/java_home -v11)
-# export JAVA_13_HOME=$(/usr/libexec/java_home -v13)
-
-# alias java8='export JAVA_HOME=$JAVA_8_HOME'
-# alias java11='export JAVA_HOME=$JAVA_11_HOME'
-# alias java13='export JAVA_HOME=$JAVA_13_HOME'
-
-# default to Java 11
-# java11
+alias s3_size="python $DOTFILES/python/s3_size.py"

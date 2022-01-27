@@ -19,6 +19,7 @@ brew 'teleport'
 # python
 brew 'pyenv'
 brew 'flake8'
+brew 'poetry'
 # brew 'pyenv-virtualenv'
 
 # apps
