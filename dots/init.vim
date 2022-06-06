@@ -144,7 +144,7 @@ map <leader>/ <c-_><c-_>
 
 " Mappings for fugitive
 map <leader>gb :Git blame<CR>
-map <leader>gh :Gbrowse<CR>
+map <leader>gh :GBrowse<CR>
 
 " Gundo mappings
 map <leader>u :GundoToggle<CR>
