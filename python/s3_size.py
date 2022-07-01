@@ -68,7 +68,8 @@ def get_size(bucket, prefix: str = "", regex: str = None, top_num: int = None):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        raise Exception("Invalid num args")
+        print("usage: get_size <bucket> [prefix] [regex] [num_top_size]")
+        sys.exit(0)
 
     bucket = sys.argv[1]
     prefix = sys.argv[2] if len(sys.argv) > 2 else ""

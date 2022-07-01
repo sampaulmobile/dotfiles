@@ -441,5 +441,9 @@ alias laws="aws --profile localstack --endpoint-url=http://localhost:4566"
 alias s3_size="python $DOTFILES/python/s3_size.py"
 
 s3_get_largest_n() {
-    aws s3api list-objects-v2 --bucket $1 --prefix $2 --query "sort_by(Contents, &Size)[-${3:-3}:]"
+    if [ $# -eq 0 ]; then
+        echo "usage: s3_get_largest_n <bucket> <prefix> [num:-3]"
+    else
+        aws s3api list-objects-v2 --bucket $1 --prefix $2 --query "sort_by(Contents, &Size)[-${3:-3}:]"
+    fi
 }
