@@ -29,7 +29,7 @@ set clipboard=unnamed           "Allow vim to access OS clipboard
 set history=100                 "Store 100 lines of :cmdline history
 set gcr=a:blinkon0              "Disable cursor blink
 
-set foldnestmax=5               "deepest fold is 5 levels
+set foldnestmax=20              "deepest fold is 20 levels
 set foldmethod=syntax           "fold by syntax
 
 " Display tabs and trailing spaces visually

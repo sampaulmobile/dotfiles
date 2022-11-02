@@ -1,5 +1,6 @@
 [user]
 	name = Sam Paul
+	email = sam@nydig.com
 [push]
 	default = simple
 [core]
@@ -55,3 +56,6 @@
     s = status
 [pull]
 	rebase = false
+
+[url "git@github.com:"]
+    insteadOf = "https://github.com/"
