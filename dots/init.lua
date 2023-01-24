@@ -35,18 +35,19 @@ require('packer').startup(function(use)
 
   use {
     'nvim-treesitter/nvim-treesitter',
+    requires = "RRethy/nvim-treesitter-endwise",
     run = function()
       local ts_update = require('nvim-treesitter.install').update({ with_sync = true })
       ts_update()
     end,
     config = function()
-      require 'nvim-treesitter.configs'.setup {
+      require('nvim-treesitter.configs').setup({
         highlight = {
           enable = true,
           disable = {},
         },
         indent = {
-          enable = false,
+          enable = true,
           disable = {},
         },
         ensure_installed = {
@@ -59,9 +60,14 @@ require('packer').startup(function(use)
           "html",
           "python",
         },
-      }
+        endwise = {
+          enable = true
+        }
+      })
     end
   }
+
+  -- A collection of language packs for Vim
   use 'sheerun/vim-polyglot'
 
   use "nvim-lua/plenary.nvim"
@@ -140,6 +146,7 @@ require('packer').startup(function(use)
     },
     config = function()
       require("nvim-tree").setup({
+        open_on_setup = true,
         sort_by = "case_sensitive",
         view = {
           adaptive_size = true,
@@ -152,10 +159,6 @@ require('packer').startup(function(use)
         renderer = {
           group_empty = true,
         },
-        filters = {
-          dotfiles = true,
-        },
-        hijack_cursor = false,
         on_attach = function(bufnr)
           local bufmap = function(lhs, rhs, desc)
             vim.keymap.set('n', lhs, rhs, { buffer = bufnr, desc = desc })
@@ -164,8 +167,8 @@ require('packer').startup(function(use)
           -- :help nvim-tree.api
           local api = require('nvim-tree.api')
 
-          bufmap('L', api.node.open.edit, 'Expand folder or go to file')
           bufmap('H', api.node.navigate.parent_close, 'Close parent folder')
+          bufmap('I', api.tree.toggle_hidden_filter, 'Toggle hidden files')
           bufmap('gh', api.tree.toggle_hidden_filter, 'Toggle hidden files')
         end
       })
@@ -186,11 +189,25 @@ require('packer').startup(function(use)
   }
 
   -- Hotkey for adding comments to blocks of code
-  -- use 'tomtom/tcomment_vim'
   use 'terrortylor/nvim-comment'
 
+  -- Python folding
+  use 'tmhedberg/SimpylFold'
+
+  -- use {
+  --   'nmac427/guess-indent.nvim',
+  --   config = function()
+  --     require('guess-indent').setup()
+  --   end
+  -- }
+
   -- Insert or delete brackets, parens, quotes in pair
-  use 'Raimondi/delimitMate'
+  use {
+    "windwp/nvim-autopairs",
+    config = function()
+      require("nvim-autopairs").setup()
+    end
+  }
 
   -- Text filtering and alignment
   use 'godlygeek/tabular'
@@ -216,7 +233,7 @@ require('packer').startup(function(use)
     config = function()
       require('lualine').setup({
         options = {
-          theme = 'tokyonight',
+          theme = 'nightfox',
         }
       })
     end
@@ -229,6 +246,7 @@ require('packer').startup(function(use)
   -- use {'prettier/vim-prettier', run = 'yarn install'}
 
   use 'folke/tokyonight.nvim'
+  use "EdenEast/nightfox.nvim"
   -- use {'lewis6991/impatient.nvim'}
 
   if packer_bootstrap then
@@ -255,14 +273,13 @@ vim.cmd([[
 ]])
 
 -- o.foldenable = false
--- vim.api.nvim_create_autocmd({'BufEnter','BufAdd','BufNew','BufNewFile','BufWinEnter'}, {
---   group = vim.api.nvim_create_augroup('TS_FOLD_WORKAROUND', {}),
---   callback = function()
---     vim.opt.foldmethod     = 'expr'
---     vim.opt.foldexpr       = 'nvim_treesitter#foldexpr()'
---   end
+-- vim.api.nvim_create_autocmd({ 'BufEnter', 'BufAdd', 'BufNew', 'BufNewFile', 'BufWinEnter' }, {
+-- group = vim.api.nvim_create_augroup('TS_FOLD_WORKAROUND', {}),
+-- callback = function()
+-- vim.opt.foldmethod = 'expr'
+-- vim.opt.foldexpr   = 'nvim_treesitter#foldexpr()'
+-- end
 -- })
-
 
 local lspconfig = require("lspconfig")
 
@@ -438,3 +455,5 @@ k.set('n', '<leader>/', '<cmd>CommentToggle<cr>')
 
 o.termguicolors = true
 vim.cmd('colorscheme tokyonight')
+-- night, day, dawn, dusk, nord, tera, carbon fox
+-- vim.cmd('colorscheme nightfox')
