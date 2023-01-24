@@ -14,7 +14,7 @@ brew 'nvm'
 brew 'neovim'
 brew 'awscli'
 brew 'postgresql'
-brew 'teleport'
+# brew 'teleport'
 
 # python
 brew 'pyenv'

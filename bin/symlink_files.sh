@@ -40,11 +40,13 @@ fi
 
 if [ $(which nvim) ]; then
     mkdir -p ~/.config/nvim
-    mv ~/.config/nvim/init.vim $deldir
-    ln -s $dir/init.vim ~/.config/nvim/init.vim
 
-    mv ~/.config/nvim/plugs_neo.vim $deldir
-    ln -s $dir/plugs_neo.vim ~/.config/nvim/plugs_neo.vim
+    mv ~/.config/nvim/init.lua $deldir
+    ln -s $dir/init.lua ~/.config/nvim/init.lua
+
+    mkdir -p ~/.config/nvim/lua
+    mv ~/.config/nvim/lua $deldir
+    ln -s $dir/lua ~/.config/nvim/lua
 fi
 
 if [ -d $NOT_PUBLIC/links ]; then
