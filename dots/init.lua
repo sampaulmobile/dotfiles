@@ -33,6 +33,8 @@ local packer_bootstrap = ensure_packer()
 require('packer').startup(function(use)
   use 'wbthomason/packer.nvim'
 
+  use "nvim-lua/plenary.nvim"
+
   use {
     'nvim-treesitter/nvim-treesitter',
     requires = "RRethy/nvim-treesitter-endwise",
@@ -70,7 +72,6 @@ require('packer').startup(function(use)
   -- A collection of language packs for Vim
   use 'sheerun/vim-polyglot'
 
-  use "nvim-lua/plenary.nvim"
   use "neovim/nvim-lspconfig"
 
   use {
@@ -149,12 +150,7 @@ require('packer').startup(function(use)
         open_on_setup = true,
         sort_by = "case_sensitive",
         view = {
-          adaptive_size = true,
-          mappings = {
-            list = {
-              { key = "u", action = "dir_up" },
-            },
-          },
+          width = 20
         },
         renderer = {
           group_empty = true,
@@ -167,7 +163,6 @@ require('packer').startup(function(use)
           -- :help nvim-tree.api
           local api = require('nvim-tree.api')
 
-          bufmap('H', api.node.navigate.parent_close, 'Close parent folder')
           bufmap('I', api.tree.toggle_hidden_filter, 'Toggle hidden files')
           bufmap('gh', api.tree.toggle_hidden_filter, 'Toggle hidden files')
         end
@@ -280,6 +275,7 @@ vim.cmd([[
 -- vim.opt.foldexpr   = 'nvim_treesitter#foldexpr()'
 -- end
 -- })
+
 
 local lspconfig = require("lspconfig")
 
@@ -437,6 +433,17 @@ k.set('n', '<leader>b', builtin.buffers, {})
 
 -- nvim-tree (File explorer)
 k.set('', 'T', '<cmd>NvimTreeToggle<cr>')
+
+-- close neovim if nvim-tree is last window open
+-- https://github.com/nvim-tree/nvim-tree.lua/wiki/Auto-Close
+vim.api.nvim_create_autocmd("BufEnter", {
+  nested = true,
+  callback = function()
+    if #vim.api.nvim_list_wins() == 1 and require("nvim-tree.utils").is_nvim_tree_buf() then
+      vim.cmd "quit"
+    end
+  end
+})
 
 -- Set some shortcuts for Tabularize
 k.set({ 'n', 'v' }, '<leader>a=', '<cmd>Tabularize /=<cr>')
