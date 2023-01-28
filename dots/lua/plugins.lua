@@ -159,6 +159,13 @@ require('packer').startup(function(use)
     config = require("config.lualine")
   }
 
+  -- toggleterm - persist and toggle multiple terminals during an editing session
+  use {
+    "akinsho/toggleterm.nvim",
+    tag = '*',
+    config = require("config.toggleterm"),
+  }
+
   -- use {'lewis6991/impatient.nvim'}
   use 'folke/tokyonight.nvim'
   use "EdenEast/nightfox.nvim"
@@ -185,6 +192,6 @@ local packerSyncGrp = vim.api.nvim_create_augroup("PackerSyncGrp", {})
 vim.api.nvim_clear_autocmds({ group = packerSyncGrp })
 vim.api.nvim_create_autocmd({ "BufWritePost" }, {
   group = packerSyncGrp,
-  pattern = { "**/lua/packer.lua", "**/lua/config/*.lua" },
+  pattern = { "**/lua/plugins.lua", "**/lua/config/*.lua" },
   command = "source <afile> | PackerCompile",
 })
