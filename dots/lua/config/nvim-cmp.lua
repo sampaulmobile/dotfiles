@@ -1,5 +1,5 @@
 return function()
-  vim.opt.completeopt = { 'menu', 'menuone', 'noselect' }
+  vim.opt.completeopt = { 'menu', 'menuone' }
 
   local cmp = require('cmp')
   local luasnip = require('luasnip')

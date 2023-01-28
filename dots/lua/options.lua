@@ -15,8 +15,8 @@ o.smartcase = true -- Override 'ignorecase' if search has uppercase
 o.undofile = true
 o.synmaxcol = 300 -- stop syntax highlight after x lines for performance
 
--- o.expandtab = true -- use space instead of tab by default
-o.showmode = false -- Don't show the mode (we use statusline instead)
+o.expandtab = true -- use space instead of tab by default
+o.showmode = false -- Don't show the mode (we use lualine instead)
 o.scrolloff = 8 -- Start scrolling 8 lines from top/bottom margin
 o.sidescrolloff = 15 -- Start scrolling 15 lines from left/right margin
 o.sidescroll = 1 -- Scroll horizontally by 1 character at time
