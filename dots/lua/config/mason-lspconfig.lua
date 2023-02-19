@@ -7,6 +7,7 @@ return function()
       "jsonls",
       "sumneko_lua",
       "jedi_language_server", -- python
+      "pyright", -- python
       "sqlls",
       "terraformls",
       "yamlls"

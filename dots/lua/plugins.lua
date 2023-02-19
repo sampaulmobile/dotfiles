@@ -166,6 +166,12 @@ require('packer').startup(function(use)
     config = require("config.toggleterm"),
   }
 
+  use {
+    "folke/trouble.nvim",
+    requires = "nvim-tree/nvim-web-devicons",
+    config = require("config.trouble"),
+  }
+
   -- use {'lewis6991/impatient.nvim'}
   use 'folke/tokyonight.nvim'
   use "EdenEast/nightfox.nvim"
