@@ -1,8 +1,12 @@
 -- pcall(require, "impatient")
 
-require("options")
-require("mappings")
-require("plugins")
+require("sp.options")
+require("sp.mappings")
+require("sp.plugins")
+
+-- require("options")
+-- require("mappings")
+-- require("packer")
 
 vim.o.termguicolors = true
 vim.cmd('colorscheme tokyonight')

@@ -1,3 +1,6 @@
 
 *.swp
 other_aliases
+
+**/packer_compiled.lua
+
