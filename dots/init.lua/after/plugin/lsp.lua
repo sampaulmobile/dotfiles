@@ -62,6 +62,38 @@ lsp_config["dartls"].setup({
     },
 })
 
+local flake_ignores = {
+    "E203", -- whitespace before :
+    "W503", -- line break before binary operator
+    "E501", -- line too long
+    "C901"  -- mccabe complexity
+}
+
+lsp_config["pylsp"].setup({
+    on_attach = on_attach,
+    settings = {
+        pylsp = {
+            configurationSources = "flake8",
+            plugins = {
+                pycodestyle = { enabled = false },
+                mccabe = { enabled = false },
+                pyflakes = { enabled = false },
+                flake8 = {
+                    enabled = true,
+                    ignore = table.concat(flake_ignores, ",")
+                },
+                pyls_black = { enabled = true },
+                isort = { enabled = true, profile = "black" },
+                -- ruff = {
+                --     enabled = true,
+                --     extendSelect = { "I" },
+                -- },
+            },
+        },
+    },
+})
+
+
 lsp_zero.format_on_save({
     format_opts = {
         async = false,
