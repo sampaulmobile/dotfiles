@@ -8,64 +8,68 @@ require('packer').startup(function(use)
 
   -- Git(hub) wrapper - :gblame, :gbrowse, etc.
   use {
-    'tpope/vim-fugitive',
-    requires = {
-      'tpope/vim-rhubarb',
-    }
-  }
-
-  use {
-	  'nvim-telescope/telescope.nvim',
-    tag = '0.1.0',
-	  requires = { {'nvim-lua/plenary.nvim'} }
-  }
-
-  use({
-      "folke/trouble.nvim",
-      config = function()
-          require("trouble").setup {
-              -- icons = false,
-              -- your configuration comes here
-              -- or leave it empty to use the default settings
-              -- refer to the configuration section below
+          'tpope/vim-fugitive',
+          requires = {
+                  'tpope/vim-rhubarb',
           }
-      end
-  })
+  }
+
+  -- Hotkey for adding comments to blocks of code
+  use {'terrortylor/nvim-comment'}
 
   use {
-    'nvim-treesitter/nvim-treesitter',
-    run = function()
-      local ts_update = require('nvim-treesitter.install').update({ with_sync = true })
-      ts_update()
-    end,
+          'nvim-telescope/telescope.nvim',
+          tag = '0.1.0',
+          requires = { {'nvim-lua/plenary.nvim'} }
+  }
+
+  -- use({
+  --     "folke/trouble.nvim",
+  --     config = function()
+  --         require("trouble").setup {
+  --             icons = false,
+  --             -- your configuration comes here
+  --             -- or leave it empty to use the default settings
+  --             -- refer to the configuration section below
+  --         }
+  --     end
+  -- })
+
+  -- Visualize vim undo tree
+  use("mbbill/undotree")
+
+  use {
+          'nvim-treesitter/nvim-treesitter',
+          run = function()
+                  local ts_update = require('nvim-treesitter.install').update({ with_sync = true })
+                  ts_update()
+          end,
   }
 
   -- use("theprimeagen/harpoon")
   -- use("theprimeagen/refactoring.nvim")
-  use("mbbill/undotree")
   use("nvim-treesitter/nvim-treesitter-context");
 
   use {
-    'VonHeikemen/lsp-zero.nvim',
-    branch = 'v2.x',
-    requires = {
-      -- LSP Support
-      {'neovim/nvim-lspconfig'},             -- Required
-      {                                      -- Optional
-        'williamboman/mason.nvim',
-        run = function()
-          pcall(vim.cmd, 'MasonUpdate')
-        end,
-      },
-      {'williamboman/mason-lspconfig.nvim'}, -- Optional
+          'VonHeikemen/lsp-zero.nvim',
+          branch = 'v2.x',
+          requires = {
+                  -- LSP Support
+                  {'neovim/nvim-lspconfig'},             -- Required
+                  {                                      -- Optional
+                  'williamboman/mason.nvim',
+                  run = function()
+                          pcall(vim.cmd, 'MasonUpdate')
+                  end,
+          },
+          {'williamboman/mason-lspconfig.nvim'}, -- Optional
 
-      -- Autocompletion
-      {'hrsh7th/nvim-cmp'},     -- Required
-      {'hrsh7th/cmp-nvim-lsp'}, -- Required
-      {'L3MON4D3/LuaSnip'},     -- Required
-    }
+          -- Autocompletion
+          {'hrsh7th/nvim-cmp'},     -- Required
+          {'hrsh7th/cmp-nvim-lsp'}, -- Required
+          {'L3MON4D3/LuaSnip'},     -- Required
   }
-
+  }
 
   -- nvim-tree (File explorer)
   -- use {
@@ -82,21 +86,8 @@ require('packer').startup(function(use)
   --   config = require("config.indent-blankline")
   -- }
 
-  -- Hotkey for adding comments to blocks of code
-  -- use {
-  --   'terrortylor/nvim-comment',
-  --   config = require("config.nvim-comment")
-  -- }
-
   -- Python folding
   -- use 'tmhedberg/SimpylFold'
-
-
-  -- Visualize vim undo tree
-  -- use {
-  --   'mbbill/undotree',
-  --   config = require("config.undotree")
-  -- }
 
   -- use {
   --   'nvim-lualine/lualine.nvim',
@@ -115,6 +106,11 @@ require('packer').startup(function(use)
   --   config = require("config.toggleterm"),
   -- }
 
+  -- Plug 'thosakwe/vim-flutter'
+  -- use {'dart-lang/dart-vim-plugin'}
+  use {'natebosch/vim-lsc'}
+  use {'natebosch/vim-lsc-dart'}
+
 
   -- Flutter
   -- use {
@@ -125,32 +121,19 @@ require('packer').startup(function(use)
   --   end,
   -- }
 
-  -- use {'lewis6991/impatient.nvim'}
   use 'folke/tokyonight.nvim'
   use "EdenEast/nightfox.nvim"
   -- use 'tjdevries/colorbuddy.nvim'
   -- use 'bkegley/gloombuddy'
+  -- use {'lewis6991/impatient.nvim'}
 
-  if packer_bootstrap then
-    require('packer').sync()
-  end
 end)
 
-if packer_bootstrap then
-  print '=================================='
-  print '    Plugins will be installed.'
-  print '      After you press Enter'
-  print '    Wait until Packer completes,'
-  print '       then restart nvim'
-  print '=================================='
-  return
-end
-
 -- PackerCompile after saving any packer-related lua files
-local packerSyncGrp = vim.api.nvim_create_augroup("PackerSyncGrp", {})
-vim.api.nvim_clear_autocmds({ group = packerSyncGrp })
-vim.api.nvim_create_autocmd({ "BufWritePost" }, {
-  group = packerSyncGrp,
-  pattern = { "**/lua/plugins.lua", "**/lua/config/*.lua" },
-  command = "source <afile> | PackerCompile",
-})
+-- local packerSyncGrp = vim.api.nvim_create_augroup("PackerSyncGrp", {})
+-- vim.api.nvim_clear_autocmds({ group = packerSyncGrp })
+-- vim.api.nvim_create_autocmd({ "BufWritePost" }, {
+--   group = packerSyncGrp,
+--   pattern = { "**/lua/plugins.lua", "**/lua/config/*.lua" },
+--   command = "source <afile> | PackerCompile",
+-- })
