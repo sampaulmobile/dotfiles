@@ -36,5 +36,16 @@ require("telescope").setup({
   },
 })
 
+-- local find_files_in_root = function(opts)
+--   opts = opts or {}
+--   opts.cwd = vim.fn.systemlist("git rev-parse --show-toplevel")[1]
+--   if vim.v.shell_error ~= 0 then
+--     -- if not git then active lsp client root
+--     -- will get the configured root directory of the first attached lsp. You will have problems if you are using multiple lsps
+--     opts.cwd = vim.lsp.get_active_clients()[1].config.root_dir
+--   end
+--   require 'telescope.builtin'.find_files(opts)
+-- end
+
 require("telescope").load_extension("fzy_native")
 require("telescope").load_extension("ui-select")

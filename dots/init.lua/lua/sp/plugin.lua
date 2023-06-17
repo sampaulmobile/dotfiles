@@ -48,9 +48,8 @@ local plugins = {
   'nvim-telescope/telescope-ui-select.nvim',
   -- "ThePrimeagen/harpoon",
 
-  -- POG
   {
-    "jiaoshijie/undotree",
+    "mbbill/undotree",
     dependencies = {
       "nvim-lua/plenary.nvim",
     },
@@ -95,6 +94,14 @@ local plugins = {
   -- "lewis6991/gitsigns.nvim",
 
   -- UI
+  -- Visually display indent levels in code
+  -- use {
+  --   "lukas-reineke/indent-blankline.nvim",
+  --   config = require("config.indent-blankline")
+  -- }
+
+  -- Python folding
+  -- use 'tmhedberg/SimpylFold'
 
   -- "f-person/auto-dark-mode.nvim",
   -- {
