@@ -62,23 +62,40 @@ lsp_config["dartls"].setup({
   },
 })
 
+lsp_zero.format_on_save({
+  format_opts = {
+    async = false,
+    timeout_ms = 10000,
+  },
+  servers = {
+    ['lua_ls'] = {'lua'},
+    ['rust_analyzer'] = {'rust'},
+    -- if you have a working setup with null-ls
+    -- you can specify filetypes it can format.
+    -- ['null-ls'] = {'javascript', 'typescript'},
+  }
+})
 
 lsp_zero.setup()
 
 local cmp = require('cmp')
+local cmp_action = require('lsp-zero').cmp_action()
 
 local cmp_mappings = cmp.mapping.preset.insert({
   ["<C-b>"] = cmp.mapping.scroll_docs(-4),
   ["<C-f>"] = cmp.mapping.scroll_docs(4),
   ["<C-y>"] = cmp.mapping.complete(),
   ["<C-e>"] = cmp.mapping.abort(),
+  ['<Tab>'] = cmp_action.luasnip_supertab(),
+  ['<S-Tab>'] = cmp_action.luasnip_shift_supertab(),
   ["<CR>"] = cmp.mapping.confirm({ select = false }),
+
 });
 
 -- disable completion with tab
 -- this helps with copilot setup
-cmp_mappings['<Tab>'] = vim.NIL
-cmp_mappings['<S-Tab>'] = vim.NIL
+-- cmp_mappings['<Tab>'] = vim.NIL
+-- cmp_mappings['<S-Tab>'] = vim.NIL
 
 cmp.setup({
   sources = {

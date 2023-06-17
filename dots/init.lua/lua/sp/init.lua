@@ -3,7 +3,6 @@
 require("sp.options")
 require("sp.mappings")
 require("sp.plugin")
--- require("sp.plugins")
 
 -- require("options")
 -- require("mappings")
