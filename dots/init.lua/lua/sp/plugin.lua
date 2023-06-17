@@ -63,6 +63,8 @@ local plugins = {
     },
   },
 
+        "thosakwe/vim-flutter",
+
   -- Snippets
   "RobertBrunhage/flutter-riverpod-snippets",
   "Neevash/awesome-flutter-snippets",
