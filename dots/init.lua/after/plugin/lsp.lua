@@ -73,15 +73,16 @@ lsp_config["pylsp"].setup({
     on_attach = on_attach,
     settings = {
         pylsp = {
-            configurationSources = "flake8",
+            configurationSources = "black",
             plugins = {
                 pycodestyle = { enabled = false },
                 mccabe = { enabled = false },
                 pyflakes = { enabled = false },
-                flake8 = {
-                    enabled = true,
-                    ignore = table.concat(flake_ignores, ",")
-                },
+                flake8 = { enabled = false },
+                -- flake8 = {
+                --     enabled = true,
+                --     ignore = table.concat(flake_ignores, ",")
+                -- },
                 pyls_black = { enabled = true },
                 isort = { enabled = true, profile = "black" },
                 -- ruff = {
@@ -102,7 +103,7 @@ lsp_zero.format_on_save({
     servers = {
         ['lua_ls'] = { 'lua' },
         ['rust_analyzer'] = { 'rust' },
-        ['pylsp'] = { 'python' },
+        -- ['pylsp'] = { 'python' },
         -- if you have a working setup with null-ls
         -- you can specify filetypes it can format.
         -- ['null-ls'] = {'javascript', 'typescript'},
