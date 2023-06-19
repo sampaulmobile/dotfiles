@@ -73,12 +73,12 @@ lsp_config["pylsp"].setup({
     on_attach = on_attach,
     settings = {
         pylsp = {
-            configurationSources = "black",
+            -- configurationSources = "flake8",
             plugins = {
-                pycodestyle = { enabled = false },
-                mccabe = { enabled = false },
-                pyflakes = { enabled = false },
-                flake8 = { enabled = false },
+                pycodestyle = { enabled = true },
+                mccabe = { enabled = true },
+                pyflakes = { enabled = true },
+                flake8 = { enabled = true },
                 -- flake8 = {
                 --     enabled = true,
                 --     ignore = table.concat(flake_ignores, ",")
