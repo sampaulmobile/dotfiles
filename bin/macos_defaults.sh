@@ -1,7 +1,7 @@
 
 keyRepeat=$(defaults read NSGlobalDomain KeyRepeat)
 initKeyRepeat=$(defaults read NSGlobalDomain InitialKeyRepeat)
-if [ $# -eq 0 ] && [ $keyRepeat -eq 1 ] && [ $initKeyRepeat -eq 15 ]; then
+if [ $# -eq 0 ] && [ $keyRepeat -eq 1 ] && [ $initKeyRepeat -eq 10 ]; then
 	echo "macOS defaults already set, exiting"
 	exit 1
 fi
@@ -131,7 +131,7 @@ defaults write NSGlobalDomain ApplePressAndHoldEnabled -bool false
 
 # Set a blazingly fast keyboard repeat rate
 defaults write NSGlobalDomain KeyRepeat -int 1
-defaults write NSGlobalDomain InitialKeyRepeat -int 15
+defaults write NSGlobalDomain InitialKeyRepeat -int 10
 
 
 for app in 	"Dock" "Finder"; do
