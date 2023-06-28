@@ -78,22 +78,42 @@ lsp_config["pylsp"].setup({
                 pycodestyle = { enabled = true },
                 mccabe = { enabled = true },
                 pyflakes = { enabled = true },
-                flake8 = { enabled = true },
-                -- flake8 = {
-                --     enabled = true,
-                --     ignore = table.concat(flake_ignores, ",")
-                -- },
-                pyls_black = { enabled = true },
-                isort = { enabled = true, profile = "black" },
-                -- ruff = {
-                --     enabled = true,
-                --     extendSelect = { "I" },
-                -- },
+                -- flake8 = { enabled = true },
+                -- pyright = { enabled = true },
+                -- pyls_black = { enabled = true },
+                -- isort = { enabled = true, profile = "black" },
+                flake8 = {
+                    enabled = true,
+                    ignore = table.concat(flake_ignores, ",")
+                },
+                ruff = {
+                    enabled = true,
+                    extendSelect = { "I" },
+                },
             },
         },
     },
 })
 
+-- Configure `ruff-lsp`.
+local configs = require 'lspconfig.configs'
+if not configs.ruff_lsp then
+    configs.ruff_lsp = {
+        default_config = {
+            cmd = { 'ruff-lsp' },
+            filetypes = { 'python' },
+            root_dir = require('lspconfig').util.find_git_ancestor,
+            init_options = {
+                settings = {
+                    args = {}
+                }
+            }
+        }
+    }
+end
+lsp_config['ruff_lsp'].setup {
+    on_attach = on_attach,
+}
 
 lsp_zero.format_on_save({
     format_opts = {

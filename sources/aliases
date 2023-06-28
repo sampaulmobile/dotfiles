@@ -18,6 +18,8 @@ alias cdown='cd ~/Downloads'
 alias soz='source ~/.zshrc'
 alias cpwd="pwd | tr -d '\n' | pbcopy"
 
+alias jp='cd $HOME/dev/just-play/'
+
 launch_todo() {
     # filepath=$NOT_PUBLIC/notes/todo/personal.taskpaper
     # filepath="/Volumes/GoogleDrive/My Drive/notes/todo.taskpaper"

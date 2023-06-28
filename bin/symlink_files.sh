@@ -29,25 +29,28 @@ for file in $files; do
     ln -s $dir/$file ~/.$file
 done
 
-mkdir -p ~/.vim
-mv ~/.vim/plugs.vim $deldir
-ln -s $dir/plugs.vim ~/.vim/plugs.vim
+mv ~/.config/starship.toml $deldir
+ln -s $dir/starship.toml ~/.config/starship.toml
 
-if [ -d ~/.oh-my-zsh ]; then
-    mv ~/.oh-my-zsh/custom/sampaul.zsh-theme $deldir
-    ln -s $dir/sampaul.zsh-theme ~/.oh-my-zsh/custom/sampaul.zsh-theme
-fi
+# mkdir -p ~/.vim
+# mv ~/.vim/plugs.vim $deldir
+# ln -s $dir/plugs.vim ~/.vim/plugs.vim
 
-if [ $(which nvim) ]; then
-    mkdir -p ~/.config/nvim
+# if [ -d ~/.oh-my-zsh ]; then
+#     mv ~/.oh-my-zsh/custom/sampaul.zsh-theme $deldir
+#     ln -s $dir/sampaul.zsh-theme ~/.oh-my-zsh/custom/sampaul.zsh-theme
+# fi
 
-    mv ~/.config/nvim/init.lua $deldir
-    ln -s $dir/init.lua ~/.config/nvim/init.lua
-
-    mkdir -p ~/.config/nvim/lua
-    mv ~/.config/nvim/lua $deldir
-    ln -s $dir/lua ~/.config/nvim/lua
-fi
+# if [ $(which nvim) ]; then
+#     mkdir -p ~/.config/nvim
+#
+#     mv ~/.config/nvim/init.lua $deldir
+#     ln -s $dir/init.lua ~/.config/nvim/init.lua
+#
+#     mkdir -p ~/.config/nvim/lua
+#     mv ~/.config/nvim/lua $deldir
+#     ln -s $dir/lua ~/.config/nvim/lua
+# fi
 
 if [ -d $NOT_PUBLIC/links ]; then
     mkdir -p ~/.aws
