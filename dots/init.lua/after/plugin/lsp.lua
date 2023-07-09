@@ -75,45 +75,56 @@ lsp_config["pylsp"].setup({
         pylsp = {
             -- configurationSources = "flake8",
             plugins = {
-                pycodestyle = { enabled = true },
-                mccabe = { enabled = true },
-                pyflakes = { enabled = true },
-                -- flake8 = { enabled = true },
-                -- pyright = { enabled = true },
+                pycodestyle = {
+                    enabled = false,
+                    ignore = table.concat(flake_ignores, ","),
+                    exclude = {
+                        vim.fn.expand("/Users/sampaul/dev/just-play/api/cdk/cdk.out"),
+                    }
+                },
+                flake8 = {
+                    enabled = false,
+                    ignore = table.concat(flake_ignores, ","),
+                    exclude = {
+                        vim.fn.expand("/Users/sampaul/dev/just-play/api/cdk/cdk.out"),
+                    }
+                },
+                pyright = {
+                    enabled = true,
+                },
+                mccabe = { enabled = false },
+                pyflakes = { enabled = false },
                 -- pyls_black = { enabled = true },
                 -- isort = { enabled = true, profile = "black" },
-                flake8 = {
-                    enabled = true,
-                    ignore = table.concat(flake_ignores, ",")
-                },
-                ruff = {
-                    enabled = true,
-                    extendSelect = { "I" },
-                },
+                -- ruff = {
+                --     enabled = false,
+                --     extendSelect = { "I" },
+                -- },
             },
         },
     },
 })
 
--- Configure `ruff-lsp`.
-local configs = require 'lspconfig.configs'
-if not configs.ruff_lsp then
-    configs.ruff_lsp = {
-        default_config = {
-            cmd = { 'ruff-lsp' },
-            filetypes = { 'python' },
-            root_dir = require('lspconfig').util.find_git_ancestor,
-            init_options = {
-                settings = {
-                    args = {}
-                }
-            }
-        }
-    }
-end
-lsp_config['ruff_lsp'].setup {
-    on_attach = on_attach,
-}
+-- -- Configure `ruff-lsp`.
+-- local configs = require 'lspconfig.configs'
+-- if not configs.ruff_lsp then
+--     configs.ruff_lsp = {
+--         default_config = {
+--             cmd = { 'ruff-lsp' },
+--             filetypes = { 'python' },
+--             -- root_dir = require('lspconfig').util.find_git_ancestor,
+--             root_dir = require('lspconfig').util.find_git_ancestor,
+--             init_options = {
+--                 settings = {
+--                     args = {}
+--                 }
+--             }
+--         }
+--     }
+-- end
+-- lsp_config['ruff_lsp'].setup {
+--     on_attach = on_attach,
+-- }
 
 lsp_zero.format_on_save({
     format_opts = {
