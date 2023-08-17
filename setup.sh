@@ -34,7 +34,7 @@ nvm install --lts
 nvm use default
 
 # pyenv/pip (and installs)
-$DOTFILES/bin/pyenv_installs_mac.sh
+# $DOTFILES/bin/pyenv_installs_mac.sh
 # eval "$(pyenv init -)"
 # $DOTFILES/bin/install_pip.sh
 # $DOTFILES/bin/pip_installs.sh
@@ -44,10 +44,10 @@ echo "Symlinking dotfiles"
 $DOTFILES/bin/symlink_files.sh
 
 # vim (and plugs)
-echo "Installing vim plug for nvim"
-$DOTFILES/bin/install_vim_plug_neo.sh
-echo "Running vim plug update"
-$DOTFILES/bin/update_vim_plugs_neo.sh
+# echo "Installing vim plug for nvim"
+# $DOTFILES/bin/install_vim_plug_neo.sh
+# echo "Running vim plug update"
+# $DOTFILES/bin/update_vim_plugs_neo.sh
 
 # set shell (assuming ZSH has been installed)
 echo "Setting default shell to zsh"
@@ -60,10 +60,10 @@ echo "Symlinking dotfiles"
 $DOTFILES/bin/symlink_files.sh
 
 # setup zsh
-echo "Installing zsh syntax highlighting"
-$DOTFILES/bin/install_zsh_syntax_highlighting.sh
-echo "Installing zsh git prompt"
-$DOTFILES/bin/install_zsh_git_prompt.sh
+# echo "Installing zsh syntax highlighting"
+# $DOTFILES/bin/install_zsh_syntax_highlighting.sh
+# echo "Installing zsh git prompt"
+# $DOTFILES/bin/install_zsh_git_prompt.sh
 
 # install TPM/plugins
 echo "Installing TPM"

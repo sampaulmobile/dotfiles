@@ -8,18 +8,22 @@ brew 'exa'
 brew 'jq'
 brew 'fzf'
 brew 'ripgrep'
+brew 'starship'
+brew 'gh'
 
 # utilities
 brew 'nvm'
 brew 'neovim'
 brew 'awscli'
-brew 'postgresql'
+brew 'fastlane'
+brew 'pre-commit'
+# brew 'postgresql'
 # brew 'teleport'
 
 # python
 brew 'pyenv'
-brew 'flake8'
 brew 'poetry'
+# brew 'flake8'
 # brew 'pyenv-virtualenv'
 
 # apps
@@ -28,8 +32,11 @@ cask 'spectacle'
 cask 'google-chrome'
 cask '1password'
 cask 'slack'
+cask 'docker'
 
-# cask 'docker'
+# cask 'visual-studio-code'
+# cask 'flutter'
+
 # cask 'divvy'
 # cask 'deluge'
 # cask 'java8'
