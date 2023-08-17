@@ -1,7 +1,7 @@
 
 keyRepeat=$(defaults read NSGlobalDomain KeyRepeat)
 initKeyRepeat=$(defaults read NSGlobalDomain InitialKeyRepeat)
-if [ $# -eq 0 ] && [ $keyRepeat -eq 1 ] && [ $initKeyRepeat -eq 13 ]; then
+if [ "$#" -eq "0" ] && [ "$keyRepeat" -eq "1" ] && [ "$initKeyRepeat" -eq "13" ]; then
 	echo "macOS defaults already set, exiting"
 	exit 1
 fi
