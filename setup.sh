@@ -27,11 +27,11 @@ echo "Running brew bundle"
 brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_m1
 
 # install node
-brew_prefix=$(brew --prefix)
-source $brew_prefix/opt/nvm/nvm.sh  # This loads nvm
-echo "installing node"
-nvm install --lts
-nvm use default
+# brew_prefix=$(brew --prefix)
+# source $brew_prefix/opt/nvm/nvm.sh  # This loads nvm
+# echo "installing node"
+# nvm install --lts
+# nvm use default
 
 # pyenv/pip (and installs)
 # $DOTFILES/bin/pyenv_installs_mac.sh
@@ -52,12 +52,12 @@ $DOTFILES/bin/symlink_files.sh
 # set shell (assuming ZSH has been installed)
 echo "Setting default shell to zsh"
 $DOTFILES/bin/set_zsh_mac.sh
-echo "Installing oh-my-zsh"
-$DOTFILES/bin/install_oh_my_zsh.sh
+# echo "Installing oh-my-zsh"
+# $DOTFILES/bin/install_oh_my_zsh.sh
 
 # link .oh-my-zsh theme
-echo "Symlinking dotfiles"
-$DOTFILES/bin/symlink_files.sh
+# echo "Symlinking dotfiles"
+# $DOTFILES/bin/symlink_files.sh
 
 # setup zsh
 # echo "Installing zsh syntax highlighting"
