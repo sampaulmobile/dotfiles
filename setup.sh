@@ -66,7 +66,7 @@ $DOTFILES/bin/set_zsh_mac.sh
 # $DOTFILES/bin/install_zsh_git_prompt.sh
 
 # install TPM/plugins
-echo "Installing TPM"
-$DOTFILES/bin/install_tpm.sh
-echo "Updating TPM plugins"
-$DOTFILES/bin/update_tpm_plugins.sh
+# echo "Installing TPM"
+# $DOTFILES/bin/install_tpm.sh
+# echo "Updating TPM plugins"
+# $DOTFILES/bin/update_tpm_plugins.sh
