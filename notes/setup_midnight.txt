@@ -1,0 +1,60 @@
+
+
+- run init.lua/dev script
+    - symlinks init.lua properly
+
+
+- mac os
+    - download xcode
+    - accessibility -> zoom
+        - set ctrl + scroll zoom in
+
+    - setup ~/.ssh
+        - create config file
+        - copy over other keys
+        - create new key
+            - ssh-keygen -t ed25519 -C 'sampaulmobile@gmail.com'
+
+- setup flutter
+    - install rvm
+        - install ruby
+        - rvm install 3.0 --with-openssl-dir=/opt/homebrew/bin/openssl/
+    - gem install cocoapods
+
+    - run android studio
+        - install SDKs
+        - open settings -> Android SDK -> SDK Tools tab
+            - install Android SDK command-line tools
+    - flutter doctor --android-licenses
+    - flutter doctor
+
+- iterm
+    - allow clipboard access
+    - in profiles -> Text
+        - set font to nerd font
+    - in profiles -> terminal
+        - scrollback 50,000 lines
+        - disable indicators
+    - in keys -> key bindings
+        - add hex codes
+            - next        0x02 0x6E
+            - previous    0x02 0x70
+
+- setup 1password
+    - clear global hotkey cmd+shift+space
+
+- setup chrome / google
+
+- setup icloud
+    - turn off sync for
+        - photos
+        - icloud mail
+        - news
+        - stocks
+        - wallet
+    - open messages app
+        - enable icloud message sync
+        - enable read receipts
+    - system prefs -> keyboard -> text input -> edit
+        - turn off auto caps, correction, etc.
+

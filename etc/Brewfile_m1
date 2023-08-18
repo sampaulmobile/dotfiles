@@ -24,7 +24,6 @@ brew 'pre-commit'
 brew 'pyenv'
 brew 'poetry'
 # brew 'flake8'
-# brew 'pyenv-virtualenv'
 
 # apps
 cask 'iterm2'
@@ -34,8 +33,11 @@ cask '1password'
 cask 'slack'
 cask 'docker'
 
-# cask 'visual-studio-code'
-# cask 'flutter'
+# ---- extra stuff ----
+
+cask 'flutter'
+cask 'visual-studio-code'
+cask 'android-studio'
 
 # cask 'divvy'
 # cask 'deluge'
