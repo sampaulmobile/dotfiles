@@ -35,6 +35,7 @@ cask 'docker'
 
 # ---- extra stuff ----
 
+cask 'tailscale'
 cask 'flutter'
 cask 'visual-studio-code'
 cask 'android-studio'

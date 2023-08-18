@@ -862,9 +862,18 @@
         }
       },
       "ngrok": {
-        "version": "3.3.3,cfNBjG6xAbr,a",
+        "version": "3.3.4,mCL51Hi52gn,a",
         "options": {
           "full_name": "ngrok",
+          "args": {
+            "appdir": "/Applications"
+          }
+        }
+      },
+      "tailscale": {
+        "version": "1.48.0",
+        "options": {
+          "full_name": "tailscale",
           "args": {
             "appdir": "/Applications"
           }
