@@ -860,6 +860,15 @@
             "appdir": "/Applications"
           }
         }
+      },
+      "ngrok": {
+        "version": "3.3.3,cfNBjG6xAbr,a",
+        "options": {
+          "full_name": "ngrok",
+          "args": {
+            "appdir": "/Applications"
+          }
+        }
       }
     }
   },

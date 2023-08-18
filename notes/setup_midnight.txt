@@ -1,8 +1,6 @@
 
-
 - run init.lua/dev script
     - symlinks init.lua properly
-
 
 - mac os
     - download xcode
@@ -14,6 +12,10 @@
         - copy over other keys
         - create new key
             - ssh-keygen -t ed25519 -C 'sampaulmobile@gmail.com'
+
+- install cdk
+    - npm install -g aws-cdk
+    - npm install -g aws-cdk-local
 
 - setup flutter
     - install rvm
@@ -27,6 +29,15 @@
             - install Android SDK command-line tools
     - flutter doctor --android-licenses
     - flutter doctor
+
+    - setup simulator
+        - open -a Simulator
+    - run flutter project
+        - flutter run --target lib/main_local.dart --flavor local
+
+- run docker
+    - install localstack
+        - docker-compose up -d localstack
 
 - iterm
     - allow clipboard access

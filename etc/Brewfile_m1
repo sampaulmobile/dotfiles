@@ -38,6 +38,7 @@ cask 'docker'
 cask 'flutter'
 cask 'visual-studio-code'
 cask 'android-studio'
+cask 'ngrok'
 
 # cask 'divvy'
 # cask 'deluge'
