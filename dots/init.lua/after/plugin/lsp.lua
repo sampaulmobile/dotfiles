@@ -5,7 +5,7 @@ local null_ls = require('null-ls')
 lsp_zero.preset('minimal')
 
 lsp_zero.ensure_installed({
-    'tsserver',
+    -- 'tsserver',
     'eslint',
     'lua_ls',
 })

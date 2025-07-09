@@ -64,4 +64,16 @@ brew_prefix=$(brew --prefix)
 eval "$(starship init zsh)"
 
 # Add RVM to PATH for scripting. Make sure this is the last PATH variable change.
-export PATH="$PATH:$HOME/.rvm/bin"
+# export PATH="$PATH:$HOME/.rvm/bin"
+
+# rbenv setup
+export PATH="$HOME/.rbenv/bin:$PATH"
+eval "$(rbenv init - zsh)"
+
+# Add FVM to PATH
+export PATH="$HOME/fvm/default/bin:$PATH"
+
+## [Completion]
+## Completion scripts setup. Remove the following line to uninstall
+[[ -f /Users/sampaul/.dart-cli-completion/zsh-config.zsh ]] && . /Users/sampaul/.dart-cli-completion/zsh-config.zsh || true
+## [/Completion]

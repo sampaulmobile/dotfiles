@@ -35,7 +35,7 @@ alias todo='launch_todo'
 
 # ============ UNIX =============
 if which exa >/dev/null 2>&1; then
-    alias ls='exa'
+    # alias ls='exa'
     exa_tree() {
         if [ $# -eq 0 ]; then
             exa --tree
@@ -448,4 +448,40 @@ s3_get_largest_n() {
     else
         aws s3api list-objects-v2 --bucket $1 --prefix $2 --query "sort_by(Contents, &Size)[-${3:-3}:]"
     fi
+}
+
+
+# ======= justplay ========
+file_diff_dev_api() {
+    local deployed_hash=$(git ll | grep -m 1 'dev/api' | awk '{print $2}')
+    git diff --name-only $deployed_hash...master
+}
+file_diff_dev_ios() {
+    local deployed_hash=$(git ll | grep -m 1 'dev/builds/ios' | awk '{print $2}')
+    git diff --name-only $deployed_hash...master
+}
+file_diff_prod_api() {
+    local deployed_hash=$(git ll | grep -m 1 'prod/api' | awk '{print $2}')
+    git diff --name-only $deployed_hash...master
+}
+file_diff_prod_ios() {
+    local deployed_hash=$(git ll | grep -m 1 'prod/builds/ios' | awk '{print $2}')
+    git diff --name-only $deployed_hash...master
+}
+
+git_diff_dev_api() {
+    local deployed_hash=$(git ll | grep -m 1 'dev/api' | awk '{print $2}')
+    git diff $deployed_hash...master -- api/
+}
+git_diff_dev_ios() {
+    local deployed_hash=$(git ll | grep -m 1 'dev/builds/ios' | awk '{print $2}')
+    git diff $deployed_hash...master -- app/
+}
+git_diff_prod_api() {
+    local deployed_hash=$(git ll | grep -m 1 'prod/api' | awk '{print $2}')
+    git diff $deployed_hash...master -- api/
+}
+git_diff_prod_ios() {
+    local deployed_hash=$(git ll | grep -m 1 'prod/builds/ios' | awk '{print $2}')
+    git diff $deployed_hash...master -- app/
 }

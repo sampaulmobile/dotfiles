@@ -25,7 +25,12 @@
 
     # nice log output
     lg = log --graph --pretty=oneline --abbrev-commit --decorate
-    ll = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%an, %cr)%Creset' --abbrev-commit --date=relative
+    # ll = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%an, %cr)%Creset' --abbrev-commit --date=relative
+    ll = log --graph \
+        --format='%C(auto)%h%Creset -%C(auto)%d%Creset %s %C(auto)(%an, %cr)%Creset' \
+        --abbrev-commit \
+        --date=relative
+
     l = log --stat --abbrev-commit
 
     # git commit
