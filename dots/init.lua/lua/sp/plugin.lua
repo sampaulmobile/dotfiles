@@ -1,5 +1,5 @@
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
-if not vim.loop.fs_stat(lazypath) then
+if not vim.uv.fs_stat(lazypath) then
     vim.fn.system({
         "git",
         "clone",
@@ -13,40 +13,33 @@ vim.opt.rtp:prepend(lazypath)
 
 
 local plugins = {
-    -- LSP
+    -- LSP Support
+    { 'neovim/nvim-lspconfig' },
     {
-        'VonHeikemen/lsp-zero.nvim',
-        branch = 'v2.x',
-        dependencies = {
-            -- LSP Support
-            { 'neovim/nvim-lspconfig' },
-            {
-                'williamboman/mason.nvim',
-                build = function()
-                    pcall(vim.cmd, 'MasonUpdate')
-                end,
-            },
-            { 'williamboman/mason-lspconfig.nvim' },
-
-            -- Autocompletion
-            { 'hrsh7th/nvim-cmp' },
-            { 'hrsh7th/cmp-buffer' },
-            { 'hrsh7th/cmp-path' },
-            { 'saadparwaiz1/cmp_luasnip' },
-            { 'hrsh7th/cmp-nvim-lsp' },
-            { 'hrsh7th/cmp-nvim-lua' },
-
-            -- Snippets
-            -- { 'L3MON4D3/LuaSnip' },
-            {
-                "L3MON4D3/LuaSnip",
-                -- follow latest release.
-                version = "v2.*",
-            },
-            { 'rafamadriz/friendly-snippets' },
-        }
+        'williamboman/mason.nvim',
+        build = function()
+            pcall(vim.cmd, 'MasonUpdate')
+        end,
     },
-    'jose-elias-alvarez/null-ls.nvim',
+    { 'williamboman/mason-lspconfig.nvim' },
+
+    -- Autocompletion
+    { 'hrsh7th/nvim-cmp' },
+    { 'hrsh7th/cmp-buffer' },
+    { 'hrsh7th/cmp-path' },
+    { 'saadparwaiz1/cmp_luasnip' },
+    { 'hrsh7th/cmp-nvim-lsp' },
+    { 'hrsh7th/cmp-nvim-lua' },
+
+    -- Snippets
+    {
+        "L3MON4D3/LuaSnip",
+        version = "v2.*",
+    },
+    { 'rafamadriz/friendly-snippets' },
+
+    -- Formatting (replaces null-ls)
+    { 'stevearc/conform.nvim' },
 
     -- File and folder management
     "nvim-telescope/telescope.nvim",
@@ -64,8 +57,8 @@ local plugins = {
     -- nvim-tree (File explorer)
     {
         'nvim-tree/nvim-tree.lua',
-        requires = {
-            'nvim-tree/nvim-web-devicons', -- optional, for file icons
+        dependencies = {
+            'nvim-tree/nvim-web-devicons',
         },
     },
 
@@ -80,17 +73,10 @@ local plugins = {
         "nvim-treesitter/nvim-treesitter",
         build = ":TSUpdate",
     },
-    -- {
-    --   dir = "~/personal/projects/nvim-treesitter",
-    --   build = ":TSUpdate",
-    -- },
     "nvim-treesitter/nvim-treesitter-context",
-    -- { dir = "~/personal/projects/nvim-treesitter-context" },
 
     -- Nice to haves
     "numToStr/Comment.nvim",
-    -- "github/copilot.vim",
-    -- "j-hui/fidget.nvim",
 
     -- Git
     {
@@ -99,23 +85,8 @@ local plugins = {
             'tpope/vim-rhubarb',
         }
     },
-    -- "lewis6991/gitsigns.nvim",
 
-    -- UI
-    -- Visually display indent levels in code
-    -- use {
-    --   "lukas-reineke/indent-blankline.nvim",
-    --   config = require("config.indent-blankline")
-    -- }
-
-    -- Python folding
-    -- use 'tmhedberg/SimpylFold'
-
-    -- "f-person/auto-dark-mode.nvim",
-    -- {
-    --   'rose-pine/neovim',
-    --   name = 'rose-pine',
-    -- }
+    -- UI / Colorschemes
     'folke/tokyonight.nvim',
     "EdenEast/nightfox.nvim"
 }

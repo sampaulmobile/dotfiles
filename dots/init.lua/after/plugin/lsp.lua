@@ -1,17 +1,45 @@
-local lsp_zero = require('lsp-zero');
-local lsp_config = require("lspconfig");
-local null_ls = require('null-ls')
-
-lsp_zero.preset('minimal')
-
-lsp_zero.ensure_installed({
-    -- 'tsserver',
-    'eslint',
-    'lua_ls',
+-- Mason setup (must be first)
+require("mason").setup()
+require("mason-lspconfig").setup({
+    ensure_installed = {
+        'lua_ls',
+        'eslint',
+        'pyright',
+    },
 })
 
--- Fix Undefined global 'vim'
-lsp_zero.configure('lua_ls', {
+-- LSP Keymaps (set when LSP attaches to buffer)
+vim.api.nvim_create_autocmd('LspAttach', {
+    callback = function(args)
+        local bufnr = args.buf
+        local opts = { buffer = bufnr, remap = false }
+
+        vim.keymap.set("n", "gd", function() vim.lsp.buf.definition() end, opts)
+        vim.keymap.set("n", "K", function() vim.lsp.buf.hover() end, opts)
+        vim.keymap.set("n", "<leader>e", function() vim.diagnostic.open_float() end, opts)
+        vim.keymap.set("n", "<leader>a", function() vim.lsp.buf.code_action() end, opts)
+        vim.keymap.set("n", "<leader>gr", function() vim.lsp.buf.references() end, opts)
+        vim.keymap.set("n", "<leader>rn", function() vim.lsp.buf.rename() end, opts)
+        vim.keymap.set("n", "<leader>dl", function() vim.diagnostic.setqflist() end, opts)
+        vim.keymap.set("n", "[d", function() vim.diagnostic.goto_next() end, opts)
+        vim.keymap.set("n", "]d", function() vim.diagnostic.goto_prev() end, opts)
+        vim.keymap.set("i", "<C-h>", function() vim.lsp.buf.signature_help() end, opts)
+    end,
+})
+
+-- Diagnostic config
+vim.diagnostic.config({
+    virtual_text = true,
+    signs = false,
+})
+
+-- Get capabilities from nvim-cmp
+local capabilities = require('cmp_nvim_lsp').default_capabilities()
+
+-- LSP server configurations using Neovim 0.11+ native API
+-- Lua
+vim.lsp.config('lua_ls', {
+    capabilities = capabilities,
     settings = {
         Lua = {
             diagnostics = {
@@ -21,32 +49,10 @@ lsp_zero.configure('lua_ls', {
     }
 })
 
-local on_attach = function(_, bufnr)
-    local opts = { buffer = bufnr, remap = false }
-
-    vim.keymap.set("n", "gd", function() vim.lsp.buf.definition() end, opts)
-    vim.keymap.set("n", "K", function() vim.lsp.buf.hover() end, opts)
-    vim.keymap.set("n", "<leader>e", function() vim.diagnostic.open_float() end, opts)
-    vim.keymap.set("n", "<leader>a", function() vim.lsp.buf.code_action() end, opts)
-    -- vim.keymap.set("n", "<leader>ca", function() vim.lsp.buf.code_action() end, opts)
-    vim.keymap.set("n", "<leader>gr", function() vim.lsp.buf.references() end, opts)
-    vim.keymap.set("n", "<leader>rn", function() vim.lsp.buf.rename() end, opts)
-    vim.keymap.set("n", "<leader>dl", function() vim.diagnostic.setqflist() end, opts)
-    vim.keymap.set("n", "[d", function() vim.diagnostic.goto_next() end, opts)
-    vim.keymap.set("n", "]d", function() vim.diagnostic.goto_prev() end, opts)
-    vim.keymap.set("i", "<C-h>", function() vim.lsp.buf.signature_help() end, opts)
-end
-
-lsp_zero.on_attach(on_attach)
-
-vim.diagnostic.config({
-    virtual_text = true,
-    signs = false,
-})
-
-lsp_config["dartls"].setup({
-    on_attach = on_attach,
-    root_dir = lsp_config.util.root_pattern('.git'),
+-- Dart/Flutter
+vim.lsp.config('dartls', {
+    capabilities = capabilities,
+    root_markers = { '.git' },
     settings = {
         dart = {
             analysisExcludedFolders = {
@@ -62,122 +68,76 @@ lsp_config["dartls"].setup({
     },
 })
 
-local flake_ignores = {
-    "E203", -- whitespace before :
-    "W503", -- line break before binary operator
-    "E501", -- line too long
-    "C901"  -- mccabe complexity
-}
-
-lsp_config["pylsp"].setup({
-    on_attach = on_attach,
-    settings = {
-        pylsp = {
-            -- configurationSources = "flake8",
-            plugins = {
-                pycodestyle = {
-                    enabled = false,
-                    ignore = table.concat(flake_ignores, ","),
-                    exclude = {
-                        vim.fn.expand("/Users/sampaul/dev/just-play/api/cdk/cdk.out"),
-                    }
-                },
-                flake8 = {
-                    enabled = false,
-                    ignore = table.concat(flake_ignores, ","),
-                    exclude = {
-                        vim.fn.expand("/Users/sampaul/dev/just-play/api/cdk/cdk.out"),
-                    }
-                },
-                pyright = {
-                    enabled = true,
-                },
-                mccabe = { enabled = false },
-                pyflakes = { enabled = false },
-                -- pyls_black = { enabled = true },
-                -- isort = { enabled = true, profile = "black" },
-                -- ruff = {
-                --     enabled = false,
-                --     extendSelect = { "I" },
-                -- },
-            },
-        },
-    },
+-- Python
+vim.lsp.config('pyright', {
+    capabilities = capabilities,
 })
 
--- -- Configure `ruff-lsp`.
--- local configs = require 'lspconfig.configs'
--- if not configs.ruff_lsp then
---     configs.ruff_lsp = {
---         default_config = {
---             cmd = { 'ruff-lsp' },
---             filetypes = { 'python' },
---             -- root_dir = require('lspconfig').util.find_git_ancestor,
---             root_dir = require('lspconfig').util.find_git_ancestor,
---             init_options = {
---                 settings = {
---                     args = {}
---                 }
---             }
---         }
---     }
--- end
--- lsp_config['ruff_lsp'].setup {
---     on_attach = on_attach,
--- }
+-- Enable the LSP servers
+vim.lsp.enable('lua_ls')
+vim.lsp.enable('dartls')
+vim.lsp.enable('pyright')
 
-lsp_zero.format_on_save({
-    format_opts = {
-        async = false,
-        timeout_ms = 10000,
-    },
-    servers = {
-        ['lua_ls'] = { 'lua' },
-        ['rust_analyzer'] = { 'rust' },
-        -- ['pylsp'] = { 'python' },
-        -- if you have a working setup with null-ls
-        -- you can specify filetypes it can format.
-        -- ['null-ls'] = {'javascript', 'typescript'},
-    }
-})
-
-lsp_zero.setup()
-
+-- Completion setup (nvim-cmp)
 local cmp = require('cmp')
-local cmp_action = require('lsp-zero').cmp_action()
+local luasnip = require('luasnip')
 
-local cmp_mappings = cmp.mapping.preset.insert({
-    ["<C-b>"] = cmp.mapping.scroll_docs(-4),
-    ["<C-f>"] = cmp.mapping.scroll_docs(4),
-    ["<C-y>"] = cmp.mapping.complete(),
-    ["<C-e>"] = cmp.mapping.abort(),
-    ['<Tab>'] = cmp_action.luasnip_supertab(),
-    ['<S-Tab>'] = cmp_action.luasnip_shift_supertab(),
-    ["<CR>"] = cmp.mapping.confirm({ select = false }),
-
-});
-
--- disable completion with tab
--- this helps with copilot setup
--- cmp_mappings['<Tab>'] = vim.NIL
--- cmp_mappings['<S-Tab>'] = vim.NIL
+-- Load friendly-snippets
+require('luasnip.loaders.from_vscode').lazy_load()
 
 cmp.setup({
+    snippet = {
+        expand = function(args)
+            luasnip.lsp_expand(args.body)
+        end,
+    },
     sources = {
         { name = 'nvim_lsp' },
-        { name = 'path' },
         { name = 'luasnip' },
-        { name = 'buffer',  keyword_length = 5 },
+        { name = 'path' },
+        { name = 'buffer', keyword_length = 5 },
     },
-    mapping = cmp_mappings,
+    mapping = cmp.mapping.preset.insert({
+        ["<C-b>"] = cmp.mapping.scroll_docs(-4),
+        ["<C-f>"] = cmp.mapping.scroll_docs(4),
+        ["<C-y>"] = cmp.mapping.complete(),
+        ["<C-e>"] = cmp.mapping.abort(),
+        ["<CR>"] = cmp.mapping.confirm({ select = false }),
+        ['<Tab>'] = cmp.mapping(function(fallback)
+            if cmp.visible() then
+                cmp.select_next_item()
+            elseif luasnip.expand_or_jumpable() then
+                luasnip.expand_or_jump()
+            else
+                fallback()
+            end
+        end, { 'i', 's' }),
+        ['<S-Tab>'] = cmp.mapping(function(fallback)
+            if cmp.visible() then
+                cmp.select_prev_item()
+            elseif luasnip.jumpable(-1) then
+                luasnip.jump(-1)
+            else
+                fallback()
+            end
+        end, { 'i', 's' }),
+    }),
 })
 
-null_ls.setup({
-    on_attach = on_attach,
-    sources = {
-        null_ls.builtins.formatting.prettier,
-        -- null_ls.builtins.diagnostics.eslint,
-    }
+-- Formatting with conform.nvim (replaces null-ls)
+require("conform").setup({
+    formatters_by_ft = {
+        lua = { "stylua" },
+        python = { "ruff_format" },
+        javascript = { "prettier" },
+        typescript = { "prettier" },
+        json = { "prettier" },
+        yaml = { "prettier" },
+        markdown = { "prettier" },
+        dart = { "dart_format" },
+    },
+    format_on_save = {
+        timeout_ms = 500,
+        lsp_fallback = true,
+    },
 })
-
--- require("fidget").setup({})
