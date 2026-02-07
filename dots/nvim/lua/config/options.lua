@@ -1,6 +1,9 @@
 -- Options are automatically loaded before lazy.nvim startup
 -- Add any additional options here
 
+vim.g.mapleader = ","
+vim.g.maplocalleader = "\\"
+
 local opt = vim.opt
 
 -- Custom options (preserved from original config)
