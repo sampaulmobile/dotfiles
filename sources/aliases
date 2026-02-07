@@ -38,24 +38,24 @@ alias todo='launch_todo'
 
 
 # ============ UNIX =============
-if which exa >/dev/null 2>&1; then
-    # alias ls='exa'
-    exa_tree() {
+if which eza >/dev/null 2>&1; then
+    alias ls='eza'
+    eza_tree() {
         if [ $# -eq 0 ]; then
-            exa --tree
+            eza --tree
         else
-            exa --tree --level=$1
+            eza --tree --level=$1
         fi
     }
-    alias ltree='exa_tree'
-    exa_tree_long() {
+    alias ltree='eza_tree'
+    eza_tree_long() {
         if [ $# -eq 0 ]; then
-            exa -l --tree
+            eza -l --tree
         else
-            exa -l --tree --level=$1
+            eza -l --tree --level=$1
         fi
     }
-    alias lltree='exa_tree_long'
+    alias lltree='eza_tree_long'
 fi
 # these are overwritten by ~/.oh-my-zsh/lib/directories.zsh
 # alias l='ls -l'
@@ -221,17 +221,9 @@ alias git_reset_to_master='git reset --hard origin/master'
 
 # ============ GITHUB =============
 if [[ "$OSTYPE" == darwin* ]]; then
-    alias grev='open https://github.com/pulls/review-requested'
-    # $1 = github org/user name
-    git_new_pr() {
-        local repo=$(basename $(git rev-parse --show-toplevel))
-        open -n https://github.com/$1/$repo/pull/new/$GIT_BRANCH
-    }
-    # $1 = github org/user name
-    git_new_issue() {
-        local repo=$(basename `git rev-parse --show-toplevel`)
-        open -n https://github.com/$1/$repo/issues/new
-    }
+    alias gpr='gh pr create --web'
+    alias giss='gh issue create --web'
+    alias grev='gh browse https://github.com/pulls/review-requested'
 fi
 
 

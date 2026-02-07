@@ -1,19 +1,49 @@
+# update install location
 cask_args appdir: '/Applications'
-tap 'caskroom/cask'
 
+# shell stuff
 brew 'zsh'
-brew 'vim'
-brew 'pyenv'
-brew 'ripgrep'
-brew 'fzf'
-brew 'macvim'
-brew 'awscli'
-brew 'exa'
-brew 'pyenv-virtualenv'
 brew 'tmux'
-brew 'neovim'
-# brew 'node'
+brew 'eza'
+brew 'jq'
+brew 'fzf'
+brew 'ripgrep'
+brew 'starship'
+brew 'gh'
 
-cask 'google-chrome'
+# utilities
+brew 'nvm'
+brew 'neovim'
+brew 'awscli'
+brew 'fastlane'
+brew 'pre-commit'
+# brew 'postgresql'
+# brew 'teleport'
+
+# python
+brew 'pyenv'
+brew 'poetry'
+# brew 'flake8'
+
+# apps
 cask 'iterm2'
-# cask 'vlc'
+cask 'spectacle'
+cask 'google-chrome'
+cask '1password'
+cask 'slack'
+cask 'docker'
+
+# ---- extra stuff ----
+
+cask 'tailscale'
+cask 'flutter'
+cask 'visual-studio-code'
+cask 'android-studio'
+cask 'ngrok'
+
+# cask 'divvy'
+# cask 'deluge'
+# cask 'java8'
+# cask 'intellij-idea'
+# cask 'pycharm'
+# brew 'gradle'
