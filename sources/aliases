@@ -255,14 +255,6 @@ tmux_wrapper() {
 alias t='tmux_wrapper'
 
 
-# ============ BREW =============
-if (( $+commands[brew] )); then
-    alias bserv='brew services list'
-    alias bstart='brew services start'
-    alias bstop='brew services stop'
-fi
-
-
 # ============ DOCKER =============
 alias d='docker'
 alias dcl='docker container ls'
@@ -348,24 +340,6 @@ alias ber='bundle exec rspec'
 # ============ GOOGLE CLOUD =============
 alias gc='gcloud'
 alias gcssh='gcloud compute ssh'
-
-
-# ============ WEBSITES =============
-if [[ "$OSTYPE" == darwin* ]]; then
-    alias sl='open http://www.seamless.com/food-delivery/vendors.m'
-    alias slmmg='open http://www.seamless.com/food-delivery/muscle-maker-grill-chelsea-new-york-city.29481.r'
-    alias sltoast='open http://www.seamless.com/food-delivery/toasties-delicatessen-new-york-city.1898.r'
-    alias slzumi='open http://www.seamless.com/food-delivery/izumi-sushi-new-york-city.1688.r'
-    alias weather='open http://www.weather.com/weather/hourbyhour/l/10003:4:US'
-    alias ff='open https://football.fantasysports.yahoo.com/f1/119334'
-    alias fandango='open https://www.fandango.com/10003_movietimes?mode=general&q=10003'
-fi
-
-
-# ============ BUZZER / PUSHFOROPEN =============
-BUZZER_URL='https://buzzer.domo.media'
-hit_buzzer() { curl "$BUZZER_URL/open/$1" }
-alias buzz='hit_buzzer'
 
 
 # ============ VIM (cleanup) =============
