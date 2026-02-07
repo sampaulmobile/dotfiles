@@ -24,7 +24,6 @@ require("lazy").setup({
     -- Language extras
     { import = "lazyvim.plugins.extras.lang.python" },
     { import = "lazyvim.plugins.extras.lang.json" },
-    { import = "lazyvim.plugins.extras.lang.bash" },
 
     -- Import your custom plugins
     { import = "plugins" },
