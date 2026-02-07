@@ -9,79 +9,65 @@
 # dotfiles directory
 dir=$HOME/dotfiles/dots
 
-# backup directory (deprecated)
-deldir=$HOME/DELETE_dotfiles
-
-# list of files/folders to symlink in homedir
-files="vimrc zshrc gitconfig gitignore tmux.conf tmux.remote.conf ideavimrc"
-
-# dropbox !public folder
-NOT_PUBLIC=$HOME/Dropbox/!Public
+# detect OS
+OS="$(uname -s)"
 
 ##########
 
-# create DELETE_dotfiles in homedir
-mkdir -p $deldir
+# Helper: force-create a symlink (removes existing file/link first)
+link() {
+    rm -rf "$2"
+    ln -sfv "$1" "$2"
+}
 
-# Remove existing dotfiles and create symlinks for $files
-for file in $files; do
-    mv ~/.$file $deldir
-    ln -s $dir/$file ~/.$file
+# ===== Common dotfiles (both platforms) =====
+common_files="gitconfig gitignore tmux.conf tmux.remote.conf"
+
+for file in $common_files; do
+    link $dir/$file ~/.$file
 done
 
-mv ~/.config/starship.toml $deldir
-ln -s $dir/starship.toml ~/.config/starship.toml
+# ===== zshrc (platform-specific) =====
+if [[ "$OS" == "Linux" ]]; then
+    link $dir/zshrc_linux ~/.zshrc
+else
+    link $dir/zshrc ~/.zshrc
+fi
 
-# mkdir -p ~/.vim
-# mv ~/.vim/plugs.vim $deldir
-# ln -s $dir/plugs.vim ~/.vim/plugs.vim
+# ===== starship =====
+mkdir -p ~/.config
+link $dir/starship.toml ~/.config/starship.toml
 
-# if [ -d ~/.oh-my-zsh ]; then
-#     mv ~/.oh-my-zsh/custom/sampaul.zsh-theme $deldir
-#     ln -s $dir/sampaul.zsh-theme ~/.oh-my-zsh/custom/sampaul.zsh-theme
-# fi
+# ===== neovim (LazyVim config) =====
+link $dir/nvim ~/.config/nvim
 
-# if [ $(which nvim) ]; then
-#     mkdir -p ~/.config/nvim
-#
-#     mv ~/.config/nvim/init.lua $deldir
-#     ln -s $dir/init.lua ~/.config/nvim/init.lua
-#
-#     mkdir -p ~/.config/nvim/lua
-#     mv ~/.config/nvim/lua $deldir
-#     ln -s $dir/lua ~/.config/nvim/lua
-# fi
+# ===== Mac-only dotfiles =====
+if [[ "$OS" == "Darwin" ]]; then
+    link $dir/ideavimrc ~/.ideavimrc
 
-if [ -d $NOT_PUBLIC/links ]; then
-    mkdir -p ~/.aws
-    mv ~/.aws/config $deldir
-    ln -s $NOT_PUBLIC/links/aws_config ~/.aws/config
+    # Dropbox-linked sensitive files (Mac only)
+    NOT_PUBLIC=$HOME/Dropbox/!Public
+    if [ -d $NOT_PUBLIC/links ]; then
+        mkdir -p ~/.aws
+        link $NOT_PUBLIC/links/aws_config ~/.aws/config
+        link $NOT_PUBLIC/links/aws_credentials ~/.aws/credentials
 
-    mkdir -p ~/.aws
-    mv ~/.aws/credentials $deldir
-    ln -s $NOT_PUBLIC/links/aws_credentials ~/.aws/credentials
+        mkdir -p ~/.ssh
+        link $NOT_PUBLIC/links/ssh_config ~/.ssh/config
+        link $NOT_PUBLIC/links/ssh_known_hosts ~/.ssh/known_hosts
 
-    mkdir -p ~/.ssh
-    mv ~/.ssh/config $deldir
-    ln -s $NOT_PUBLIC/links/ssh_config ~/.ssh/config
-    mv ~/.ssh/known_hosts $deldir
-    ln -s $NOT_PUBLIC/links/ssh_known_hosts ~/.ssh/known_hosts
+        link $NOT_PUBLIC/links/pgpass ~/.pgpass
 
-    mv ~/.pgpass $deldir
-    ln -s $NOT_PUBLIC/links/pgpass ~/.pgpass
+        if [ -d $HOME/.kube ]; then
+            link $NOT_PUBLIC/keys/sam.paul.vpn.crt ~/.kube/client.crt
+            link $NOT_PUBLIC/keys/sam.paul.vpn.key ~/.kube/client.key
+            link $NOT_PUBLIC/keys/docurated.intermediate.crt ~/.kube/ca.crt
+        fi
 
-    if [ -d $HOME/.kube ]; then
-	mv ~/.kube/client.crt $deldir
-	ln -s $NOT_PUBLIC/keys/sam.paul.vpn.crt ~/.kube/client.crt
-	mv ~/.kube/client.key $deldir
-	ln -s $NOT_PUBLIC/keys/sam.paul.vpn.key ~/.kube/client.key
-	mv ~/.kube/ca.crt $deldir
-	ln -s $NOT_PUBLIC/keys/docurated.intermediate.crt ~/.kube/ca.crt
-    fi
-
-    if [ -d $HOME/Library/Application\ Support/Tunnelblick ]; then
-	mv ~/Library/Application\ Support/Tunnelblick/Configurations $deldir
-	ln -s $NOT_PUBLIC/keys/Configurations ~/Library/Application\ Support/Tunnelblick/Configurations
+        if [ -d "$HOME/Library/Application Support/Tunnelblick" ]; then
+            link $NOT_PUBLIC/keys/Configurations "$HOME/Library/Application Support/Tunnelblick/Configurations"
+        fi
     fi
 fi
-rm -rf $deldir
+
+echo "Symlinks created successfully!"

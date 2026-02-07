@@ -16,7 +16,11 @@ alias cdot='cd ~/dotfiles'
 alias ndot='cdot && nvim'
 alias cdown='cd ~/Downloads'
 alias soz='source ~/.zshrc'
-alias cpwd="pwd | tr -d '\n' | pbcopy"
+if [[ "$OSTYPE" == darwin* ]]; then
+    alias cpwd="pwd | tr -d '\n' | pbcopy"
+else
+    alias cpwd="pwd | tr -d '\n' | xclip -selection clipboard"
+fi
 
 alias jp='cd $HOME/dev/just-play/'
 
@@ -123,7 +127,7 @@ launch_vim() {
     fi
 }
 alias v='launch_vim'
-alias m='mvim'
+[[ "$OSTYPE" == darwin* ]] && alias m='mvim'
 launch_nvim() {
     if [ -n "$TMUX" ]; then
         local curr_folder=${PWD##*/}
@@ -216,18 +220,19 @@ alias git_reset_to_master='git reset --hard origin/master'
 
 
 # ============ GITHUB =============
-# alias giss='open https://github.com/issues/assigned'
-alias grev='open https://github.com/pulls/review-requested'
-# $1 = github org/user name
-git_new_pr() {
-    local repo=$(basename $(git rev-parse --show-toplevel))
-    open -n https://github.com/$1/$repo/pull/new/$GIT_BRANCH
-}
-# $1 = github org/user name
-git_new_issue() {
-    local repo=$(basename `git rev-parse --show-toplevel`)
-    open -n https://github.com/$1/$repo/issues/new
-}
+if [[ "$OSTYPE" == darwin* ]]; then
+    alias grev='open https://github.com/pulls/review-requested'
+    # $1 = github org/user name
+    git_new_pr() {
+        local repo=$(basename $(git rev-parse --show-toplevel))
+        open -n https://github.com/$1/$repo/pull/new/$GIT_BRANCH
+    }
+    # $1 = github org/user name
+    git_new_issue() {
+        local repo=$(basename `git rev-parse --show-toplevel`)
+        open -n https://github.com/$1/$repo/issues/new
+    }
+fi
 
 
 # ============ TMUX =============
@@ -251,9 +256,11 @@ alias t='tmux_wrapper'
 
 
 # ============ BREW =============
-alias bserv='brew services list'
-alias bstart='brew services start'
-alias bstop='brew services stop'
+if (( $+commands[brew] )); then
+    alias bserv='brew services list'
+    alias bstart='brew services start'
+    alias bstop='brew services stop'
+fi
 
 
 # ============ DOCKER =============
@@ -344,13 +351,15 @@ alias gcssh='gcloud compute ssh'
 
 
 # ============ WEBSITES =============
-alias sl='open http://www.seamless.com/food-delivery/vendors.m'
-alias slmmg='open http://www.seamless.com/food-delivery/muscle-maker-grill-chelsea-new-york-city.29481.r'
-alias sltoast='open http://www.seamless.com/food-delivery/toasties-delicatessen-new-york-city.1898.r'
-alias slzumi='open http://www.seamless.com/food-delivery/izumi-sushi-new-york-city.1688.r'
-alias weather='open http://www.weather.com/weather/hourbyhour/l/10003:4:US'
-alias ff='open https://football.fantasysports.yahoo.com/f1/119334'
-alias fandango='open https://www.fandango.com/10003_movietimes?mode=general&q=10003'
+if [[ "$OSTYPE" == darwin* ]]; then
+    alias sl='open http://www.seamless.com/food-delivery/vendors.m'
+    alias slmmg='open http://www.seamless.com/food-delivery/muscle-maker-grill-chelsea-new-york-city.29481.r'
+    alias sltoast='open http://www.seamless.com/food-delivery/toasties-delicatessen-new-york-city.1898.r'
+    alias slzumi='open http://www.seamless.com/food-delivery/izumi-sushi-new-york-city.1688.r'
+    alias weather='open http://www.weather.com/weather/hourbyhour/l/10003:4:US'
+    alias ff='open https://football.fantasysports.yahoo.com/f1/119334'
+    alias fandango='open https://www.fandango.com/10003_movietimes?mode=general&q=10003'
+fi
 
 
 # ============ BUZZER / PUSHFOROPEN =============
