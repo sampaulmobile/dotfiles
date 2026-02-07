@@ -9,15 +9,21 @@
 # dotfiles directory
 dir=$HOME/dotfiles/dots
 
+# backup directory
+deldir=$HOME/DELETE_dotfiles
+
 # detect OS
 OS="$(uname -s)"
 
 ##########
 
-# Helper: force-create a symlink (removes existing file/link first)
+# create backup dir
+mkdir -p $deldir
+
+# Helper: backup existing file, then symlink
 link() {
-    rm -rf "$2"
-    ln -sfv "$1" "$2"
+    mv "$2" $deldir 2>/dev/null
+    ln -sv "$1" "$2"
 }
 
 # ===== Common dotfiles (both platforms) =====
@@ -41,4 +47,12 @@ link $dir/starship.toml ~/.config/starship.toml
 # ===== neovim (LazyVim config) =====
 link $dir/nvim ~/.config/nvim
 
+echo ""
 echo "Symlinks created successfully!"
+echo "Old dotfiles backed up to: $deldir"
+read -p "Delete backup directory? (y/n) " -n 1 -r
+echo ""
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    rm -rf $deldir
+    echo "Backup deleted."
+fi

@@ -73,7 +73,3 @@ eval "$(rbenv init - zsh)"
 # Add FVM to PATH
 export PATH="$HOME/fvm/default/bin:$PATH"
 
-## [Completion]
-## Completion scripts setup. Remove the following line to uninstall
-[[ -f /Users/sampaul/.dart-cli-completion/zsh-config.zsh ]] && . /Users/sampaul/.dart-cli-completion/zsh-config.zsh || true
-## [/Completion]
