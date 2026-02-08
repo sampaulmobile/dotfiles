@@ -1,0 +1,44 @@
+###### ===== ZSHRC (Linux VPS) by Sam Paul ===== ######
+DOTFILES=$HOME/dotfiles
+DOTS=$DOTFILES/dots
+SOURCES=$DOTFILES/sources
+typeset -U path
+
+# ===== OH-MY-ZSH ========
+ZSH=$HOME/.oh-my-zsh
+ZSH_DISABLE_COMPFIX=true
+plugins=(
+    zsh-syntax-highlighting
+)
+[[ -f "$ZSH/oh-my-zsh.sh" ]] && source $ZSH/oh-my-zsh.sh
+
+# ===== PYENV =====
+[[ -d "$HOME/.pyenv" ]] && export PATH="$HOME/.pyenv/bin:$PATH" && eval "$(pyenv init --path)"
+[[ $(command -v pyenv-virtualenv) ]] && eval "$(pyenv virtualenv-init -)"
+
+# ===== FZF =====
+set -o vi
+[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
+# fzf installed via apt uses this path
+[ -f /usr/share/doc/fzf/examples/key-bindings.zsh ] && source /usr/share/doc/fzf/examples/key-bindings.zsh
+[ -f /usr/share/doc/fzf/examples/completion.zsh ] && source /usr/share/doc/fzf/examples/completion.zsh
+export FZF_DEFAULT_OPTS='--height 40% --reverse'
+
+# ===== VI-MODE =====
+bindkey -v
+bindkey -M viins 'jj' vi-cmd-mode #map jj to exit (mimic ESC)
+# backspace and ^h working even after returning from command mode
+bindkey '^?' backward-delete-char
+bindkey '^h' backward-delete-char
+
+# ===== HISTORY =====
+[[ -f "$SOURCES/history" ]] && source $SOURCES/history
+
+# ===== ALIASES =====
+[[ -f "$SOURCES/aliases" ]] && source $SOURCES/aliases
+
+# ===== OTHER ALIASES =====
+[[ -f "$SOURCES/other_aliases" ]] && source $SOURCES/other_aliases
+
+# run starship
+eval "$(starship init zsh)"

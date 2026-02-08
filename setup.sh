@@ -24,7 +24,7 @@ $DOTFILES/bin/install_brew.sh
 echo "Initializing brew"
 eval $(/opt/homebrew/bin/brew shellenv)
 echo "Running brew bundle"
-brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_m1
+brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_mac
 
 # install node
 brew_prefix=$(brew --prefix)

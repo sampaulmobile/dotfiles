@@ -16,7 +16,11 @@ alias cdot='cd ~/dotfiles'
 alias ndot='cdot && nvim'
 alias cdown='cd ~/Downloads'
 alias soz='source ~/.zshrc'
-alias cpwd="pwd | tr -d '\n' | pbcopy"
+if [[ "$OSTYPE" == darwin* ]]; then
+    alias cpwd="pwd | tr -d '\n' | pbcopy"
+else
+    alias cpwd="pwd | tr -d '\n' | xclip -selection clipboard"
+fi
 
 alias jp='cd $HOME/dev/just-play/'
 
@@ -34,24 +38,24 @@ alias todo='launch_todo'
 
 
 # ============ UNIX =============
-if which exa >/dev/null 2>&1; then
-    alias ls='exa'
-    exa_tree() {
+if which eza >/dev/null 2>&1; then
+    alias ls='eza'
+    eza_tree() {
         if [ $# -eq 0 ]; then
-            exa --tree
+            eza --tree
         else
-            exa --tree --level=$1
+            eza --tree --level=$1
         fi
     }
-    alias ltree='exa_tree'
-    exa_tree_long() {
+    alias ltree='eza_tree'
+    eza_tree_long() {
         if [ $# -eq 0 ]; then
-            exa -l --tree
+            eza -l --tree
         else
-            exa -l --tree --level=$1
+            eza -l --tree --level=$1
         fi
     }
-    alias lltree='exa_tree_long'
+    alias lltree='eza_tree_long'
 fi
 # these are overwritten by ~/.oh-my-zsh/lib/directories.zsh
 # alias l='ls -l'
@@ -123,7 +127,7 @@ launch_vim() {
     fi
 }
 alias v='launch_vim'
-alias m='mvim'
+[[ "$OSTYPE" == darwin* ]] && alias m='mvim'
 launch_nvim() {
     if [ -n "$TMUX" ]; then
         local curr_folder=${PWD##*/}
@@ -216,18 +220,11 @@ alias git_reset_to_master='git reset --hard origin/master'
 
 
 # ============ GITHUB =============
-# alias giss='open https://github.com/issues/assigned'
-alias grev='open https://github.com/pulls/review-requested'
-# $1 = github org/user name
-git_new_pr() {
-    local repo=$(basename $(git rev-parse --show-toplevel))
-    open -n https://github.com/$1/$repo/pull/new/$GIT_BRANCH
-}
-# $1 = github org/user name
-git_new_issue() {
-    local repo=$(basename `git rev-parse --show-toplevel`)
-    open -n https://github.com/$1/$repo/issues/new
-}
+if [[ "$OSTYPE" == darwin* ]]; then
+    alias gpr='gh pr create --web'
+    alias giss='gh issue create --web'
+    alias grev='gh browse https://github.com/pulls/review-requested'
+fi
 
 
 # ============ TMUX =============
@@ -248,12 +245,6 @@ tmux_wrapper() {
     fi
 }
 alias t='tmux_wrapper'
-
-
-# ============ BREW =============
-alias bserv='brew services list'
-alias bstart='brew services start'
-alias bstop='brew services stop'
 
 
 # ============ DOCKER =============
@@ -341,22 +332,6 @@ alias ber='bundle exec rspec'
 # ============ GOOGLE CLOUD =============
 alias gc='gcloud'
 alias gcssh='gcloud compute ssh'
-
-
-# ============ WEBSITES =============
-alias sl='open http://www.seamless.com/food-delivery/vendors.m'
-alias slmmg='open http://www.seamless.com/food-delivery/muscle-maker-grill-chelsea-new-york-city.29481.r'
-alias sltoast='open http://www.seamless.com/food-delivery/toasties-delicatessen-new-york-city.1898.r'
-alias slzumi='open http://www.seamless.com/food-delivery/izumi-sushi-new-york-city.1688.r'
-alias weather='open http://www.weather.com/weather/hourbyhour/l/10003:4:US'
-alias ff='open https://football.fantasysports.yahoo.com/f1/119334'
-alias fandango='open https://www.fandango.com/10003_movietimes?mode=general&q=10003'
-
-
-# ============ BUZZER / PUSHFOROPEN =============
-BUZZER_URL='https://buzzer.domo.media'
-hit_buzzer() { curl "$BUZZER_URL/open/$1" }
-alias buzz='hit_buzzer'
 
 
 # ============ VIM (cleanup) =============
@@ -448,4 +423,40 @@ s3_get_largest_n() {
     else
         aws s3api list-objects-v2 --bucket $1 --prefix $2 --query "sort_by(Contents, &Size)[-${3:-3}:]"
     fi
+}
+
+
+# ======= justplay ========
+file_diff_dev_api() {
+    local deployed_hash=$(git ll | grep -m 1 'dev/api' | awk '{print $2}')
+    git diff --name-only $deployed_hash...master
+}
+file_diff_dev_ios() {
+    local deployed_hash=$(git ll | grep -m 1 'dev/builds/ios' | awk '{print $2}')
+    git diff --name-only $deployed_hash...master
+}
+file_diff_prod_api() {
+    local deployed_hash=$(git ll | grep -m 1 'prod/api' | awk '{print $2}')
+    git diff --name-only $deployed_hash...master
+}
+file_diff_prod_ios() {
+    local deployed_hash=$(git ll | grep -m 1 'prod/builds/ios' | awk '{print $2}')
+    git diff --name-only $deployed_hash...master
+}
+
+git_diff_dev_api() {
+    local deployed_hash=$(git ll | grep -m 1 'dev/api' | awk '{print $2}')
+    git diff $deployed_hash...master -- api/
+}
+git_diff_dev_ios() {
+    local deployed_hash=$(git ll | grep -m 1 'dev/builds/ios' | awk '{print $2}')
+    git diff $deployed_hash...master -- app/
+}
+git_diff_prod_api() {
+    local deployed_hash=$(git ll | grep -m 1 'prod/api' | awk '{print $2}')
+    git diff $deployed_hash...master -- api/
+}
+git_diff_prod_ios() {
+    local deployed_hash=$(git ll | grep -m 1 'prod/builds/ios' | awk '{print $2}')
+    git diff $deployed_hash...master -- app/
 }
