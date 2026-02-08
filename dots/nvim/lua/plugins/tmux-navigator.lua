@@ -2,11 +2,13 @@
 return {
   {
     "christoomey/vim-tmux-navigator",
-    keys = {
-      { "<C-h>", "<cmd>TmuxNavigateLeft<cr>", desc = "Navigate left" },
-      { "<C-j>", "<cmd>TmuxNavigateDown<cr>", desc = "Navigate down" },
-      { "<C-k>", "<cmd>TmuxNavigateUp<cr>", desc = "Navigate up" },
-      { "<C-l>", "<cmd>TmuxNavigateRight<cr>", desc = "Navigate right" },
-    },
+    lazy = false,
+    init = function()
+      -- Delete LazyVim's default Ctrl+hjkl mappings so vim-tmux-navigator can own them
+      vim.keymap.del("n", "<C-h>")
+      vim.keymap.del("n", "<C-j>")
+      vim.keymap.del("n", "<C-k>")
+      vim.keymap.del("n", "<C-l>")
+    end,
   },
 }
