@@ -33,7 +33,18 @@ sudo apt-get install -y \
     build-essential \
     mosh
 
-# ===== 2. Neovim (latest stable appimage - apt version is too old) =====
+# ===== 2. Node.js (needed by Mason for LSP servers like pyright, jsonls) =====
+echo ""
+echo ">>> Installing node.js..."
+if command -v node &>/dev/null; then
+    echo "node already installed: $(node --version)"
+else
+    curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+    sudo apt-get install -y nodejs
+    echo "node installed: $(node --version)"
+fi
+
+# ===== 3. Neovim (latest stable appimage - apt version is too old) =====
 echo ""
 echo ">>> Installing neovim..."
 if command -v nvim &>/dev/null; then
