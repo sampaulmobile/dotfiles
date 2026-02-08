@@ -36,5 +36,6 @@
   "undotree": { "branch": "master", "commit": "fc28931fbfba66ab75d9af23fe46ffbbb9de6e8c" },
   "venv-selector.nvim": { "branch": "main", "commit": "26a6da0348dc2d0a3787e095bd4e68d976304bb2" },
   "vim-flutter": { "branch": "master", "commit": "2c528672b0b8a21875689389bc3eb22678e8d983" },
+  "vim-tmux-navigator": { "branch": "master", "commit": "e41c431a0c7b7388ae7ba341f01a0d217eb3a432" },
   "which-key.nvim": { "branch": "main", "commit": "3aab2147e74890957785941f0c1ad87d0a44c15a" }
 }
