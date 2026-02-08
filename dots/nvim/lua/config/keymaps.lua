@@ -15,11 +15,7 @@ k.set("n", "<leader>wq", "<cmd>wq<cr>", { silent = true, desc = "Save and quit" 
 k.set("n", "<leader>q", "<cmd>q<cr>", { silent = true, desc = "Quit" })
 k.set("n", "<leader>r", "<cmd>so $MYVIMRC<cr>", { desc = "Reload config" })
 
--- Move between split windows with Ctrl + hjkl
-k.set("n", "<C-h>", "<C-w>h", { silent = true, desc = "Go to left window" })
-k.set("n", "<C-l>", "<C-w>l", { silent = true, desc = "Go to right window" })
-k.set("n", "<C-k>", "<C-w>k", { silent = true, desc = "Go to upper window" })
-k.set("n", "<C-j>", "<C-w>j", { silent = true, desc = "Go to lower window" })
+-- Ctrl+hjkl window/pane navigation handled by vim-tmux-navigator plugin
 
 -- Buffer navigation
 k.set("n", "<leader>]", "<cmd>bnext<cr>", { desc = "Next buffer" })
