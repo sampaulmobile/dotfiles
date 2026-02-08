@@ -89,7 +89,24 @@ else
     echo "neovim installed: $(nvim --version | head -1)"
 fi
 
-# ===== 5. Starship prompt =====
+# ===== 5. GitHub CLI =====
+echo ""
+echo ">>> Installing GitHub CLI..."
+if command -v gh &>/dev/null; then
+    echo "gh already installed: $(gh --version | head -1)"
+else
+    (type -p wget >/dev/null || sudo apt-get install -y wget) \
+        && sudo mkdir -p -m 755 /etc/apt/keyrings \
+        && out=$(mktemp) && wget -nv -O"$out" https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        && cat "$out" | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
+        && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+        && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+        && sudo apt-get update \
+        && sudo apt-get install -y gh
+    echo "gh installed: $(gh --version | head -1)"
+fi
+
+# ===== 6. Starship prompt =====
 echo ""
 echo ">>> Installing starship..."
 if command -v starship &>/dev/null; then
@@ -98,32 +115,32 @@ else
     curl -sS https://starship.rs/install.sh | sh -s -- -y
 fi
 
-# ===== 6. Oh-my-zsh =====
+# ===== 7. Oh-my-zsh =====
 echo ""
 echo ">>> Installing oh-my-zsh..."
 $DOTFILES/bin/install_oh_my_zsh.sh
 
-# ===== 7. Zsh syntax highlighting =====
+# ===== 8. Zsh syntax highlighting =====
 echo ""
 echo ">>> Installing zsh-syntax-highlighting..."
 $DOTFILES/bin/install_zsh_syntax_highlighting.sh
 
-# ===== 8. TPM (Tmux Plugin Manager) =====
+# ===== 9. TPM (Tmux Plugin Manager) =====
 echo ""
 echo ">>> Installing TPM..."
 $DOTFILES/bin/install_tpm.sh
 
-# ===== 9. Symlink dotfiles =====
+# ===== 10. Symlink dotfiles =====
 echo ""
 echo ">>> Symlinking dotfiles..."
 $DOTFILES/bin/symlink_files.sh
 
-# ===== 10. Set zsh as default shell =====
+# ===== 11. Set zsh as default shell =====
 echo ""
 echo ">>> Setting zsh as default shell..."
 $DOTFILES/bin/set_zsh_linux.sh
 
-# ===== 11. Install TPM plugins =====
+# ===== 12. Install TPM plugins =====
 echo ""
 echo ">>> Installing tmux plugins..."
 # TPM plugin install needs tmux server - start one if not running
