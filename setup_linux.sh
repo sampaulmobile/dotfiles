@@ -31,7 +31,19 @@ sudo apt-get install -y \
     curl \
     unzip \
     build-essential \
-    mosh
+    mosh \
+    python3-pip \
+    python3-venv \
+    libssl-dev \
+    zlib1g-dev \
+    libbz2-dev \
+    libreadline-dev \
+    libsqlite3-dev \
+    libncursesw5-dev \
+    libxml2-dev \
+    libxmlsec1-dev \
+    libffi-dev \
+    liblzma-dev
 
 # ===== 2. Node.js (needed by Mason for LSP servers like pyright, jsonls) =====
 echo ""
@@ -44,7 +56,25 @@ else
     echo "node installed: $(node --version)"
 fi
 
-# ===== 3. Neovim (latest stable appimage - apt version is too old) =====
+# ===== 3. Pyenv + Python =====
+echo ""
+echo ">>> Installing pyenv..."
+$DOTFILES/bin/install_pyenv.sh
+export PYENV_ROOT="$HOME/.pyenv"
+export PATH="$PYENV_ROOT/bin:$PATH"
+eval "$(pyenv init --path)"
+
+PYTHON_VERSION="3.12.8"
+if pyenv versions --bare | grep -q "^${PYTHON_VERSION}$"; then
+    echo "Python $PYTHON_VERSION already installed"
+else
+    echo "Installing Python $PYTHON_VERSION (this takes a few minutes)..."
+    pyenv install $PYTHON_VERSION
+fi
+pyenv global $PYTHON_VERSION
+echo "Python: $(python --version)"
+
+# ===== 4. Neovim (latest stable appimage - apt version is too old) =====
 echo ""
 echo ">>> Installing neovim..."
 if command -v nvim &>/dev/null; then
@@ -58,7 +88,7 @@ else
     echo "neovim installed: $(nvim --version | head -1)"
 fi
 
-# ===== 3. Starship prompt =====
+# ===== 5. Starship prompt =====
 echo ""
 echo ">>> Installing starship..."
 if command -v starship &>/dev/null; then
@@ -67,32 +97,32 @@ else
     curl -sS https://starship.rs/install.sh | sh -s -- -y
 fi
 
-# ===== 4. Oh-my-zsh =====
+# ===== 6. Oh-my-zsh =====
 echo ""
 echo ">>> Installing oh-my-zsh..."
 $DOTFILES/bin/install_oh_my_zsh.sh
 
-# ===== 5. Zsh syntax highlighting =====
+# ===== 7. Zsh syntax highlighting =====
 echo ""
 echo ">>> Installing zsh-syntax-highlighting..."
 $DOTFILES/bin/install_zsh_syntax_highlighting.sh
 
-# ===== 6. TPM (Tmux Plugin Manager) =====
+# ===== 8. TPM (Tmux Plugin Manager) =====
 echo ""
 echo ">>> Installing TPM..."
 $DOTFILES/bin/install_tpm.sh
 
-# ===== 7. Symlink dotfiles =====
+# ===== 9. Symlink dotfiles =====
 echo ""
 echo ">>> Symlinking dotfiles..."
 $DOTFILES/bin/symlink_files.sh
 
-# ===== 8. Set zsh as default shell =====
+# ===== 10. Set zsh as default shell =====
 echo ""
 echo ">>> Setting zsh as default shell..."
 $DOTFILES/bin/set_zsh_linux.sh
 
-# ===== 9. Install TPM plugins =====
+# ===== 11. Install TPM plugins =====
 echo ""
 echo ">>> Installing tmux plugins..."
 # TPM plugin install needs tmux server - start one if not running
