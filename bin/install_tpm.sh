@@ -1,5 +1,5 @@
 if [ $# -eq 0 ] && [ -d ~/.tmux/plugins/tpm ]; then
-    exit 1
+    exit 0
 fi
 
 mkdir -p ~/.tmux/plugins

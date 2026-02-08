@@ -30,7 +30,8 @@ sudo apt-get install -y \
     git \
     curl \
     unzip \
-    build-essential
+    build-essential \
+    mosh
 
 # ===== 2. Neovim (latest stable appimage - apt version is too old) =====
 echo ""
