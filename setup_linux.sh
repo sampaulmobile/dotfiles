@@ -26,6 +26,7 @@ sudo apt-get install -y \
     tmux \
     fzf \
     eza \
+    fd-find \
     ripgrep \
     git \
     curl \
