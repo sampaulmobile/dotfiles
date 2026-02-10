@@ -12,6 +12,9 @@ success_symbol = '[➜](bold green)' # The 'success_symbol' segment is being set
 # symbol = '👾 '
 # pyenv_version_name = true
 
+[docker_context]
+disabled = true
+
 [aws]
 format = 'on [$symbol$profile]($style) '
 style = 'bold blue'
