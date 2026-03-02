@@ -9,7 +9,6 @@ local opt = vim.opt
 -- Custom options (preserved from original config)
 opt.wrap = false              -- Don't wrap lines
 opt.visualbell = true         -- No sounds
-opt.autochdir = true          -- Always set pwd to path of current file
 opt.synmaxcol = 300           -- Stop syntax highlight after x lines for performance
 
 -- Tabs/indentation (4 spaces instead of LazyVim default 2)

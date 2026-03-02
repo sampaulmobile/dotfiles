@@ -1,0 +1,18 @@
+# Theme
+theme = TokyoNight Night
+
+# Font
+font-size = 14
+
+# Window
+window-padding-x = 4
+window-padding-y = 4
+window-decoration = true
+macos-titlebar-style = tabs
+
+# Terminal
+term = xterm-256color
+
+# Keybindings: Cmd+Shift+[ and ] to switch tmux windows
+keybind = cmd+shift+right_bracket=text:\x02n
+keybind = cmd+shift+left_bracket=text:\x02p

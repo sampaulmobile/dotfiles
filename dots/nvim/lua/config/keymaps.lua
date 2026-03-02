@@ -13,7 +13,10 @@ k.set("n", "<leader>c", "<cmd>close<cr>", { silent = true, desc = "Close window"
 k.set("n", "<leader>w", "<cmd>w<cr>", { silent = true, desc = "Save file" })
 k.set("n", "<leader>wq", "<cmd>wq<cr>", { silent = true, desc = "Save and quit" })
 k.set("n", "<leader>q", "<cmd>q<cr>", { silent = true, desc = "Quit" })
-k.set("n", "<leader>r", "<cmd>so $MYVIMRC<cr>", { desc = "Reload config" })
+k.set("n", "<leader>r", function()
+  vim.cmd("so $MYVIMRC")
+  vim.notify("Config reloaded", vim.log.levels.INFO)
+end, { desc = "Reload config" })
 
 -- Ctrl+hjkl window/pane navigation handled by vim-tmux-navigator plugin
 

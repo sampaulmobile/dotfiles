@@ -47,6 +47,9 @@ link $dir/starship.toml ~/.config/starship.toml
 # ===== neovim (LazyVim config) =====
 link $dir/nvim ~/.config/nvim
 
+# ===== ghostty =====
+link $dir/ghostty ~/.config/ghostty
+
 echo ""
 echo "Symlinks created successfully!"
 echo "Old dotfiles backed up to: $deldir"
