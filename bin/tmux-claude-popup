@@ -2,11 +2,14 @@
 
 # Toggle a floating tmux popup running claude for the current project session.
 # Each project session gets its own isolated claude popup session.
+# Tracks @claude_popup flag so sessionizer can auto-restore popups.
 
 session=$(tmux display-message -p '#S')
 
 # if we're already inside a claude popup session, detach to close the popup
 if [[ "$session" == claude-* ]]; then
+    parent_session="${session#claude-}"
+    tmux set -t "$parent_session" @claude_popup ""
     tmux detach-client
     exit 0
 fi
@@ -18,4 +21,5 @@ if ! tmux has-session -t="$popup_session" 2>/dev/null; then
     tmux send-keys -t "$popup_session" "claude" Enter
 fi
 
+tmux set @claude_popup "1"
 tmux display-popup -E -w 80% -h 80% "tmux attach-session -t '$popup_session'"

@@ -16,6 +16,21 @@ search_dirs=(
 if [[ $# -eq 1 ]]; then
     selected=$1
 else
+    # Existing sessions sorted by most recently used (excluding current and claude-* popups)
+    current_session=$(tmux display-message -p '#S')
+    # If inside a claude popup, filter out the parent session instead
+    if [[ "$current_session" == claude-* ]]; then
+        filter_session="${current_session#claude-}"
+    else
+        filter_session="$current_session"
+    fi
+    existing=$(tmux list-sessions -F '#{session_last_attached} #{session_name}' 2>/dev/null \
+        | sort -rn \
+        | awk '{print $2}' \
+        | grep -v '^claude-' \
+        | grep -Fxv "$filter_session")
+
+    # Project directories not yet opened as sessions
     find_args=()
     for entry in "${search_dirs[@]}"; do
         dir="${entry%%:*}"
@@ -27,21 +42,55 @@ else
         fi
     done
 
-    selected=$(printf '%s\n' "${find_args[@]}" | fzf)
+    # Filter out dirs that already have a session
+    new_dirs=""
+    for dir in "${find_args[@]}"; do
+        name=$(basename "$dir" | tr . _)
+        if ! echo "$existing" | grep -qx "$name"; then
+            new_dirs+="$dir"$'\n'
+        fi
+    done
+
+    selected=$( (echo "$existing"; printf '%s' "$new_dirs") | grep -v '^$' | fzf)
 fi
 
 if [[ -z $selected ]]; then
     exit 0
 fi
 
-selected_name=$(basename "$selected" | tr . _)
+# If the selection is an existing session name (not a path), use it directly
+if tmux has-session -t="$selected" 2>/dev/null; then
+    selected_name="$selected"
+else
+    selected_name=$(basename "$selected" | tr . _)
+fi
 
 if ! tmux has-session -t="$selected_name" 2> /dev/null; then
     tmux new-session -ds "$selected_name" -c "$selected"
 fi
 
-if [[ -n $TMUX ]]; then
+# If inside a claude popup, close it and switch the parent client
+# Keep the @claude_popup flag set so it auto-restores when switching back
+current_session=$(tmux display-message -p '#S')
+if [[ "$current_session" == claude-* ]]; then
+    parent_session="${current_session#claude-}"
+    client=$(tmux list-clients -t "$parent_session" -F '#{client_name}' | head -1)
+    tmux detach-client
+    sleep 0.1
+    if [[ -n $client ]]; then
+        tmux switch-client -c "$client" -t "$selected_name"
+    fi
+elif [[ -n $TMUX ]]; then
     tmux switch-client -t "$selected_name"
 else
     tmux attach-session -t "$selected_name"
+fi
+
+# Auto-restore claude popup if the target session had one active
+popup_flag=$(tmux show -qv -t "$selected_name" @claude_popup 2>/dev/null)
+if [[ "$popup_flag" == "1" ]]; then
+    popup_session="claude-${selected_name}"
+    if tmux has-session -t="$popup_session" 2>/dev/null; then
+        tmux display-popup -E -w 80% -h 80% "tmux attach-session -t '$popup_session'"
+    fi
 fi
