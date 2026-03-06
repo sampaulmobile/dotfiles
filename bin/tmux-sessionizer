@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+
+# Fuzzy find a project directory and create/switch to a tmux session for it.
+# Based on ThePrimeagen's tmux-sessionizer.
+
+# ---- Project directories ----
+# Add entries as "path:depth"
+#   depth 0 = the directory itself is a project
+#   depth 1 = search one level deep for projects inside it
+search_dirs=(
+    "$HOME/dev:1"
+    "$HOME/dotfiles:0"
+)
+# ------------------------------
+
+if [[ $# -eq 1 ]]; then
+    selected=$1
+else
+    find_args=()
+    for entry in "${search_dirs[@]}"; do
+        dir="${entry%%:*}"
+        depth="${entry##*:}"
+        if [[ $depth -eq 0 ]]; then
+            find_args+=("$dir")
+        else
+            find_args+=($(find "$dir" -mindepth 1 -maxdepth "$depth" -type d))
+        fi
+    done
+
+    selected=$(printf '%s\n' "${find_args[@]}" | fzf)
+fi
+
+if [[ -z $selected ]]; then
+    exit 0
+fi
+
+selected_name=$(basename "$selected" | tr . _)
+
+if ! tmux has-session -t="$selected_name" 2> /dev/null; then
+    tmux new-session -ds "$selected_name" -c "$selected"
+fi
+
+if [[ -n $TMUX ]]; then
+    tmux switch-client -t "$selected_name"
+else
+    tmux attach-session -t "$selected_name"
+fi

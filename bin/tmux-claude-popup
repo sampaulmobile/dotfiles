@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+
+# Toggle a floating tmux popup running claude for the current project session.
+# Each project session gets its own isolated claude popup session.
+
+session=$(tmux display-message -p '#S')
+
+# if we're already inside a claude popup session, detach to close the popup
+if [[ "$session" == claude-* ]]; then
+    tmux detach-client
+    exit 0
+fi
+
+popup_session="claude-${session}"
+
+if ! tmux has-session -t="$popup_session" 2>/dev/null; then
+    tmux new-session -ds "$popup_session" -c "#{pane_current_path}"
+    tmux send-keys -t "$popup_session" "claude" Enter
+fi
+
+tmux display-popup -E -w 80% -h 80% "tmux attach-session -t '$popup_session'"
