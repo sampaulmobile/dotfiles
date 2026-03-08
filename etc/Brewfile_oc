@@ -1,0 +1,23 @@
+# update install location
+cask_args appdir: '/Applications'
+
+# shell essentials
+brew 'zsh'
+brew 'tmux'
+brew 'jq'
+brew 'ripgrep'
+brew 'eza'
+brew 'fzf'
+brew 'starship'
+brew 'gh'
+brew 'neovim'
+
+# node version manager (for openclaw)
+brew 'fnm'
+
+# terminal + browser
+cask 'ghostty'
+cask 'google-chrome'
+
+# remote access
+cask 'tailscale'
