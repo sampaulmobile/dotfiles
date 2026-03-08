@@ -59,11 +59,8 @@ bindkey '^h' backward-delete-char
 # ===== EXPORTS (/PATH) =====
 # [[ -f "$SOURCES/exports" ]] && source $SOURCES/exports
 
-# ===== NVM =====
-export NVM_DIR="$HOME/.nvm"
-brew_prefix=$(brew --prefix)
-[ -s "$brew_prefix/opt/nvm/nvm.sh" ] && . "$brew_prefix/opt/nvm/nvm.sh"  # This loads nvm
-[ -s "$brew_prefix/opt/nvm/etc/bash_completion.d/nvm" ] && . "$brew_prefix/opt/nvm/etc/bash_completion.d/nvm"  # This loads nvm bash_completion
+# ===== FNM =====
+command -v fnm &>/dev/null && eval "$(fnm env)"
 
 # run starship
 eval "$(starship init zsh)"

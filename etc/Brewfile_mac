@@ -13,7 +13,7 @@ brew 'gh'
 brew 'mosh'
 
 # utilities
-brew 'nvm'
+brew 'fnm'
 brew 'neovim'
 brew 'awscli'
 brew 'fastlane'
@@ -23,11 +23,11 @@ brew 'pre-commit'
 
 # python
 brew 'pyenv'
-brew 'poetry'
+# brew 'poetry'
 # brew 'flake8'
 
 # apps
-cask 'iterm2'
+cask 'ghostty'
 cask 'spectacle'
 cask 'google-chrome'
 cask '1password'
@@ -37,10 +37,10 @@ cask 'docker'
 # ---- extra stuff ----
 
 cask 'tailscale'
-cask 'flutter'
-cask 'visual-studio-code'
-cask 'android-studio'
-cask 'ngrok'
+# cask 'flutter'
+# cask 'visual-studio-code'
+# cask 'android-studio'
+# cask 'ngrok'
 
 # cask 'divvy'
 # cask 'deluge'

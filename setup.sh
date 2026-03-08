@@ -27,11 +27,10 @@ echo "Running brew bundle"
 brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_mac
 
 # install node
-brew_prefix=$(brew --prefix)
-source $brew_prefix/opt/nvm/nvm.sh  # This loads nvm
+eval "$(fnm env)"
 echo "installing node"
-nvm install --lts
-nvm use default
+fnm install 22
+fnm default 22
 
 echo "Symlinking dotfiles"
 $DOTFILES/bin/symlink_files.sh
