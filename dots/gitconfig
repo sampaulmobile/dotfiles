@@ -1,8 +1,11 @@
 [user]
 	name = SP
 	email = sampaulmobile@gmail.com
+[include]
+	path = ~/.gitconfig.local
 [push]
 	default = simple
+	autoSetupRemote = true
 [core]
     editor = vim
     excludesfile = ~/.gitignore
@@ -61,3 +64,9 @@
     s = status
 [pull]
 	rebase = false
+[credential "https://github.com"]
+	helper =
+	helper = !/opt/homebrew/bin/gh auth git-credential
+[credential "https://gist.github.com"]
+	helper =
+	helper = !/opt/homebrew/bin/gh auth git-credential
