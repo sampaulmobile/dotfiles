@@ -9,6 +9,7 @@
 #   depth 1 = search one level deep for projects inside it
 search_dirs=(
     "$HOME/dev:1"
+    "$HOME/research:1"
     "$HOME/dotfiles:0"
 )
 # ------------------------------
@@ -24,11 +25,11 @@ else
     else
         filter_session="$current_session"
     fi
-    existing=$(tmux list-sessions -F '#{session_last_attached} #{session_name}' 2>/dev/null \
-        | sort -rn \
-        | awk '{print $2}' \
-        | grep -v '^claude-' \
-        | grep -Fxv "$filter_session")
+    existing=$(tmux list-sessions -F '#{session_last_attached} #{session_name}' 2>/dev/null |
+        sort -rn |
+        awk '{print $2}' |
+        grep -v '^claude-' |
+        grep -Fxv "$filter_session")
 
     # Project directories not yet opened as sessions
     find_args=()
@@ -51,7 +52,10 @@ else
         fi
     done
 
-    selected=$( (echo "$existing"; printf '%s' "$new_dirs") | grep -v '^$' | fzf)
+    selected=$( (
+        echo "$existing"
+        printf '%s' "$new_dirs"
+    ) | grep -v '^$' | fzf)
 fi
 
 if [[ -z $selected ]]; then
@@ -65,7 +69,7 @@ else
     selected_name=$(basename "$selected" | tr . _)
 fi
 
-if ! tmux has-session -t="$selected_name" 2> /dev/null; then
+if ! tmux has-session -t="$selected_name" 2>/dev/null; then
     tmux new-session -ds "$selected_name" -c "$selected"
 fi
 

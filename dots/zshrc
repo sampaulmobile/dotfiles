@@ -46,6 +46,12 @@ bindkey -M viins 'jj' vi-cmd-mode #map jj to exit (mimic ESC)
 # backspace and ^h working even after returning from command mode
 bindkey '^?' backward-delete-char
 bindkey '^h' backward-delete-char
+# fix multiline prompt redraw on mode switch
+function zle-keymap-select {
+  zle reset-prompt
+  zle -R
+}
+zle -N zle-keymap-select
 
 # ===== HISTORY =====
 [[ -f "$SOURCES/history" ]] && source $SOURCES/history

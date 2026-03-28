@@ -155,6 +155,23 @@ alias rmltx='latexmk -c'
 
 
 # ============ GIT =============
+# detect main branch (master, main, etc.)
+git_main_branch() {
+    local ref
+    ref=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
+    if [[ -n "$ref" ]]; then
+        echo "$ref"
+        return
+    fi
+    for branch in main master; do
+        if git show-ref -q --verify "refs/remotes/origin/$branch" 2>/dev/null; then
+            echo "$branch"
+            return
+        fi
+    done
+    echo "main"
+}
+
 alias gb='git branch -av'
 alias gbl='git branch'
 
@@ -172,12 +189,13 @@ git_checkout() {
     fi
 }
 alias gco='git_checkout'
-alias gcom='git checkout master'
+alias gcom='git checkout $(git_main_branch)'
 alias gcob='git checkout -b'
 
 git_merge() {
-    if [ "$GIT_BRANCH" != "master" ]; then
-        echo "Not on master, exiting."
+    local main=$(git_main_branch)
+    if [ "$GIT_BRANCH" != "$main" ]; then
+        echo "Not on $main, exiting."
         return 0
     fi
     local branch=$(git branch | fzf -0 | awk '{print $1}')
@@ -186,7 +204,7 @@ git_merge() {
     git push
 }
 alias gmerge='git_merge'
-alias gmm='git merge master'
+alias gmm='git merge $(git_main_branch)'
 
 alias gpull='git pull'
 alias gpush='git push'
@@ -195,7 +213,7 @@ git_push_origin() {
     git push origin ${1:-${GIT_BRANCH}}
 }
 alias gpo='git_push_origin'
-alias gitrm='git reset --hard origin/master'
+alias gitrm='git reset --hard origin/$(git_main_branch)'
 gcamp() {
     gcam $1
     gpp
@@ -209,14 +227,15 @@ function cdg() {
     cd "${topdir}/${1}"
 }
 git_clean_branches() {
-    git checkout master
+    local main=$(git_main_branch)
+    git checkout "$main"
     git pull
-    git branch --merged | egrep -v "(^\*|master)" | xargs git branch -d
+    git branch --merged | egrep -v "(^\*|$main)" | xargs git branch -d
 }
 git_undo_last_commit() {
     git reset --soft HEAD~1
 }
-alias git_reset_to_master='git reset --hard origin/master'
+alias git_reset_to_master='git reset --hard origin/$(git_main_branch)'
 
 
 # ============ GITHUB =============
