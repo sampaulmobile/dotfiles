@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+#
+# gwconvert [path]
+#
+# Converts an existing normal git clone into the bare+worktree layout.
+# Path defaults to $PWD. Must be run from OUTSIDE the target directory.
+#
+# What it does:
+#   1. Sanity checks: git repo, non-bare, has origin, no uncommitted changes
+#   2. Renames <target> to <target>.gwbak
+#   3. Bare-clones from origin into <target>/.bare/
+#   4. Creates a worktree for the default branch
+#   5. Leaves <target>.gwbak in place for you to inspect and delete manually
+
+set -euo pipefail
+
+target="${1:-$PWD}"
+
+if [[ ! -d "$target" ]]; then
+    echo "error: $target does not exist" >&2
+    exit 1
+fi
+
+# Absolutize (and fail if cd doesn't work)
+target=$(cd "$target" && pwd)
+
+if [[ ! -d "$target/.git" ]]; then
+    echo "error: $target is not a git repository (no .git/)" >&2
+    exit 1
+fi
+
+if [[ "$(git -C "$target" rev-parse --is-bare-repository 2>/dev/null)" == "true" ]]; then
+    echo "error: $target is already a bare repo" >&2
+    exit 1
+fi
+
+if ! git -C "$target" remote get-url origin >/dev/null 2>&1; then
+    echo "error: $target has no 'origin' remote — can't determine URL to re-clone" >&2
+    exit 1
+fi
+url=$(git -C "$target" remote get-url origin)
+
+# Refuse to run from inside the target — we're about to rename it
+case "$PWD/" in
+    "$target/"*|"$target/")
+        echo "error: you are currently inside $target — cd out first (try 'cd ..')" >&2
+        exit 1
+        ;;
+esac
+
+# Reject uncommitted changes (staged or unstaged). Requires HEAD to exist.
+if git -C "$target" rev-parse --verify HEAD >/dev/null 2>&1; then
+    if ! git -C "$target" diff --quiet HEAD 2>/dev/null; then
+        echo "error: $target has uncommitted changes — commit, stash, or discard first" >&2
+        exit 1
+    fi
+fi
+
+echo "About to convert:"
+echo "  target: $target"
+echo "  remote: $url"
+echo ""
+read -r -p "Proceed? Backup will be kept at <target>.gwbak. (y/n) " reply
+if [[ ! "$reply" =~ ^[Yy]$ ]]; then
+    echo "aborted"
+    exit 0
+fi
+
+parent=$(dirname "$target")
+base=$(basename "$target")
+backup="$parent/${base}.gwbak"
+
+if [[ -e "$backup" ]]; then
+    echo "error: backup location $backup already exists — move it out of the way" >&2
+    exit 1
+fi
+
+# --- Perform the conversion ---
+mv "$target" "$backup"
+mkdir -p "$target"
+
+git clone --bare "$url" "$target/.bare"
+git -C "$target/.bare" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+git -C "$target/.bare" fetch origin
+
+default_branch=$(git -C "$target/.bare" symbolic-ref --short HEAD)
+git -C "$target/.bare" worktree add "$target/$default_branch" "$default_branch"
+git -C "$target/.bare" branch \
+    --set-upstream-to="origin/$default_branch" "$default_branch" >/dev/null 2>&1 || true
+echo "created worktree: $default_branch"
+
+echo ""
+echo "Done."
+echo "  new layout: $target"
+echo "  backup:     $backup"
+echo "  use 'gwnew <branch>' to add worktrees as needed"
+echo "  (inspect the backup, then 'rm -rf $backup' when you're sure nothing's needed)"

@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+#
+# gwls
+#
+# Lists all worktrees for the current project (walks up from cwd to find .bare/).
+# A leading "*" marks worktrees that currently have an active tmux session.
+
+set -euo pipefail
+
+find_project_root() {
+    local dir="$PWD"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -d "$dir/.bare" ]]; then
+            echo "$dir"
+            return 0
+        fi
+        dir=$(dirname "$dir")
+    done
+    return 1
+}
+
+project_dir=$(find_project_root || true)
+if [[ -z "$project_dir" ]]; then
+    echo "error: not inside a worktree-layout project (no .bare/ found walking up)" >&2
+    exit 1
+fi
+
+project_name=$(basename "$project_dir")
+
+# Snapshot active tmux sessions once
+sessions=""
+if command -v tmux >/dev/null 2>&1; then
+    sessions=$(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
+fi
+
+echo "$project_name"
+
+# Iterate immediate subdirs of project root (skip .bare)
+shopt -s nullglob
+for wt in "$project_dir"/*/; do
+    wt="${wt%/}"
+    name=$(basename "$wt")
+    [[ "$name" == ".bare" ]] && continue
+
+    # The branch currently checked out in this worktree
+    branch=$(git -C "$wt" branch --show-current 2>/dev/null || echo "?")
+
+    session_name=$(echo "${project_name}_${name}" | tr . _)
+    marker=" "
+    if echo "$sessions" | grep -qx "$session_name"; then
+        marker="*"
+    fi
+
+    if [[ "$name" == "$branch" ]]; then
+        printf '  %s %s\n' "$marker" "$name"
+    else
+        printf '  %s %-30s [on %s]\n' "$marker" "$name" "$branch"
+    fi
+done

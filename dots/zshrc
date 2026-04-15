@@ -63,7 +63,7 @@ zle -N zle-keymap-select
 [[ -f "$SOURCES/other_aliases" ]] && source $SOURCES/other_aliases
 
 # ===== EXPORTS (/PATH) =====
-# [[ -f "$SOURCES/exports" ]] && source $SOURCES/exports
+export PATH="$HOME/dotfiles/bin:$PATH"
 
 # ===== FNM =====
 command -v fnm &>/dev/null && eval "$(fnm env)"

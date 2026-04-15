@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+#
+# gwnew [branch] [base]
+#
+# Creates a new worktree for <branch> inside the current project's
+# bare+worktree layout. Walks up from cwd to find a directory containing
+# a .bare/ sibling — that's the project root.
+#
+# If called with no arguments, fetches origin and presents an fzf picker
+# of remote branches that don't already have a local worktree.
+#
+# Behavior:
+#   - If <branch> exists locally, checks it out into a new worktree.
+#   - If <branch> exists only on origin, tracks it into a new worktree.
+#   - Otherwise, creates a brand new branch. The base is [base] if given,
+#     else the bare repo's HEAD (typically main/master).
+#
+# After creating, drops you into a tmux session for the new worktree
+# via tmux-sessionizer.
+
+set -euo pipefail
+
+base="${2:-}"
+
+# Walk up from cwd to find a project root (directory containing .bare/).
+find_project_root() {
+    local dir="$PWD"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -d "$dir/.bare" ]]; then
+            echo "$dir"
+            return 0
+        fi
+        dir=$(dirname "$dir")
+    done
+    return 1
+}
+
+project_dir=$(find_project_root || true)
+if [[ -z "$project_dir" ]]; then
+    echo "error: not inside a worktree-layout project (no .bare/ found walking up)" >&2
+    exit 1
+fi
+
+bare="$project_dir/.bare"
+
+# Make sure origin refs are up to date so "exists on remote" checks are accurate
+git -C "$bare" fetch origin --quiet 2>/dev/null || true
+
+# If no branch given, pick from remote branches via fzf
+if [[ -z "${1:-}" ]]; then
+    # Get existing worktree directory names
+    existing_wts=$(find "$project_dir" -mindepth 1 -maxdepth 1 -type d ! -name '.bare' -exec basename {} \;)
+
+    # List remote branches, strip origin/ prefix, exclude ones that already have a worktree
+    branch=$(git -C "$bare" branch -r --format='%(refname:short)' |
+        sed 's|^origin/||' |
+        grep -v '^HEAD$' |
+        while IFS= read -r b; do
+            echo "$existing_wts" | grep -qx "$b" || echo "$b"
+        done |
+        fzf --prompt="branch> ") || true
+
+    if [[ -z "$branch" ]]; then
+        exit 0
+    fi
+else
+    branch="$1"
+fi
+
+worktree_path="$project_dir/$branch"
+
+if [[ -e "$worktree_path" ]]; then
+    echo "error: $worktree_path already exists" >&2
+    exit 1
+fi
+
+if git -C "$bare" show-ref --verify --quiet "refs/heads/$branch"; then
+    # Local branch already exists — just check it out
+    git -C "$bare" worktree add "$worktree_path" "$branch"
+elif git -C "$bare" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+    # Remote branch exists — create a local tracking branch
+    git -C "$bare" worktree add --track -b "$branch" "$worktree_path" "origin/$branch"
+else
+    # New branch
+    if [[ -n "$base" ]]; then
+        git -C "$bare" worktree add -b "$branch" "$worktree_path" "$base"
+    else
+        git -C "$bare" worktree add -b "$branch" "$worktree_path"
+    fi
+fi
+
+echo "worktree: $worktree_path"
+
+# Hand off to sessionizer
+if command -v tmux-sessionizer >/dev/null 2>&1; then
+    exec tmux-sessionizer "$worktree_path"
+fi

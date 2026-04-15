@@ -62,6 +62,9 @@
 
     # git status
     s = status
+
+    # git worktree
+    wt = worktree
 [pull]
 	rebase = false
 [credential "https://github.com"]

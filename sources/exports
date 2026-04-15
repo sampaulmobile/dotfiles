@@ -20,6 +20,9 @@ if [ -d /usr/local/opt/google-cloud-sdk ]; then
     source /usr/local/opt/google-cloud-sdk/path.zsh.inc
 fi
 
+# dotfiles bin (gwclone, gwnew, gwrm, tmux-sessionizer, etc.)
+export PATH="$HOME/dotfiles/bin:$PATH"
+
 # export PYTHONPATH=$HOME/Development/Docurated/activity/analytics
 export TERM='xterm-256color'
 

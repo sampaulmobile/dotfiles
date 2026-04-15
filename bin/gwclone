@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+#
+# gwclone <url> [name]
+#
+# Clones a repo into the bare+worktree layout under ~/dev/:
+#
+#   ~/dev/<name>/
+#   ├── .bare/          (bare git database)
+#   └── <default-branch>/  (initial worktree)
+#
+# If [name] is omitted, it's derived from the URL (strips .git suffix).
+# After cloning, drops you into a tmux session for the initial worktree
+# via tmux-sessionizer.
+
+set -euo pipefail
+
+url="${1:-}"
+if [[ -z "$url" ]]; then
+    echo "usage: gwclone <url> [name]" >&2
+    exit 1
+fi
+
+# Derive project name
+if [[ $# -ge 2 ]]; then
+    name="$2"
+else
+    name="${url##*/}"
+    name="${name%.git}"
+fi
+
+dev_dir="$HOME/dev"
+project_dir="$dev_dir/$name"
+
+if [[ -e "$project_dir" ]]; then
+    echo "error: $project_dir already exists" >&2
+    exit 1
+fi
+
+mkdir -p "$project_dir"
+
+# Bare clone into .bare/
+git clone --bare "$url" "$project_dir/.bare"
+
+# Fix the fetch refspec so remote-tracking branches work normally.
+# A bare clone's default refspec writes remote branches directly into
+# refs/heads/*, which is wrong for our use case — we want origin/* to be
+# distinct from local branches so `gwnew feature origin/feature` works.
+git -C "$project_dir/.bare" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+git -C "$project_dir/.bare" fetch origin
+
+# Detect the default branch from the bare repo's HEAD
+default_branch=$(git -C "$project_dir/.bare" symbolic-ref --short HEAD)
+
+# Create the initial worktree for the default branch
+git -C "$project_dir/.bare" worktree add "$project_dir/$default_branch" "$default_branch"
+
+# Wire up tracking so `git pull` works inside the worktree
+git -C "$project_dir/.bare" branch \
+    --set-upstream-to="origin/$default_branch" "$default_branch" >/dev/null
+
+echo "cloned: $project_dir"
+echo "worktree: $project_dir/$default_branch"
+
+# Hand off to sessionizer — opens a tmux session for the worktree
+if command -v tmux-sessionizer >/dev/null 2>&1; then
+    exec tmux-sessionizer "$project_dir/$default_branch"
+fi

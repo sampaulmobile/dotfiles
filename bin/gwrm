@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+#
+# gwrm [branch]
+#
+# Removes the worktree for <branch> in the current project:
+#   - Kills the tmux session for the worktree (if one exists)
+#   - Runs `git worktree remove`
+#   - Prompts to delete the branch as well (safe delete only;
+#     use `git branch -D` manually if you need to force)
+#
+# If run from inside the worktree being removed, automatically switches
+# you to a sibling worktree's tmux session before removing.
+
+set -euo pipefail
+
+find_project_root() {
+    local dir="$PWD"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -d "$dir/.bare" ]]; then
+            echo "$dir"
+            return 0
+        fi
+        dir=$(dirname "$dir")
+    done
+    return 1
+}
+
+project_dir=$(find_project_root || true)
+if [[ -z "$project_dir" ]]; then
+    echo "error: not inside a worktree-layout project" >&2
+    exit 1
+fi
+
+bare="$project_dir/.bare"
+
+# If no branch given, pick from existing worktrees via fzf
+if [[ -z "${1:-}" ]]; then
+    default_branch=$(git -C "$bare" symbolic-ref --short HEAD 2>/dev/null || echo "")
+
+    # Use gh to detect merged PRs (handles squash merges correctly)
+    merged_branches=""
+    any_wt=$(find "$project_dir" -mindepth 1 -maxdepth 1 -type d ! -name '.bare' -print -quit)
+    if [[ -n "$any_wt" ]] && command -v gh >/dev/null 2>&1; then
+        merged_branches=$(cd "$any_wt" && gh pr list --state merged --limit 100 \
+            --json headRefName --jq '.[].headRefName' 2>/dev/null || true)
+    fi
+
+    branch=$(
+        for d in "$project_dir"/*/; do
+            d="${d%/}"
+            name=$(basename "$d")
+            [[ "$name" == ".bare" || "$name" == "$default_branch" ]] && continue
+            if echo "$merged_branches" | grep -qx "$name"; then
+                printf '%s  (merged)\n' "$name"
+            else
+                echo "$name"
+            fi
+        done |
+        fzf --prompt="remove> " |
+        awk '{print $1}'
+    ) || true
+    if [[ -z "$branch" ]]; then
+        exit 0
+    fi
+else
+    branch="$1"
+fi
+
+worktree_path="$project_dir/$branch"
+
+if [[ ! -d "$worktree_path" ]]; then
+    echo "error: $worktree_path does not exist" >&2
+    exit 1
+fi
+
+project_name=$(basename "$project_dir")
+session_name=$(echo "${project_name}_${branch}" | tr . _)
+inside_target=false
+
+case "$PWD/" in
+    "$worktree_path/"*)
+        inside_target=true
+        # Find a sibling worktree to land in
+        sibling=""
+        for d in "$project_dir"/*/; do
+            d="${d%/}"
+            sib_name=$(basename "$d")
+            [[ "$sib_name" == ".bare" || "$sib_name" == "$branch" ]] && continue
+            sibling="$d"
+            break
+        done
+        if [[ -z "$sibling" ]]; then
+            echo "error: no sibling worktree to switch to — can't remove the only worktree" >&2
+            exit 1
+        fi
+        # cd out so git worktree remove works
+        cd "$sibling"
+        ;;
+esac
+
+# Remove the worktree first (before killing session, since we're running inside it)
+git -C "$bare" worktree remove "$worktree_path"
+echo "removed worktree: $worktree_path"
+
+# Prompt to delete the branch (still visible to user before we switch sessions)
+read -r -p "delete branch '$branch' too? (y/n) " reply
+if [[ "$reply" =~ ^[Yy]$ ]]; then
+    if git -C "$bare" branch -d "$branch" 2>/dev/null; then
+        echo "deleted branch: $branch"
+    else
+        echo "branch not deleted (unmerged?). Use 'git -C $bare branch -D $branch' to force."
+    fi
+fi
+
+# Switch to sibling and kill old session last (so the script finishes first)
+if [[ "$inside_target" == true ]] && command -v tmux >/dev/null 2>&1 && [[ -n "$TMUX" ]]; then
+    sibling_name=$(basename "$sibling")
+    sibling_session=$(echo "${project_name}_${sibling_name}" | tr . _)
+    if ! tmux has-session -t="$sibling_session" 2>/dev/null; then
+        tmux new-session -ds "$sibling_session" -c "$sibling"
+    fi
+    tmux switch-client -t "$sibling_session"
+    # Small delay to let switch complete before killing the session we're in
+    sleep 0.1
+    tmux kill-session -t "$session_name" 2>/dev/null || true
+elif command -v tmux >/dev/null 2>&1 && tmux has-session -t="$session_name" 2>/dev/null; then
+    tmux kill-session -t "$session_name"
+    echo "killed tmux session: $session_name"
+fi

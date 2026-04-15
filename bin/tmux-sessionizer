@@ -2,6 +2,11 @@
 
 # Fuzzy find a project directory and create/switch to a tmux session for it.
 # Based on ThePrimeagen's tmux-sessionizer.
+#
+# Worktree support: if a project directory contains a .bare/ subdir (the
+# bare+worktree layout — see bin/gwclone), its immediate worktree subdirs
+# are enumerated as separate entries. Session names become "<project>_<branch>"
+# so two projects with the same branch name don't collide.
 
 # ---- Project directories ----
 # Add entries as "path:depth"
@@ -13,6 +18,21 @@ search_dirs=(
     "$HOME/dotfiles:0"
 )
 # ------------------------------
+
+# Compute the tmux session name for a given project/worktree path.
+# - For a worktree (parent contains .bare/), uses "<project>_<branch>".
+# - Otherwise, uses basename of the path.
+# Dots are translated to underscores (tmux session names don't love dots).
+session_name_for() {
+    local path="$1"
+    local parent
+    parent=$(dirname "$path")
+    if [[ -d "$parent/.bare" ]]; then
+        printf '%s_%s' "$(basename "$parent")" "$(basename "$path")" | tr . _
+    else
+        basename "$path" | tr . _
+    fi
+}
 
 if [[ $# -eq 1 ]]; then
     selected=$1
@@ -32,21 +52,32 @@ else
         grep -Fxv "$filter_session")
 
     # Project directories not yet opened as sessions
-    find_args=()
+    candidates=()
     for entry in "${search_dirs[@]}"; do
         dir="${entry%%:*}"
         depth="${entry##*:}"
         if [[ $depth -eq 0 ]]; then
-            find_args+=("$dir")
+            raw=("$dir")
         else
-            find_args+=($(find "$dir" -mindepth 1 -maxdepth "$depth" -type d))
+            raw=($(find "$dir" -mindepth 1 -maxdepth "$depth" -type d))
         fi
+        # For each raw candidate, expand worktree-layout projects into their
+        # individual worktrees. Non-worktree dirs pass through as-is.
+        for cand in "${raw[@]}"; do
+            if [[ -d "$cand/.bare" ]]; then
+                while IFS= read -r wt; do
+                    [[ -n "$wt" ]] && candidates+=("$wt")
+                done < <(find "$cand" -mindepth 1 -maxdepth 1 -type d ! -name '.bare')
+            else
+                candidates+=("$cand")
+            fi
+        done
     done
 
     # Filter out dirs that already have a session
     new_dirs=""
-    for dir in "${find_args[@]}"; do
-        name=$(basename "$dir" | tr . _)
+    for dir in "${candidates[@]}"; do
+        name=$(session_name_for "$dir")
         if ! echo "$existing" | grep -qx "$name"; then
             new_dirs+="$dir"$'\n'
         fi
@@ -66,7 +97,7 @@ fi
 if tmux has-session -t="$selected" 2>/dev/null; then
     selected_name="$selected"
 else
-    selected_name=$(basename "$selected" | tr . _)
+    selected_name=$(session_name_for "$selected")
 fi
 
 if ! tmux has-session -t="$selected_name" 2>/dev/null; then
