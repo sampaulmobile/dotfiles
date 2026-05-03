@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+
+# Shared library for claude session manager scripts.
+# Source this file, don't execute it directly.
+
+CLAUDE_SESSIONS_DIR="$HOME/.claude/sessions"
+CLAUDE_PROJECTS_DIR="$HOME/.claude/projects"
+
+# get_claude_sessions
+#   Prints all claude-* tmux session names, one per line.
+get_claude_sessions() {
+    tmux list-sessions -F '#{session_activity} #{session_name}' 2>/dev/null \
+        | grep ' claude-' \
+        | sort -rn \
+        | awk '{print $2}'
+}
+
+# get_session_status <tmux-session-name>
+#   Prints: working | idle | permission | unknown
+#   Detects state by inspecting the last lines of the tmux pane.
+get_session_status() {
+    local session="$1"
+    local content
+    content=$(tmux capture-pane -t "${session}:1" -p -S -30 2>/dev/null | grep -v '^$' | tail -10)
+
+    if [[ -z "$content" ]]; then
+        echo "unknown"
+        return
+    fi
+
+    # Working: claude is actively streaming output
+    if echo "$content" | grep -q "to interrupt"; then
+        echo "working"
+        return
+    fi
+
+    # Permission: Yes/No selector visible (must check before idle — ❯ appears in both)
+    if echo "$content" | grep -q "Yes" && echo "$content" | grep -q "No"; then
+        echo "permission"
+        return
+    fi
+
+    # Idle: the ❯ input prompt is visible, claude is done
+    if echo "$content" | grep -q "❯"; then
+        echo "idle"
+        return
+    fi
+
+    echo "unknown"
+}
+
+# get_pane_cwd <tmux-session-name>
+#   Prints the working directory of the claude pane (window 1).
+get_pane_cwd() {
+    local session="$1"
+    tmux list-panes -t "${session}:1" -F '#{pane_current_path}' 2>/dev/null | head -1
+}
+
+# encode_cwd <path>
+#   Encodes a path for the claude projects directory.
+#   /Users/sampaul/dev/foo -> -Users-sampaul-dev-foo
+encode_cwd() {
+    echo "$1" | sed 's|/|-|g'
+}
+
+# build_cwd_session_map
+#   Builds a temp file mapping CWD -> sessionId (one per line, tab-separated).
+#   Call once, then use find_session_jsonl which looks up from the cache.
+_CWD_MAP_FILE=""
+build_cwd_session_map() {
+    _CWD_MAP_FILE=$(mktemp /tmp/claude-cwd-map.XXXXXX)
+    jq -r '[.cwd, .sessionId] | @tsv' "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null > "$_CWD_MAP_FILE"
+}
+
+# find_session_jsonl <tmux-session-name>
+#   Prints the path to the active JSONL transcript file, or empty string.
+#   Uses CWD map file (call build_cwd_session_map first).
+find_session_jsonl() {
+    local session="$1"
+    local cwd
+    cwd=$(get_pane_cwd "$session")
+    [[ -z "$cwd" ]] && return
+
+    local session_id=""
+    if [[ -n "$_CWD_MAP_FILE" && -f "$_CWD_MAP_FILE" ]]; then
+        session_id=$(awk -F'\t' -v cwd="$cwd" '$1 == cwd { print $2; exit }' "$_CWD_MAP_FILE")
+    else
+        session_id=$(jq -r --arg cwd "$cwd" 'select(.cwd == $cwd) | .sessionId' "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null | head -1)
+    fi
+    [[ -z "$session_id" ]] && return
+
+    local encoded
+    encoded=$(encode_cwd "$cwd")
+    local jsonl="${CLAUDE_PROJECTS_DIR}/${encoded}/${session_id}.jsonl"
+    [[ -f "$jsonl" ]] && echo "$jsonl"
+}
+
+# get_context_and_model <jsonl-path>
+#   Fast path: reads only the tail of the file.
+#   Prints tab-separated: context_size model
+get_context_and_model() {
+    local jsonl="$1"
+    [[ ! -f "$jsonl" ]] && printf '0\tunknown' && return
+
+    tail -50 "$jsonl" | jq -rs '
+        [.[] | select(.type == "assistant" and .message.usage)] |
+        if length == 0 then
+            [0, "unknown"]
+        else
+            (last | .message.usage) as $last |
+            (last | .message.model // "unknown") as $model |
+            (($last.input_tokens // 0) + ($last.cache_read_input_tokens // 0) + ($last.cache_creation_input_tokens // 0)) as $context |
+            [$context, $model]
+        end | @tsv
+    ' 2>/dev/null || printf '0\tunknown'
+}
+
+# get_totals_incremental <jsonl-path> <cache-file>
+#   Incremental path: parses only new bytes since last call.
+#   Cache file stores: total_output\ttotal_all\tbyte_offset
+#   Prints tab-separated: total_output total_all
+get_totals_incremental() {
+    local jsonl="$1"
+    local cache="$2"
+    [[ ! -f "$jsonl" ]] && printf '0\t0' && return
+
+    local file_size
+    file_size=$(wc -c < "$jsonl" 2>/dev/null)
+
+    local cached_out=0 cached_all=0 cached_offset=0
+    if [[ -f "$cache" ]]; then
+        IFS=$'\t' read -r cached_out cached_all cached_offset < "$cache"
+        # if file shrunk (new session / cleared), reset
+        if (( file_size < cached_offset )); then
+            cached_out=0; cached_all=0; cached_offset=0
+        fi
+    fi
+
+    if (( file_size == cached_offset )); then
+        # no new data
+        printf '%s\t%s' "$cached_out" "$cached_all"
+        return
+    fi
+
+    # parse only the new bytes
+    local delta_out=0 delta_all=0
+    local delta
+    delta=$(tail -c +"$(( cached_offset + 1 ))" "$jsonl" | jq -rs '
+        [.[] | select(.type == "assistant" and .message.usage)] |
+        if length == 0 then
+            [0, 0]
+        else
+            (map(.message.usage.output_tokens // 0) | add) as $d_out |
+            (map(
+                (.message.usage.input_tokens // 0) +
+                (.message.usage.cache_read_input_tokens // 0) +
+                (.message.usage.cache_creation_input_tokens // 0) +
+                (.message.usage.output_tokens // 0)
+            ) | add) as $d_all |
+            [$d_out, $d_all]
+        end | @tsv
+    ' 2>/dev/null)
+
+    if [[ -n "$delta" ]]; then
+        IFS=$'\t' read -r delta_out delta_all <<< "$delta"
+    fi
+
+    local new_out=$(( cached_out + delta_out ))
+    local new_all=$(( cached_all + delta_all ))
+
+    # save updated cache
+    printf '%s\t%s\t%s' "$new_out" "$new_all" "$file_size" > "$cache"
+    printf '%s\t%s' "$new_out" "$new_all"
+}
+
+# format_tokens <number>
+#   Pretty-prints token counts: 1234567 -> 1.2M, 12345 -> 12.3k, 999 -> 999
+format_tokens() {
+    local n="$1"
+    if (( n >= 1000000 )); then
+        printf "%.1fM" "$(echo "scale=1; $n / 1000000" | bc)"
+    elif (( n >= 1000 )); then
+        printf "%.1fk" "$(echo "scale=1; $n / 1000" | bc)"
+    else
+        echo "$n"
+    fi
+}
+
+# short_model <model-string>
+#   Shortens model names: claude-opus-4-6 -> opus-4-6, claude-sonnet-4-6 -> sonnet-4-6
+short_model() {
+    echo "$1" | sed 's/^claude-//'
+}

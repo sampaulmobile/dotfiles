@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+# Print permission-needed count for tmux status bar.
+# Called by tmux every status-interval (~5s). Must be fast.
+# Output: "🔴 N " if N>0 sessions need permission, else empty string.
+count=0
+while IFS= read -r session; do
+    content=$(tmux capture-pane -t "${session}:1" -p -S -30 2>/dev/null | grep -v '^$' | tail -10)
+    [[ -z "$content" ]] && continue
+
+    # Skip if working
+    echo "$content" | grep -q "to interrupt" && continue
+
+    # Count permission prompts (Yes + No visible)
+    if echo "$content" | grep -q "Yes" && echo "$content" | grep -q "No"; then
+        (( count++ ))
+    fi
+done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^claude-')
+
+if (( count > 0 )); then
+    printf '🔴 %d ' "$count"
+fi

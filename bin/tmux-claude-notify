@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+
+# Claude Code notification hook.
+# Triggered when Claude needs permission or finishes a task.
+# Receives JSON on stdin with session_id, cwd, notification_type, etc.
+# Sends terminal bell (Ghostty dock bounce) and macOS notification.
+
+# Read hook input from stdin
+input=$(cat)
+notification_type=$(echo "$input" | jq -r '.notification_type // "unknown"' 2>/dev/null)
+cwd=$(echo "$input" | jq -r '.cwd // ""' 2>/dev/null)
+project=$(basename "$cwd")
+
+case "$notification_type" in
+    permission_prompt) message="$project needs permission" ;;
+    idle_prompt)       message="$project is waiting for input" ;;
+    *)                 message="$project needs attention" ;;
+esac
+
+# Terminal bell — Ghostty will bounce dock icon and show 🔔 badge
+printf '\a' > /dev/tty 2>/dev/null || true
+
+# macOS notification center
+if command -v osascript >/dev/null 2>&1; then
+    osascript -e "display notification \"${message}\" with title \"Claude Code\"" 2>/dev/null &
+fi

@@ -1,0 +1,316 @@
+#!/usr/bin/env bash
+
+# Interactive dashboard for Claude Code tmux sessions.
+# Shows status, token usage, and model for all claude-* sessions.
+# Bound to Ctrl+G via tmux neww.
+
+source ~/dotfiles/bin/tmux-claude-lib
+
+CACHE_DIR="/tmp/claude-dashboard"
+mkdir -p "$CACHE_DIR"
+
+# ── colors ──────────────────────────────────────────────
+
+RST=$'\033[0m'
+BOLD=$'\033[1m'
+DIM=$'\033[2m'
+CYAN=$'\033[36m'
+YELLOW=$'\033[33m'
+RED=$'\033[31m'
+BOLD_RED=$'\033[1;31m'
+DIM_GREEN=$'\033[2;32m'
+
+# ── helpers ─────────────────────────────────────────────
+
+get_session_stats() {
+    local session="$1"
+    local jsonl
+    jsonl=$(find_session_jsonl "$session")
+
+    if [[ -z "$jsonl" ]]; then
+        printf '0\t0\t0\tunknown'
+        return
+    fi
+
+    # fast: context + model from tail of file
+    local ctx_model
+    ctx_model=$(get_context_and_model "$jsonl")
+    local ctx mdl
+    IFS=$'\t' read -r ctx mdl <<< "$ctx_model"
+
+    # incremental: totals from cache + delta
+    local totals_cache="${CACHE_DIR}/${session}.totals"
+    local totals
+    totals=$(get_totals_incremental "$jsonl" "$totals_cache")
+    local tout tall
+    IFS=$'\t' read -r tout tall <<< "$totals"
+
+    printf '%s\t%s\t%s\t%s' "$ctx" "$tout" "$tall" "$mdl"
+}
+
+# ── render ──────────────────────────────────────────────
+
+render() {
+    local cols
+    cols=$(tmux display-message -p '#{pane_width}' 2>/dev/null || tput cols 2>/dev/null || echo 80)
+
+    # find longest session name
+    local max_name=7
+    for n in "${names[@]}"; do
+        (( ${#n} > max_name )) && max_name=${#n}
+    done
+
+    local min_name=12
+    local ctx_w=9 out_w=9 all_w=9 mdl_w=12
+
+    # row_width computes exact visible chars for a given configuration
+    # row = marker(2) + name_w + status(15) + ctx(9) [+ 1+out] [+ 1+all] [+ 2+mdl]
+    row_width() {
+        local nw=$1 o=$2 t=$3 m=$4
+        local w=$(( 2 + nw + 15 + ctx_w ))
+        (( o )) && w=$(( w + 1 + out_w ))
+        (( t )) && w=$(( w + 1 + all_w ))
+        (( m )) && w=$(( w + 2 + mdl_w ))
+        echo $w
+    }
+
+    # try each layout: prefer full names, drop columns before truncating
+    local show_model=0 show_output=0 show_total=0 name_w=$max_name
+
+    if (( $(row_width $max_name 1 1 1) <= cols )); then
+        show_output=1; show_total=1; show_model=1; name_w=$max_name
+    elif (( $(row_width $max_name 1 1 0) <= cols )); then
+        show_output=1; show_total=1; name_w=$max_name
+    elif (( $(row_width $max_name 1 0 0) <= cols )); then
+        show_output=1; name_w=$max_name
+    elif (( $(row_width $max_name 0 0 0) <= cols )); then
+        name_w=$max_name
+    else
+        # must truncate — try adding columns back with truncated names
+        if (( $(row_width $min_name 1 1 1) <= cols )); then
+            show_output=1; show_total=1; show_model=1
+        elif (( $(row_width $min_name 1 1 0) <= cols )); then
+            show_output=1; show_total=1
+        elif (( $(row_width $min_name 1 0 0) <= cols )); then
+            show_output=1
+        fi
+        # name gets whatever is left
+        name_w=$(( cols - 2 - 15 - ctx_w ))
+        (( show_output )) && name_w=$(( name_w - 1 - out_w ))
+        (( show_total ))  && name_w=$(( name_w - 1 - all_w ))
+        (( show_model ))  && name_w=$(( name_w - 2 - mdl_w ))
+        (( name_w < min_name )) && name_w=$min_name
+    fi
+
+    # if there's spare space, add a gap between name and status (up to 3)
+    local spare=$(( cols - $(row_width $name_w $show_output $show_total $show_model) ))
+    local name_gap=0
+    (( spare > 0 )) && name_gap=$spare
+    (( name_gap > 3 )) && name_gap=3
+
+    local out=""
+
+    # header
+    local rhs="[q · r]"
+    (( cols >= 80 )) && rhs="[q quit · r refresh]"
+    local title="  Claude Sessions"
+    local pad=$(( cols - ${#title} - ${#rhs} ))
+    (( pad < 1 )) && pad=1
+    out+="${BOLD}${title}${RST}$(printf '%*s' "$pad" '')${DIM}${rhs}${RST}"$'\n'
+    out+="  $(printf '─%.0s' $(seq 1 $(( cols - 4 ))))"$'\n'
+
+    # column headers
+    local hdr
+    local hdr_name_w=$(( name_w + name_gap ))
+    hdr=$(printf "%-${hdr_name_w}s %-13s %${ctx_w}s" "SESSION" "STATUS" "CONTEXT")
+    (( show_output )) && hdr+=$(printf " %${out_w}s" "OUTPUT")
+    (( show_total ))  && hdr+=$(printf " %${all_w}s" "TOTAL")
+    (( show_model ))  && hdr+=$(printf "  %-${mdl_w}s" "MODEL")
+    out+="  ${DIM}${hdr}${RST}"$'\n'
+
+    # rows
+    for i in "${!sessions[@]}"; do
+        local name="${names[$i]}"
+        if (( ${#name} > name_w )); then
+            name="${name:0:$(( name_w - 1 ))}…"
+        fi
+
+        local st="${statuses[$i]}"
+        local ctx="${contexts[$i]}"
+        local out_tok="${outputs[$i]}"
+        local all_tok="${total_alls[$i]}"
+        local mdl="${models[$i]}"
+
+        # marker + name
+        if (( i == selected )); then
+            out+="${CYAN}▸ ${RST}${BOLD}"
+        else
+            out+="  "
+        fi
+        out+="${name}$(printf '%*s' "$(( name_w - ${#name} + name_gap ))" '')"
+        (( i == selected )) && out+="${RST}"
+
+        # status — padded to exactly 15 visible columns
+        # ⏳ is Wide (2 cols), ⚙ and ● are Narrow (1 col)
+        case "$st" in
+            working)    out+="${YELLOW}⚙ working${RST}      " ;;
+            idle)       out+="${DIM_GREEN}● idle${RST}         " ;;
+            permission) out+="${BOLD_RED}⏳ permission${RST}  " ;;
+            loading)    out+="${DIM}… loading${RST}     " ;;
+            *)          out+="${DIM}? unknown${RST}      " ;;
+        esac
+
+        # context column — color coded by size
+        local ctx_raw="$ctx"
+        local ctx_fmt
+        ctx_fmt=$(format_tokens "$ctx_raw")
+        local ctx_color=""
+        if (( ctx_raw >= 600000 )); then
+            ctx_color="${BOLD_RED}"
+        elif (( ctx_raw >= 300000 )); then
+            ctx_color="${RED}"
+        elif (( ctx_raw >= 100000 )); then
+            ctx_color="${YELLOW}"
+        fi
+
+        out+="${ctx_color}$(printf "%${ctx_w}s" "$ctx_fmt")${RST}"
+        (( show_output )) && out+="$(printf " %${out_w}s" "$out_tok")"
+        (( show_total ))  && out+="$(printf " %${all_w}s" "$all_tok")"
+        (( show_model ))  && out+="  ${DIM}${mdl}${RST}"
+        out+=$'\n'
+    done
+
+    out+=$'\n'
+    out+="${DIM}  j/k navigate · r refresh · q quit${RST}"
+
+    printf '\033[H\033[2J%s' "$out"
+}
+
+# ── data collection ─────────────────────────────────────
+
+load_data() {
+    names=()
+    statuses=()
+    contexts=()
+    outputs=()
+    total_alls=()
+    models=()
+
+    # show names immediately with placeholders
+    for sess in "${sessions[@]}"; do
+        names+=("${sess#claude-}")
+        statuses+=("loading")
+        contexts+=("0")
+        outputs+=("—")
+        total_alls+=("—")
+        models+=("")
+    done
+    render
+
+    # batch CWD→sessionId map once
+    build_cwd_session_map
+
+    # collect all data in parallel — each session writes to a temp file
+    local parallel_dir="${CACHE_DIR}/parallel.$$"
+    mkdir -p "$parallel_dir"
+
+    for i in "${!sessions[@]}"; do
+        (
+            sess="${sessions[$i]}"
+            st=$(get_session_status "$sess")
+            stats=$(get_session_stats "$sess")
+            printf '%s\t%s' "$st" "$stats" > "${parallel_dir}/${i}"
+        ) &
+    done
+    wait
+
+    # read results and populate arrays
+    for i in "${!sessions[@]}"; do
+        local result_file="${parallel_dir}/${i}"
+        if [[ -f "$result_file" ]]; then
+            local st ctx tout tall mdl
+            IFS=$'\t' read -r st ctx tout tall mdl < "$result_file"
+            statuses[$i]="$st"
+            contexts[$i]="$ctx"
+            outputs[$i]=$(format_tokens "$tout")
+            total_alls[$i]=$(format_tokens "$tall")
+            models[$i]=$(short_model "$mdl")
+        fi
+    done
+
+    rm -rf "$parallel_dir"
+    render
+}
+
+# ── main loop ───────────────────────────────────────────
+
+tput civis 2>/dev/null
+trap 'tput cnorm 2>/dev/null; rm -f "$_CWD_MAP_FILE" 2>/dev/null' EXIT
+
+selected=0
+sessions=()
+names=()
+statuses=()
+contexts=()
+outputs=()
+total_alls=()
+models=()
+
+# initial load
+sessions=()
+while IFS= read -r s; do
+    sessions+=("$s")
+done < <(get_claude_sessions)
+session_count=${#sessions[@]}
+
+if (( session_count == 0 )); then
+    printf '\033[H\033[2J'
+    printf "${DIM}  No claude sessions running.${RST}\n"
+    read -rsn1 key
+    exit 0
+fi
+
+load_data
+
+# input loop — no auto-refresh, just respond to keys
+while true; do
+    key=""
+    read -rsn1 key || true
+
+    if [[ "$key" == $'\x1b' ]]; then
+        read -rsn2 -t 0.1 seq || true
+        case "$seq" in
+            '[A') key="UP" ;;
+            '[B') key="DOWN" ;;
+            *)    key="ESC" ;;
+        esac
+    fi
+
+    case "$key" in
+        j|DOWN)
+            (( selected++ ))
+            (( selected >= session_count )) && selected=$(( session_count - 1 ))
+            render
+            ;;
+        k|UP)
+            (( selected-- ))
+            (( selected < 0 )) && selected=0
+            render
+            ;;
+        r)
+            # refresh: re-collect sessions and data
+            sessions=()
+            while IFS= read -r s; do
+                sessions+=("$s")
+            done < <(get_claude_sessions)
+            session_count=${#sessions[@]}
+            (( selected >= session_count )) && selected=$(( session_count - 1 ))
+            # clear totals cache to force full re-parse
+            rm -f "${CACHE_DIR}"/*.totals 2>/dev/null
+            load_data
+            ;;
+        q|ESC)
+            exit 0
+            ;;
+    esac
+done

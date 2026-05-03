@@ -25,12 +25,17 @@ Personal dotfiles for macOS (Apple Silicon). Managed with symlinks, no fancy fra
 
 - `Ctrl+F` — sessionizer (fuzzy find project, create/switch tmux session)
 - `Ctrl+Space` — toggle floating Claude Code popup (per-project session)
+- `Ctrl+G` — claude session dashboard (status, tokens, model for all claude sessions)
 - `F12` — toggle keys off (for nested tmux over SSH)
 
 ## Tmux Scripts
 
 - `bin/tmux-sessionizer` — fuzzy finds projects in `~/dev` (depth 1) and `~/dotfiles` (depth 0). For worktree-layout repos (those with `.bare/`), enumerates each worktree as a separate entry. Sessions named `<project>_<branch>` for worktrees, `<basename>` for regular repos (dots → underscores).
 - `bin/tmux-claude-popup` — toggles a floating 80x80 popup with Claude Code. Creates `claude-<session>` sessions. Ctrl+Space inside popup closes it.
+- `bin/tmux-claude-dashboard` — interactive dashboard showing all claude sessions with status (working/idle/permission), token usage (context/output/total), and model. j/k to navigate, r to refresh, q to quit. Responsive columns adapt to terminal width.
+- `bin/tmux-claude-statusbar` — prints permission-needed count for the tmux status bar. Shows `🔴 N` when N sessions need permission.
+- `bin/tmux-claude-notify` — notification hook for Claude Code. Sends terminal bell + macOS notification on permission prompts. Configured in `~/.claude/settings.json`.
+- `bin/tmux-claude-lib` — shared functions sourced by the claude session manager scripts.
 
 ## Git Worktree Layout
 
