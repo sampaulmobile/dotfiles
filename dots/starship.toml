@@ -12,6 +12,10 @@ success_symbol = '[➜](bold green)' # The 'success_symbol' segment is being set
 # symbol = '👾 '
 # pyenv_version_name = true
 
+[directory]
+truncate_to_repo = false
+truncation_length = 2
+
 [docker_context]
 disabled = true
 

@@ -8,6 +8,10 @@
 # are enumerated as separate entries. Session names become "<project>_<branch>"
 # so two projects with the same branch name don't collide.
 
+# ---- Options ----
+SHOW_PERMISSION_INDICATORS=true
+# -----------------
+
 # ---- Project directories ----
 # Add entries as "path:depth"
 #   depth 0 = the directory itself is a project
@@ -74,6 +78,36 @@ else
         done
     done
 
+    # Annotate existing sessions with permission indicators
+    if [[ "$SHOW_PERMISSION_INDICATORS" == true ]]; then
+        _perm_dir=$(mktemp -d /tmp/sessionizer-perm.XXXXXX)
+        while IFS= read -r _cs; do
+            (
+                _content=$(tmux capture-pane -t "${_cs}:1" -p -S -30 2>/dev/null | grep -v '^$' | tail -10)
+                [[ -z "$_content" ]] && exit
+                echo "$_content" | grep -q "to interrupt" && exit
+                if echo "$_content" | grep -q "Yes" && echo "$_content" | grep -q "No"; then
+                    echo "${_cs#claude-}" > "${_perm_dir}/${_cs}"
+                fi
+            ) &
+        done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^claude-')
+        wait
+        _perm_sessions=$(cat "${_perm_dir}"/* 2>/dev/null)
+        rm -rf "$_perm_dir"
+
+        annotated=""
+        while IFS= read -r _sess; do
+            [[ -z "$_sess" ]] && continue
+            if echo "$_perm_sessions" | grep -qx "$_sess"; then
+                annotated+="${_sess} 🔴"$'\n'
+            else
+                annotated+="${_sess}"$'\n'
+            fi
+        done <<< "$existing"
+    else
+        annotated="$existing"$'\n'
+    fi
+
     # Filter out dirs that already have a session
     new_dirs=""
     for dir in "${candidates[@]}"; do
@@ -84,9 +118,12 @@ else
     done
 
     selected=$( (
-        echo "$existing"
+        printf '%s' "$annotated"
         printf '%s' "$new_dirs"
     ) | grep -v '^$' | fzf)
+
+    # Strip permission indicator from selection
+    [[ "$SHOW_PERMISSION_INDICATORS" == true ]] && selected="${selected% 🔴}"
 fi
 
 if [[ -z $selected ]]; then
