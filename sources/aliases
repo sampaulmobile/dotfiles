@@ -230,7 +230,7 @@ git_clean_branches() {
     local main=$(git_main_branch)
     git checkout "$main"
     git pull
-    git branch --merged | egrep -v "(^\*|$main)" | xargs git branch -d
+    git branch --merged | egrep -v "(^\*|^\+|$main)" | xargs git branch -d
 }
 git_undo_last_commit() {
     git reset --soft HEAD~1
