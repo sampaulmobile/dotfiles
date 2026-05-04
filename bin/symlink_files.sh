@@ -40,6 +40,13 @@ else
     link $dir/zshrc ~/.zshrc
 fi
 
+# ===== claude code =====
+mkdir -p ~/.claude/skills
+link $dir/claude/settings.json ~/.claude/settings.json
+for skill in $dir/claude/skills/*/; do
+    link "$skill" ~/.claude/skills/$(basename "$skill")
+done
+
 # ===== starship =====
 mkdir -p ~/.config
 link $dir/starship.toml ~/.config/starship.toml
