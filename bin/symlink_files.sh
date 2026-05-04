@@ -41,10 +41,13 @@ else
 fi
 
 # ===== claude code =====
-mkdir -p ~/.claude/skills
+mkdir -p ~/.claude/skills ~/.claude/rules
 link $dir/claude/settings.json ~/.claude/settings.json
 for skill in $dir/claude/skills/*/; do
     link "$skill" ~/.claude/skills/$(basename "$skill")
+done
+for rule in $dir/claude/rules/*.md; do
+    link "$rule" ~/.claude/rules/$(basename "$rule")
 done
 
 # ===== starship =====
