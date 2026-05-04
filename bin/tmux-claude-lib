@@ -74,25 +74,43 @@ build_cwd_session_map() {
 
 # find_session_jsonl <tmux-session-name>
 #   Prints the path to the active JSONL transcript file, or empty string.
-#   Uses CWD map file (call build_cwd_session_map first).
+#   Falls back to the most recently modified JSONL in the project dir
+#   (handles /clear creating a new session ID without updating the session JSON).
 find_session_jsonl() {
     local session="$1"
     local cwd
     cwd=$(get_pane_cwd "$session")
     [[ -z "$cwd" ]] && return
 
+    local encoded
+    encoded=$(encode_cwd "$cwd")
+    local project_dir="${CLAUDE_PROJECTS_DIR}/${encoded}"
+    [[ ! -d "$project_dir" ]] && return
+
+    # try session JSON lookup first
     local session_id=""
     if [[ -n "$_CWD_MAP_FILE" && -f "$_CWD_MAP_FILE" ]]; then
         session_id=$(awk -F'\t' -v cwd="$cwd" '$1 == cwd { print $2; exit }' "$_CWD_MAP_FILE")
     else
         session_id=$(jq -r --arg cwd "$cwd" 'select(.cwd == $cwd) | .sessionId' "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null | head -1)
     fi
-    [[ -z "$session_id" ]] && return
 
-    local encoded
-    encoded=$(encode_cwd "$cwd")
-    local jsonl="${CLAUDE_PROJECTS_DIR}/${encoded}/${session_id}.jsonl"
-    [[ -f "$jsonl" ]] && echo "$jsonl"
+    local jsonl="${project_dir}/${session_id}.jsonl"
+    if [[ -n "$session_id" && -f "$jsonl" ]]; then
+        # verify this is the most recent JSONL (not stale after /clear)
+        local newest
+        newest=$(ls -t "${project_dir}"/*.jsonl 2>/dev/null | head -1)
+        if [[ -n "$newest" && "$newest" != "$jsonl" ]]; then
+            # a newer JSONL exists — /clear likely created a new session
+            echo "$newest"
+            return
+        fi
+        echo "$jsonl"
+        return
+    fi
+
+    # fallback: most recently modified JSONL in the project dir
+    ls -t "${project_dir}"/*.jsonl 2>/dev/null | head -1
 }
 
 # get_context_and_model <jsonl-path>

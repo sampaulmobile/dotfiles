@@ -38,8 +38,10 @@ get_session_stats() {
     local ctx mdl
     IFS=$'\t' read -r ctx mdl <<< "$ctx_model"
 
-    # incremental: totals from cache + delta
-    local totals_cache="${CACHE_DIR}/${session}.totals"
+    # incremental: totals from cache + delta (keyed by jsonl path for /clear safety)
+    local jsonl_hash
+    jsonl_hash=$(echo "$jsonl" | md5 -q 2>/dev/null || echo "$jsonl" | md5sum 2>/dev/null | cut -d' ' -f1)
+    local totals_cache="${CACHE_DIR}/${session}.${jsonl_hash}.totals"
     local totals
     totals=$(get_totals_incremental "$jsonl" "$totals_cache")
     local tout tall
@@ -111,8 +113,8 @@ render() {
     local out=""
 
     # header
-    local rhs="[q · r]"
-    (( cols >= 80 )) && rhs="[q quit · r refresh]"
+    local rhs="[q · r · R]"
+    (( cols >= 80 )) && rhs="[q quit · r refresh · R hard refresh]"
     local title="  Claude Sessions"
     local pad=$(( cols - ${#title} - ${#rhs} ))
     (( pad < 1 )) && pad=1
@@ -181,7 +183,7 @@ render() {
     done
 
     out+=$'\n'
-    out+="${DIM}  j/k navigate · r refresh · q quit${RST}"
+    out+="${DIM}  j/k navigate · r refresh · R hard refresh · q quit${RST}"
 
     printf '\033[H\033[2J%s' "$out"
 }
@@ -298,14 +300,23 @@ while true; do
             render
             ;;
         r)
-            # refresh: re-collect sessions and data
+            # soft refresh: re-collect sessions, use cached totals
             sessions=()
             while IFS= read -r s; do
                 sessions+=("$s")
             done < <(get_claude_sessions)
             session_count=${#sessions[@]}
             (( selected >= session_count )) && selected=$(( session_count - 1 ))
-            # clear totals cache to force full re-parse
+            load_data
+            ;;
+        R)
+            # hard refresh: re-collect sessions, clear totals cache
+            sessions=()
+            while IFS= read -r s; do
+                sessions+=("$s")
+            done < <(get_claude_sessions)
+            session_count=${#sessions[@]}
+            (( selected >= session_count )) && selected=$(( session_count - 1 ))
             rm -f "${CACHE_DIR}"/*.totals 2>/dev/null
             load_data
             ;;
