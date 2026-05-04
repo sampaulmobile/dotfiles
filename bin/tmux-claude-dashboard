@@ -153,8 +153,8 @@ render() {
     local out=""
 
     # header
-    local rhs="[q · r · R · x]"
-    (( cols >= 80 )) && rhs="[q quit · r refresh · R hard · x kill]"
+    local rhs="[⏎ · x · X · r · q]"
+    (( cols >= 80 )) && rhs="[⏎ switch · x kill · X prune · r refresh · q quit]"
     local title="  Claude Sessions"
     local pad=$(( cols - ${#title} - ${#rhs} ))
     (( pad < 1 )) && pad=1
@@ -224,7 +224,7 @@ render() {
     done
 
     out+=$'\n'
-    out+="${DIM}  j/k navigate · x kill · r refresh · R hard refresh · q quit${RST}"
+    out+="${DIM}  j/k navigate · ⏎ switch · x kill · X prune · r refresh · R hard · q quit${RST}"
 
     printf '\033[H\033[2J%s' "$out"
 }
@@ -356,11 +356,40 @@ while true; do
             fi
             load_data
             ;;
+        X)
+            # kill all gone sessions
+            _killed=0
+            for i in "${!sessions[@]}"; do
+                if [[ "${statuses[$i]}" == "gone" ]]; then
+                    tmux kill-session -t "=${sessions[$i]}" 2>/dev/null && (( _killed++ ))
+                fi
+            done
+            if (( _killed > 0 )); then
+                reload_sessions
+                if (( session_count == 0 )); then
+                    printf '\033[H\033[2J'
+                    printf "${DIM}  No claude sessions running.${RST}\n"
+                    read -rsn1
+                    exit 0
+                fi
+                load_data
+            fi
+            ;;
         R)
             # hard refresh: re-collect sessions, clear totals cache
             reload_sessions
             rm -f "${CACHE_DIR}"/*.totals 2>/dev/null
             load_data
+            ;;
+        ""|Enter)
+            # switch to selected session
+            if (( session_count > 0 )); then
+                _target="${sessions[$selected]}"
+                if [[ -n "$_target" ]]; then
+                    tmux switch-client -t "=${_target}:1"
+                    exit 0
+                fi
+            fi
             ;;
         q|ESC)
             exit 0
