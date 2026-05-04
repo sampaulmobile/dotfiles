@@ -1,0 +1,44 @@
+{
+  "alwaysThinkingEnabled": true,
+  "effortLevel": "medium",
+  "permissions": {
+    "allow": [
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(stat:*)",
+      "Bash(file:*)",
+      "Bash(which:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git branch:*)",
+      "Bash(git show:*)",
+      "Bash(git blame:*)",
+      "Bash(git worktree list:*)",
+      "Bash(gh pr:*)",
+      "Bash(gh api:*)",
+      "Bash(jq:*)",
+      "WebSearch"
+    ]
+  },
+  "hooks": {
+    "Notification": [
+      {
+        "matcher": "permission_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/dotfiles/bin/tmux-claude-notify",
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}
