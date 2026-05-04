@@ -19,8 +19,48 @@ YELLOW=$'\033[33m'
 RED=$'\033[31m'
 BOLD_RED=$'\033[1;31m'
 DIM_GREEN=$'\033[2;32m'
+DIM_RED=$'\033[2;31m'
 
 # ── helpers ─────────────────────────────────────────────
+
+# reload_sessions
+#   Re-collects the session list from tmux.
+#   Preserves selected cursor by session name (not index), since the list
+#   is sorted by activity time and the order changes between refreshes.
+reload_sessions() {
+    local prev=""
+    if (( ${#sessions[@]} > 0 && selected < ${#sessions[@]} )); then
+        prev="${sessions[$selected]}"
+    fi
+    sessions=()
+    while IFS= read -r s; do
+        sessions+=("$s")
+    done < <(get_claude_sessions)
+    session_count=${#sessions[@]}
+    selected=0
+    if [[ -n "$prev" ]]; then
+        for i in "${!sessions[@]}"; do
+            [[ "${sessions[$i]}" == "$prev" ]] && selected=$i && break
+        done
+    fi
+    (( selected >= session_count )) && selected=$(( session_count - 1 ))
+    (( selected < 0 )) && selected=0
+}
+
+# kill_selected_session
+#   Kills the tmux session at the current selection.
+#   Guards: won't kill own session, won't kill empty target.
+kill_selected_session() {
+    (( session_count == 0 )) && return 1
+    local target="${sessions[$selected]}"
+    [[ -z "$target" ]] && return 1
+    # never kill the session the dashboard is running inside
+    local myself
+    myself=$(tmux display-message -p '#S' 2>/dev/null)
+    [[ "$target" == "$myself" ]] && return 1
+    # exact name match (= prefix prevents tmux prefix-matching)
+    tmux kill-session -t "=${target}" 2>/dev/null
+}
 
 get_session_stats() {
     local session="$1"
@@ -113,8 +153,8 @@ render() {
     local out=""
 
     # header
-    local rhs="[q · r · R]"
-    (( cols >= 80 )) && rhs="[q quit · r refresh · R hard refresh]"
+    local rhs="[q · r · R · x]"
+    (( cols >= 80 )) && rhs="[q quit · r refresh · R hard · x kill]"
     local title="  Claude Sessions"
     local pad=$(( cols - ${#title} - ${#rhs} ))
     (( pad < 1 )) && pad=1
@@ -158,6 +198,7 @@ render() {
             working)    out+="${YELLOW}⚙ working${RST}      " ;;
             idle)       out+="${DIM_GREEN}● idle${RST}         " ;;
             permission) out+="${BOLD_RED}⏳ permission${RST}  " ;;
+            gone)       out+="${DIM_RED}✗ gone${RST}         " ;;
             loading)    out+="${DIM}… loading${RST}     " ;;
             *)          out+="${DIM}? unknown${RST}      " ;;
         esac
@@ -183,7 +224,7 @@ render() {
     done
 
     out+=$'\n'
-    out+="${DIM}  j/k navigate · r refresh · R hard refresh · q quit${RST}"
+    out+="${DIM}  j/k navigate · x kill · r refresh · R hard refresh · q quit${RST}"
 
     printf '\033[H\033[2J%s' "$out"
 }
@@ -219,9 +260,12 @@ load_data() {
     for i in "${!sessions[@]}"; do
         (
             sess="${sessions[$i]}"
+            cwd=$(get_pane_cwd "$sess")
+            cwd_ok=1
+            [[ -n "$cwd" && ! -d "$cwd" ]] && cwd_ok=0
             st=$(get_session_status "$sess")
             stats=$(get_session_stats "$sess")
-            printf '%s\t%s' "$st" "$stats" > "${parallel_dir}/${i}"
+            printf '%s\t%s\t%s' "$cwd_ok" "$st" "$stats" > "${parallel_dir}/${i}"
         ) &
     done
     wait
@@ -230,8 +274,9 @@ load_data() {
     for i in "${!sessions[@]}"; do
         local result_file="${parallel_dir}/${i}"
         if [[ -f "$result_file" ]]; then
-            local st ctx tout tall mdl
-            IFS=$'\t' read -r st ctx tout tall mdl < "$result_file"
+            local cwd_ok st ctx tout tall mdl
+            IFS=$'\t' read -r cwd_ok st ctx tout tall mdl < "$result_file"
+            [[ "$cwd_ok" == "0" ]] && st="gone"
             statuses[$i]="$st"
             contexts[$i]="$ctx"
             outputs[$i]=$(format_tokens "$tout")
@@ -259,11 +304,7 @@ total_alls=()
 models=()
 
 # initial load
-sessions=()
-while IFS= read -r s; do
-    sessions+=("$s")
-done < <(get_claude_sessions)
-session_count=${#sessions[@]}
+reload_sessions
 
 if (( session_count == 0 )); then
     printf '\033[H\033[2J'
@@ -301,22 +342,23 @@ while true; do
             ;;
         r)
             # soft refresh: re-collect sessions, use cached totals
-            sessions=()
-            while IFS= read -r s; do
-                sessions+=("$s")
-            done < <(get_claude_sessions)
-            session_count=${#sessions[@]}
-            (( selected >= session_count )) && selected=$(( session_count - 1 ))
+            reload_sessions
+            load_data
+            ;;
+        x)
+            # kill selected session
+            kill_selected_session && reload_sessions
+            if (( session_count == 0 )); then
+                printf '\033[H\033[2J'
+                printf "${DIM}  No claude sessions running.${RST}\n"
+                read -rsn1
+                exit 0
+            fi
             load_data
             ;;
         R)
             # hard refresh: re-collect sessions, clear totals cache
-            sessions=()
-            while IFS= read -r s; do
-                sessions+=("$s")
-            done < <(get_claude_sessions)
-            session_count=${#sessions[@]}
-            (( selected >= session_count )) && selected=$(( session_count - 1 ))
+            reload_sessions
             rm -f "${CACHE_DIR}"/*.totals 2>/dev/null
             load_data
             ;;
