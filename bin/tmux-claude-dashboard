@@ -346,15 +346,34 @@ while true; do
             load_data
             ;;
         x)
-            # kill selected session
-            kill_selected_session && reload_sessions
-            if (( session_count == 0 )); then
-                printf '\033[H\033[2J'
-                printf "${DIM}  No claude sessions running.${RST}\n"
-                read -rsn1
-                exit 0
+            # kill selected session (confirm if live)
+            if (( session_count > 0 )); then
+                _do_kill=0
+                if [[ "${statuses[$selected]}" == "gone" ]]; then
+                    _do_kill=1
+                else
+                    # confirm before killing a live session
+                    tput cnorm 2>/dev/null
+                    printf '\033[%d;3H' $(( session_count + 6 ))
+                    printf "${YELLOW}Kill live session ${names[$selected]}? [y/N]${RST} "
+                    _confirm=""
+                    read -rsn1 _confirm
+                    tput civis 2>/dev/null
+                    [[ "$_confirm" == "y" || "$_confirm" == "Y" ]] && _do_kill=1
+                fi
+                if (( _do_kill )); then
+                    kill_selected_session && reload_sessions
+                    if (( session_count == 0 )); then
+                        printf '\033[H\033[2J'
+                        printf "${DIM}  No claude sessions running.${RST}\n"
+                        read -rsn1
+                        exit 0
+                    fi
+                    load_data
+                else
+                    render
+                fi
             fi
-            load_data
             ;;
         X)
             # kill all gone sessions
