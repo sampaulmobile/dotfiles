@@ -1,6 +1,4 @@
 {
-  "alwaysThinkingEnabled": true,
-  "effortLevel": "medium",
   "permissions": {
     "allow": [
       "Bash(grep:*)",
@@ -40,6 +38,7 @@
       "Bash(git stash:*)",
       "Bash(git worktree:*)",
       "Bash(gh pr:*)",
+      "Bash(gh issue:*)",
       "Bash(gh api:*)",
       "Bash(jq:*)",
       "Bash(tmux:*)",
@@ -88,5 +87,9 @@
         ]
       }
     ]
-  }
+  },
+  "alwaysThinkingEnabled": true,
+  "effortLevel": "medium",
+  "agentPushNotifEnabled": true,
+  "remoteControlAtStartup": true
 }

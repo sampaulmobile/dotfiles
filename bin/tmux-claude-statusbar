@@ -11,8 +11,10 @@ while IFS= read -r session; do
     # Skip if working
     echo "$content" | grep -q "to interrupt" && continue
 
-    # Count permission prompts (Yes + No visible)
+    # Count permission prompts (Yes + No visible) and plan mode questions
     if echo "$content" | grep -q "Yes" && echo "$content" | grep -q "No"; then
+        (( count++ ))
+    elif echo "$content" | tail -2 | grep -q "^Enter to select"; then
         (( count++ ))
     fi
 done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^claude-')

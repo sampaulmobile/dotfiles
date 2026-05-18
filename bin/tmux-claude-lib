@@ -34,8 +34,13 @@ get_session_status() {
         return
     fi
 
-    # Permission: Yes/No selector visible (must check before idle — ❯ appears in both)
+    # Permission: Yes/No selector or plan mode question waiting for input
+    # (must check before idle — ❯ appears in both)
     if echo "$content" | grep -q "Yes" && echo "$content" | grep -q "No"; then
+        echo "permission"
+        return
+    fi
+    if echo "$content" | tail -2 | grep -q "^Enter to select"; then
         echo "permission"
         return
     fi
@@ -60,7 +65,7 @@ get_pane_cwd() {
 #   Encodes a path for the claude projects directory.
 #   /Users/sampaul/dev/foo -> -Users-sampaul-dev-foo
 encode_cwd() {
-    echo "$1" | sed 's|/|-|g'
+    echo "$1" | sed 's|[/_]|-|g'
 }
 
 # build_cwd_session_map
