@@ -21,21 +21,29 @@ search_dirs=(
     "$HOME/research:1"
     "$HOME/dotfiles:0"
 )
+
+# Machine-local override (untracked): may redefine search_dirs entirely.
+# See other/tmux-sessionizer.local.example.
+[[ -f "$HOME/dotfiles/other/tmux-sessionizer.local" ]] && source "$HOME/dotfiles/other/tmux-sessionizer.local"
 # ------------------------------
 
 # Compute the tmux session name for a given project/worktree path.
 # - For a worktree (parent contains .bare/), uses "<project>_<branch>".
 # - Otherwise, uses basename of the path.
 # Dots are translated to underscores (tmux session names don't love dots).
+# Writes the result to the global `session_name` to avoid a subshell fork
+# per call (this runs once per candidate dir in the hot path).
 session_name_for() {
     local path="$1"
-    local parent
-    parent=$(dirname "$path")
+    local parent="${path%/*}"
+    local base="${path##*/}"
+    local name
     if [[ -d "$parent/.bare" ]]; then
-        printf '%s_%s' "$(basename "$parent")" "$(basename "$path")" | tr . _
+        name="${parent##*/}_${base}"
     else
-        basename "$path" | tr . _
+        name="$base"
     fi
+    session_name="${name//./_}"
 }
 
 if [[ $# -eq 1 ]]; then
@@ -49,13 +57,14 @@ else
     else
         filter_session="$current_session"
     fi
+    # Single awk replaces sort+awk+grep+grep pipeline (fewer forks).
     existing=$(tmux list-sessions -F '#{session_last_attached} #{session_name}' 2>/dev/null |
         sort -rn |
-        awk '{print $2}' |
-        grep -v '^claude-' |
-        grep -Fxv "$filter_session")
+        awk -v skip="$filter_session" '$2 !~ /^claude-/ && $2 != skip {print $2}')
 
-    # Project directories not yet opened as sessions
+    # Project directories not yet opened as sessions.
+    # Use shell globs instead of find — no fork, much faster for shallow depth.
+    shopt -s nullglob
     candidates=()
     for entry in "${search_dirs[@]}"; do
         dir="${entry%%:*}"
@@ -63,20 +72,23 @@ else
         if [[ $depth -eq 0 ]]; then
             raw=("$dir")
         else
-            raw=($(find "$dir" -mindepth 1 -maxdepth "$depth" -type d))
+            raw=("$dir"/*/)
+            raw=("${raw[@]%/}")
         fi
-        # For each raw candidate, expand worktree-layout projects into their
-        # individual worktrees. Non-worktree dirs pass through as-is.
+        # Expand worktree-layout projects (parent has .bare/) into individual worktrees.
         for cand in "${raw[@]}"; do
             if [[ -d "$cand/.bare" ]]; then
-                while IFS= read -r wt; do
-                    [[ -n "$wt" ]] && candidates+=("$wt")
-                done < <(find "$cand" -mindepth 1 -maxdepth 1 -type d ! -name '.bare')
+                for wt in "$cand"/*/; do
+                    wt="${wt%/}"
+                    [[ "${wt##*/}" == ".bare" ]] && continue
+                    candidates+=("$wt")
+                done
             else
                 candidates+=("$cand")
             fi
         done
     done
+    shopt -u nullglob
 
     # Annotate existing sessions with permission indicators
     if [[ "$SHOW_PERMISSION_INDICATORS" == true ]]; then
@@ -108,11 +120,14 @@ else
         annotated="$existing"$'\n'
     fi
 
-    # Filter out dirs that already have a session
+    # Filter out dirs that already have a session.
+    # Pad existing into a delimited string for O(1)-ish builtin pattern matching
+    # (no fork per check, vs the old `echo "$existing" | grep -qx "$name"`).
+    nl_existing=$'\n'"$existing"$'\n'
     new_dirs=""
     for dir in "${candidates[@]}"; do
-        name=$(session_name_for "$dir")
-        if ! echo "$existing" | grep -qx "$name"; then
+        session_name_for "$dir"
+        if [[ "$nl_existing" != *$'\n'"$session_name"$'\n'* ]]; then
             new_dirs+="$dir"$'\n'
         fi
     done
@@ -134,7 +149,8 @@ fi
 if tmux has-session -t="$selected" 2>/dev/null; then
     selected_name="$selected"
 else
-    selected_name=$(session_name_for "$selected")
+    session_name_for "$selected"
+    selected_name="$session_name"
 fi
 
 if ! tmux has-session -t="$selected_name" 2>/dev/null; then
