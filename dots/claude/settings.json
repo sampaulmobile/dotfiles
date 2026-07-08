@@ -89,7 +89,13 @@
     ]
   },
   "alwaysThinkingEnabled": true,
-  "effortLevel": "medium",
+  "effortLevel": "xhigh",
+  "voice": {
+    "enabled": true,
+    "mode": "hold"
+  },
+  "skipWorkflowUsageWarning": true,
+  "remoteControlAtStartup": true,
   "agentPushNotifEnabled": true,
-  "remoteControlAtStartup": true
+  "voiceEnabled": true
 }
