@@ -64,7 +64,7 @@ get_pane_cwd() {
 # encode_cwd <path>
 #   Encodes a path for the claude projects directory.
 #   Claude Code converts '/', '.', and '_' to '-':
-#   /Users/sam.paul/dev/foo_bar -> -Users-sam-paul-dev-foo-bar
+#   /Users/first.last/dev/foo_bar -> -Users-first-last-dev-foo-bar
 encode_cwd() {
     echo "$1" | sed 's|[/._]|-|g'
 }
