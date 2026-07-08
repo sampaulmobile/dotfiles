@@ -21,16 +21,13 @@ brew 'lazygit'
 brew 'fnm'
 brew 'neovim'
 brew 'awscli'
-brew 'fastlane'
 brew 'pre-commit'
-# brew 'postgresql'
-# brew 'teleport'
+# brew 'fastlane'
 
 # python
 brew 'pyenv'
 brew 'uv'
-# brew 'poetry'
-# brew 'flake8'
+brew 'poetry'
 
 # apps
 cask 'ghostty'
@@ -42,15 +39,7 @@ cask 'docker'
 
 # ---- extra stuff ----
 
-cask 'tailscale'
+# cask 'tailscale'
 # cask 'flutter'
 # cask 'visual-studio-code'
 # cask 'android-studio'
-# cask 'ngrok'
-
-# cask 'divvy'
-# cask 'deluge'
-# cask 'java8'
-# cask 'intellij-idea'
-# cask 'pycharm'
-# brew 'gradle'
