@@ -9,6 +9,9 @@
 # dotfiles directory
 dir=$HOME/dotfiles/dots
 
+# machine-local config (untracked — see other/README.md)
+other=$HOME/dotfiles/other
+
 # backup directory
 deldir=$HOME/DELETE_dotfiles
 
@@ -40,15 +43,13 @@ else
     link $dir/zshrc ~/.zshrc
 fi
 
-# ===== claude code =====
-mkdir -p ~/.claude/skills ~/.claude/rules
-link $dir/claude/settings.json ~/.claude/settings.json
-for skill in $dir/claude/skills/*/; do
-    link "$skill" ~/.claude/skills/$(basename "$skill")
-done
-for rule in $dir/claude/rules/*.md; do
-    link "$rule" ~/.claude/rules/$(basename "$rule")
-done
+# ===== claude code (from other/ — machine-local, untracked) =====
+# settings.json is a file link (~/.claude itself holds machine state);
+# skills/ and rules/ are whole-directory links.
+mkdir -p ~/.claude $other/claude/skills $other/claude/rules
+[[ -f $other/claude/settings.json ]] && link $other/claude/settings.json ~/.claude/settings.json
+link $other/claude/skills ~/.claude/skills
+link $other/claude/rules ~/.claude/rules
 
 # ===== starship =====
 mkdir -p ~/.config

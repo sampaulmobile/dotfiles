@@ -9,4 +9,7 @@ other_aliases
 other/*
 !other/README.md
 !other/*.example
+!other/claude
+other/claude/*
+!other/claude/*.example
 

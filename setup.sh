@@ -44,15 +44,17 @@ fnm default 22
 echo "Installing claude code"
 npm install -g @anthropic-ai/claude-code
 
-echo "Symlinking dotfiles"
-$DOTFILES/bin/symlink_files.sh
-
-# seed machine-local config from templates (real files are gitignored)
+# seed machine-local config from templates (real files are gitignored).
+# Must run before symlinking — symlink_files.sh links claude config out of
+# other/, which this creates on a fresh machine.
 echo "Seeding other/ machine-local config"
-for example in $DOTFILES/other/*.example; do
+for example in $DOTFILES/other/*.example $DOTFILES/other/claude/*.example; do
     target="${example%.example}"
     [[ -f "$target" ]] || cp -v "$example" "$target"
 done
+
+echo "Symlinking dotfiles"
+$DOTFILES/bin/symlink_files.sh
 
 # set shell (assuming ZSH has been installed)
 echo "Setting default shell to zsh"

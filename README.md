@@ -39,11 +39,11 @@ and `*.example` templates are tracked; the real files never leave the machine.
 | `other/zshrc.local` | sourced last by `~/.zshrc` — env vars, PATH, anything |
 | `other/gitconfig.local` | `[include]` from `~/.gitconfig` — git identity/overrides |
 | `other/tmux-sessionizer.local` | `bin/tmux-sessionizer` — override project `search_dirs` |
-| `other/claude/{skills,rules}/` | symlinked into `~/.claude/` by `setup_other.sh` |
+| `other/claude/` | symlinked into `~/.claude/` by `bin/symlink_files.sh` — settings.json (file link), skills/ and rules/ (dir links) |
 
 To start from a template: `cp other/<name>.example other/<name>` (setup.sh
 seeds these automatically).
 
-Per-machine Claude Code model/env is set via env vars in `other/zshrc.local`
-(e.g. `ANTHROPIC_MODEL`) — `~/.claude/settings.json` stays identical across
-machines.
+All Claude Code config is machine-local: settings.json/skills/rules live in
+`other/claude/`, and per-machine model/env is set via env vars in
+`other/zshrc.local` (e.g. `ANTHROPIC_MODEL`).
