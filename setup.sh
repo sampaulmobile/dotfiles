@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# Bootstrap order on a fresh Mac:
+#   1. `git clone https://github.com/sampaulmobile/dotfiles.git ~/dotfiles`
+#      (macOS prompts to install the Xcode Command Line Tools on first git use)
+#   2. `cd ~/dotfiles && ./setup.sh`
+#   3. work machines: `./setup_other.sh` afterwards
+# The xcode-select call below no-ops if the CLT are already installed.
+
 # get dotfiles dir
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
@@ -12,7 +19,7 @@ xcode-select --install
 
 # install rosetta (for intel based apps)
 echo "Installing rosetta"
-softwareupdate --install-rosetta --agree-to-license
+sudo softwareupdate --install-rosetta --agree-to-license
 
 # change macOS configs/defaults
 echo "Updating macOS configs/defaults"
@@ -32,8 +39,20 @@ echo "installing node"
 fnm install 22
 fnm default 22
 
+# claude code (npm globals are per-node-version under fnm — re-run this
+# after switching the default node)
+echo "Installing claude code"
+npm install -g @anthropic-ai/claude-code
+
 echo "Symlinking dotfiles"
 $DOTFILES/bin/symlink_files.sh
+
+# seed machine-local config from templates (real files are gitignored)
+echo "Seeding other/ machine-local config"
+for example in $DOTFILES/other/*.example; do
+    target="${example%.example}"
+    [[ -f "$target" ]] || cp -v "$example" "$target"
+done
 
 # set shell (assuming ZSH has been installed)
 echo "Setting default shell to zsh"
@@ -51,8 +70,11 @@ $DOTFILES/bin/install_tpm.sh
 echo "Updating TPM plugins"
 $DOTFILES/bin/update_tpm_plugins.sh
 
-# pyenv/pip (and installs)
-# $DOTFILES/bin/pyenv_installs_mac.sh
-# eval "$(pyenv init -)"
-# $DOTFILES/bin/install_pip.sh
-# $DOTFILES/bin/pip_installs.sh
+echo ""
+echo "===== Done. Manual steps remaining ====="
+echo "  - edit other/*.local (git identity, claude model, project dirs — see other/README.md)"
+echo "  - gh auth login"
+echo "  - claude (first run: log in)"
+echo "  - sign in to 1Password"
+echo "  - launch Docker.app once to finish its install"
+echo "  - work machines: ./setup_other.sh"
