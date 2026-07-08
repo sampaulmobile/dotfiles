@@ -86,3 +86,8 @@ fi
 # OpenClaw Completion
 [[ -f "$HOME/.openclaw/completions/openclaw.zsh" ]] && source "$HOME/.openclaw/completions/openclaw.zsh"
 
+# ===== MACHINE-LOCAL OVERRIDES =====
+# untracked, lives in other/ — see other/README.md. Keep last so it can
+# override anything above.
+[[ -f "$DOTFILES/other/zshrc.local" ]] && source "$DOTFILES/other/zshrc.local"
+
