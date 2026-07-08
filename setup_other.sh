@@ -16,10 +16,10 @@ echo "Symlinking other/claude skills/rules"
 mkdir -p $DOTFILES/other/claude/skills $DOTFILES/other/claude/rules
 mkdir -p ~/.claude/skills ~/.claude/rules
 for skill in $DOTFILES/other/claude/skills/*/; do
-    [[ -d "$skill" ]] && ln -sfnv "${skill%/}" ~/.claude/skills/$(basename "$skill")
+    [[ -d "$skill" ]] && ln -sfnv "${skill%/}" ~/.claude/skills/"$(basename "$skill")"
 done
 for rule in $DOTFILES/other/claude/rules/*.md; do
-    [[ -f "$rule" ]] && ln -sfnv "$rule" ~/.claude/rules/$(basename "$rule")
+    [[ -f "$rule" ]] && ln -sfnv "$rule" ~/.claude/rules/"$(basename "$rule")"
 done
 
 echo ""
