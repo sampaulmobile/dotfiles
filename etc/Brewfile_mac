@@ -6,11 +6,16 @@ brew 'zsh'
 brew 'tmux'
 brew 'eza'
 brew 'jq'
+brew 'yq'
 brew 'fzf'
 brew 'ripgrep'
+brew 'fd'
 brew 'starship'
 brew 'gh'
 brew 'mosh'
+brew 'watch'
+brew 'shellcheck'
+brew 'lazygit'
 
 # utilities
 brew 'fnm'
@@ -23,12 +28,13 @@ brew 'pre-commit'
 
 # python
 brew 'pyenv'
+brew 'uv'
 # brew 'poetry'
 # brew 'flake8'
 
 # apps
 cask 'ghostty'
-cask 'spectacle'
+cask 'rectangle'
 cask 'google-chrome'
 cask '1password'
 cask 'slack'

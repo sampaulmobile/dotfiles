@@ -1,0 +1,29 @@
+# Supplemental packages layered on top of Brewfile_mac by setup_other.sh.
+# Keep this file generic — public package names only.
+
+# infra / kubernetes
+brew 'terraform'
+brew 'tflint'
+brew 'helm'
+brew 'kind'
+brew 'krew'
+brew 'k6'
+brew 'argo'
+brew 'cloudflared'
+brew 'docker-compose'
+
+# access / auth
+brew 'teleport'
+brew 'okta-aws-cli'
+
+# data
+tap 'dbt-labs/dbt'
+brew 'dbt-labs/dbt/dbt-snowflake'
+brew 'postgresql@17'
+
+# ---- confirm still wanted ----
+# brew 'poetry'      # superseded by uv?
+# brew 'flake8'      # superseded by ruff?
+# brew 'jupyterlab'
+# brew 'rust'
+# brew 'nvm'         # redundant with fnm
