@@ -35,7 +35,7 @@ cask 'rectangle'
 cask 'google-chrome'
 cask '1password'
 cask 'slack'
-cask 'docker'
+cask 'docker-desktop'
 
 # ---- extra stuff ----
 

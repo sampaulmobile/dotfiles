@@ -3,4 +3,6 @@ if [ $# -eq 0 ] && [ -d $HOME/.oh-my-zsh ]; then
 	exit 0
 fi
 
-sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+# KEEP_ZSHRC=yes stops the installer from replacing ~/.zshrc (our symlink)
+# with the oh-my-zsh template on fresh machines.
+KEEP_ZSHRC=yes sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
