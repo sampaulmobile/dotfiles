@@ -1,0 +1,9 @@
+# Supplemental packages layered on top of Brewfile_mac by setup_other.sh.
+# Keep this file generic — public package names only.
+
+# access / auth
+brew 'okta-aws-cli'
+
+# data
+# tap 'dbt-labs/dbt'
+# brew 'dbt-labs/dbt/dbt-snowflake'

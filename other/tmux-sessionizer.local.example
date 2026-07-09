@@ -1,0 +1,12 @@
+# Machine-local project dirs for bin/tmux-sessionizer — sourced after the
+# defaults, so redefining search_dirs here replaces them entirely.
+# To use: cp tmux-sessionizer.local.example tmux-sessionizer.local && edit.
+#
+# Entries are "path:depth":
+#   depth 0 = the directory itself is a project
+#   depth 1 = search one level deep for projects inside it
+#
+# search_dirs=(
+#     "$HOME/dev/<org>:1"
+#     "$HOME/dotfiles:0"
+# )

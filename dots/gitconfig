@@ -2,7 +2,9 @@
 	name = SP
 	email = sampaulmobile@gmail.com
 [include]
-	path = ~/.gitconfig.local
+	# machine-local overrides (untracked) — git expands ~/ but not env vars,
+	# so this must be a literal path. See other/README.md.
+	path = ~/dotfiles/other/gitconfig.local
 [push]
 	default = simple
 	autoSetupRemote = true

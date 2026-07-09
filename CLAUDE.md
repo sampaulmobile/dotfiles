@@ -7,8 +7,18 @@ Personal dotfiles for macOS (Apple Silicon). Managed with symlinks, no fancy fra
 - `dots/` — config files, symlinked to `~/` or `~/.config/` by `bin/symlink_files.sh`
 - `bin/` — scripts (install helpers, tmux scripts, worktree helpers, etc.)
 - `sources/` — zsh source files (aliases, history config, exports)
+- `etc/` — Brewfiles: `Brewfile_mac` (base, all machines), `Brewfile_other` (supplemental, installed by `setup_other.sh`)
+- `other/` — machine-local config, gitignored except `*.example` templates and README. Consumed via: zshrc sources `other/zshrc.local` last; gitconfig includes `other/gitconfig.local`; tmux-sessionizer sources `other/tmux-sessionizer.local` (can redefine `search_dirs`); `other/claude/` symlinked into `~/.claude/` by `bin/symlink_files.sh` (settings.json file link; skills/, rules/ dir links)
 - `archive/` — old/unused configs kept for reference
 - `notes/` — machine setup guides
+
+## IMPORTANT: This repo is PUBLIC
+
+Nothing sensitive or machine/employer-identifying may ever be committed — no
+private filepaths, directory/service/project names, claude skills content, or
+absolute paths beyond generic `$HOME` placeholders, in tracked files OR commit
+messages. All of that belongs in the gitignored `other/` directory. Generic
+public package names in Brewfiles are fine. Sweep diffs before pushing.
 
 ## Key Configs
 
@@ -74,3 +84,6 @@ Repos can use a bare+worktree layout for branch-per-directory workflows:
 - zshrc loads brew first, then auto-launches tmux. The outer shell skips everything after the tmux block (`&& return`). The inner shell (inside tmux) loads the full config.
 - Platform-specific zshrc: `zshrc` for macOS, `zshrc_linux` for Linux.
 - GHA runners run locally — never add `[safe] directory` to the global gitconfig. Set it in the runner's local `.git/config` instead.
+- Fresh machine: `git clone` (triggers CLT install) → `./setup.sh` → optionally `./setup_other.sh`. Both end with manual-step checklists.
+- Claude Code config is fully machine-local (public repo): settings.json/skills/rules live in `other/claude/`, seeded from `other/claude/settings.json.example`; machine differences (model, TLS) are env vars in `other/zshrc.local` (e.g. `ANTHROPIC_MODEL`). Never commit claude config.
+- claude-code is installed via npm global — per-node-version under fnm, so reinstall after changing the default node.

@@ -4,3 +4,12 @@ other_aliases
 
 **/packer_compiled.lua
 
+# Machine-specific / private config lives in other/ — only the docs and
+# example templates are tracked. Real files never leave this machine.
+other/*
+!other/README.md
+!other/*.example
+!other/claude
+other/claude/*
+!other/claude/*.example
+

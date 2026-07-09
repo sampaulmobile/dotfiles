@@ -1,0 +1,18 @@
+# Machine-local shell config — sourced at the very end of ~/.zshrc, so it can
+# override anything. To use: cp zshrc.local.example zshrc.local && edit.
+
+# ===== CLAUDE CODE =====
+# Per-machine model — ~/.claude/settings.json is shared across machines, so
+# set the model here instead of there.
+# export ANTHROPIC_MODEL='claude-fable-5[1m]'
+# export CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1
+# export MAX_THINKING_TOKENS=128000
+
+# ===== CORPORATE TLS INTERCEPTION (work machines) =====
+# Prefer pointing node at the corp root cert:
+# export NODE_EXTRA_CA_CERTS="$HOME/certs/corp-root.pem"
+# Blunt fallback (disables TLS verification for node entirely):
+# export NODE_TLS_REJECT_UNAUTHORIZED=0
+
+# ===== ANYTHING ELSE =====
+# extra PATH entries, work aliases, tokens sourced from a secret store, etc.
