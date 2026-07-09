@@ -13,19 +13,9 @@
 
 set -euo pipefail
 
-find_project_root() {
-    local dir="$PWD"
-    while [[ "$dir" != "/" ]]; do
-        if [[ -d "$dir/.bare" ]]; then
-            echo "$dir"
-            return 0
-        fi
-        dir=$(dirname "$dir")
-    done
-    return 1
-}
+source "$(dirname "${BASH_SOURCE[0]}")/gw-lib"
 
-project_dir=$(find_project_root || true)
+project_dir=$(gw_project_root || true)
 if [[ -z "$project_dir" ]]; then
     echo "error: not inside a worktree-layout project" >&2
     exit 1
@@ -45,15 +35,21 @@ if [[ -z "${1:-}" ]]; then
             --json headRefName --jq '.[].headRefName' 2>/dev/null || true)
     fi
 
+    # List worktrees by dir name, annotated with the branch when it differs
+    # (slashed branches live in flattened dirs) + merged-PR detection.
     branch=$(
         for d in "$project_dir"/*/; do
             d="${d%/}"
             name=$(basename "$d")
-            [[ "$name" == ".bare" || "$name" == "$default_branch" ]] && continue
-            if echo "$merged_branches" | grep -qx "$name"; then
-                printf '%s  (merged)\n' "$name"
+            [[ "$name" == ".bare" ]] && continue
+            wt_branch=$(gw_branch_for_path "$bare" "$d")
+            [[ "$wt_branch" == "$default_branch" ]] && continue
+            line="$name"
+            [[ -n "$wt_branch" && "$wt_branch" != "$name" ]] && line="$name  [$wt_branch]"
+            if echo "$merged_branches" | grep -qx "${wt_branch:-$name}"; then
+                printf '%s  (merged)\n' "$line"
             else
-                echo "$name"
+                echo "$line"
             fi
         done |
         fzf --prompt="remove> " |
@@ -66,15 +62,19 @@ else
     branch="$1"
 fi
 
-worktree_path="$project_dir/$branch"
+# Accept either a branch name or a worktree dir name; resolve via git's records
+worktree_path=$(gw_worktree_path "$bare" "$branch")
 
-if [[ ! -d "$worktree_path" ]]; then
-    echo "error: $worktree_path does not exist" >&2
+if [[ -z "$worktree_path" || ! -d "$worktree_path" ]]; then
+    echo "error: no worktree found for '$branch'" >&2
     exit 1
 fi
+# The real branch checked out there (may differ from the dir name)
+branch=$(gw_branch_for_path "$bare" "$worktree_path")
+dir_name=$(basename "$worktree_path")
 
 project_name=$(basename "$project_dir")
-session_name=$(echo "${project_name}_${branch}" | tr . _)
+session_name=$(echo "${project_name}_${dir_name}" | tr . _)
 inside_target=false
 
 case "$PWD/" in
@@ -85,7 +85,7 @@ case "$PWD/" in
         for d in "$project_dir"/*/; do
             d="${d%/}"
             sib_name=$(basename "$d")
-            [[ "$sib_name" == ".bare" || "$sib_name" == "$branch" ]] && continue
+            [[ "$sib_name" == ".bare" || "$sib_name" == "$dir_name" ]] && continue
             sibling="$d"
             break
         done
@@ -97,6 +97,11 @@ case "$PWD/" in
         cd "$sibling"
         ;;
 esac
+
+# Unwind .shared symlinks first — they read as untracked files and make
+# `git worktree remove` refuse. Real untracked files still block removal,
+# which is what we want.
+gw_unlink_shared "$project_dir" "$worktree_path"
 
 # Remove the worktree first (before killing session, since we're running inside it)
 git -C "$bare" worktree remove "$worktree_path"

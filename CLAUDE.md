@@ -66,11 +66,12 @@ Repos can use a bare+worktree layout for branch-per-directory workflows:
 
 | Script | Usage | Purpose |
 |--------|-------|---------|
-| `gwclone` | `gwclone <url> [name]` | Bare clone into `~/dev/`, create initial worktree for default branch, drop into tmux session |
-| `gwnew` | `gwnew <branch> [base]` | Create a new worktree (new branch, existing local branch, or remote-tracking branch) |
-| `gwrm` | `gwrm <branch>` | Remove worktree, kill its tmux session, prompt to delete the branch |
+| `gwclone` | `gwclone <url> [name]` | Bare clone into `~/dev/`, create initial worktree for default branch + `.shared/`, drop into tmux session |
+| `gwnew` | `gwnew <branch> [base]` | Create a new worktree (new branch, existing local branch, or remote-tracking branch); links `.shared/` contents in |
+| `gwrm` | `gwrm <branch-or-dir>` | Remove worktree (unwinds `.shared` links first), kill its tmux session, prompt to delete the branch |
 | `gwls` | `gwls` | List worktrees for current project, `*` marks active tmux sessions |
-| `gwconvert` | `gwconvert [path]` | Migrate an existing normal clone to bare+worktree layout (re-clones from origin, keeps `.gwbak` backup) |
+| `gwconvert` | `gwconvert [path] [dest]` | Migrate a normal clone to bare+worktree layout (re-clones from origin, keeps `.gwbak` backup); warns about local-only state, offers a secrets sweep into `.shared/`; `[dest]` relocates (e.g. flatten `~/dev/org/x` → `~/dev/x`) |
+| `gw-lib` | (sourced) | Shared functions: project-root discovery, branch↔dir mapping, `.shared` link/unlink |
 
 ### Worktree Conventions
 
@@ -78,6 +79,8 @@ Repos can use a bare+worktree layout for branch-per-directory workflows:
 - `git wt` is aliased to `git worktree` in gitconfig for raw worktree commands.
 - Worktree scripts find the project root by walking up from cwd looking for `.bare/`.
 - `gwconvert` only migrates branches that exist on origin — local-only branches, stashes, and untracked files stay in the `.gwbak` backup.
+- Slashed branch names get flattened worktree dirs (`spaul/foo` → `spaul-foo/`) so worktrees stay direct children of the project root (nesting would hide them from the sessionizer). `gwrm` accepts either the branch or the dir name.
+- **`.shared/` convention:** machine-local per-project files (`.env`, secrets, certs) live once in `<project>/.shared/` (untracked); `gwnew`/`gwclone` symlink its contents (file-level, relative paths preserved) into each worktree. Repos are expected to gitignore these names — the linker warns on any that aren't (fix the repo's `.gitignore` upstream; don't mask locally).
 
 ## Conventions
 

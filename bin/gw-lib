@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+#
+# gw-lib — shared functions for the gw* worktree scripts. Source, don't run.
+
+# Walk up from cwd to find the project root (directory containing .bare/).
+gw_project_root() {
+    local dir="$PWD"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -d "$dir/.bare" ]]; then
+            echo "$dir"
+            return 0
+        fi
+        dir=$(dirname "$dir")
+    done
+    return 1
+}
+
+# Worktree directory name for a branch: slashes flattened to dashes
+# (spaul/foo -> spaul-foo). Nested dirs would hide worktrees from the
+# sessionizer and break session naming.
+gw_dir_for_branch() {
+    echo "${1//\//-}"
+}
+
+# Resolve a branch name OR worktree dir name to its worktree path.
+# Prints nothing if no match. Uses git's own records, not path conventions.
+#   gw_worktree_path <bare> <branch-or-dir>
+gw_worktree_path() {
+    git -C "$1" worktree list --porcelain | awk -v want="$2" '
+        $1 == "worktree" { path = $2 }
+        $1 == "branch" {
+            sub("refs/heads/", "", $2)
+            n = split(path, parts, "/")
+            if ($2 == want || parts[n] == want) { print path; exit }
+        }'
+}
+
+# Branch checked out in a given worktree path (empty if unknown).
+#   gw_branch_for_path <bare> <worktree-path>
+gw_branch_for_path() {
+    git -C "$1" worktree list --porcelain | awk -v want="$2" '
+        $1 == "worktree" { path = $2 }
+        $1 == "branch" && path == want {
+            sub("refs/heads/", "", $2); print $2; exit
+        }'
+}
+
+# Symlink every file in <project>/.shared into <worktree>, preserving
+# relative paths (file-level links, so .shared content can nest inside
+# tracked directories without shadowing them). No-op if .shared is absent.
+#   gw_link_shared <project_dir> <worktree_path>
+gw_link_shared() {
+    local shared="$1/.shared" wt="$2" rel
+    [[ -d "$shared" ]] || return 0
+    while IFS= read -r rel; do
+        rel="${rel#./}"
+        mkdir -p "$wt/$(dirname "$rel")"
+        ln -sfn "$shared/$rel" "$wt/$rel"
+        echo "  linked: $rel"
+        # Repos are expected to gitignore their secret/local-config names.
+        # If this one doesn't, say so — that's a .gitignore hole to fix
+        # upstream, not something to paper over locally.
+        if ! git -C "$wt" check-ignore -q "$rel" 2>/dev/null; then
+            echo "    WARNING: '$rel' is NOT gitignored in this repo — fix its .gitignore"
+        fi
+    done < <(cd "$shared" && find . \( -type f -o -type l \) 2>/dev/null)
+}
+
+# Remove the .shared symlinks from a worktree (inverse of gw_link_shared).
+# Needed before `git worktree remove` — the links count as untracked files
+# and make git refuse. Only removes symlinks that resolve into .shared;
+# real files are never touched. Cleans up now-empty parent dirs.
+#   gw_unlink_shared <project_dir> <worktree_path>
+gw_unlink_shared() {
+    local shared="$1/.shared" wt="$2" rel link
+    [[ -d "$shared" ]] || return 0
+    while IFS= read -r rel; do
+        rel="${rel#./}"
+        link="$wt/$rel"
+        if [[ -L "$link" && "$(readlink "$link")" == "$shared/"* ]]; then
+            rm "$link"
+            rmdir -p "$(dirname "$link")" 2>/dev/null || true
+        fi
+    done < <(cd "$shared" && find . \( -type f -o -type l \) 2>/dev/null)
+}
