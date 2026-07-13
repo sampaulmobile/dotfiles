@@ -90,7 +90,8 @@ echo "worktree: $worktree_path"
 # Link machine-local secrets/config from <project>/.shared into the new worktree
 gw_link_shared "$project_dir" "$worktree_path"
 
-# Hand off to sessionizer
-if command -v tmux-sessionizer >/dev/null 2>&1; then
+# Hand off to sessionizer — but only at an interactive terminal. When run
+# by scripts or claude (stdout not a tty), just print the path (batch-safe).
+if [[ -t 1 ]] && command -v tmux-sessionizer >/dev/null 2>&1; then
     exec tmux-sessionizer "$worktree_path"
 fi
