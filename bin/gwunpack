@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+#
+# gwunpack <bundle.zip> [dev-dir]
+#
+# Unpacks a secrets/local-config bundle into worktree-layout projects.
+# The zip's top-level directories are project names; each one's contents
+# are repo-relative files destined for ~/dev/<project>/.shared/, which
+# then get symlinked into every existing worktree of that project.
+# (gwnew links them into future worktrees automatically.)
+#
+#   bundle.zip
+#   ├── README.txt            (ignored)
+#   ├── myproject/.env.secrets
+#   └── otherproj/.certs/root.pem
+#
+# Copies OVERWRITE existing .shared files (the bundle is the seed source
+# of truth). Projects not present under [dev-dir] (default ~/dev) or not
+# in worktree layout are skipped with a warning — clone them and re-run.
+
+set -euo pipefail
+
+source "$(dirname "${BASH_SOURCE[0]}")/gw-lib"
+
+case "${1:-}" in
+    -h|--help) gw_usage "${BASH_SOURCE[0]}"; exit 0 ;;
+    "") gw_usage "${BASH_SOURCE[0]}" >&2; exit 1 ;;
+esac
+
+bundle="$1"
+dev_dir="${2:-$HOME/dev}"
+
+if [[ ! -f "$bundle" ]]; then
+    echo "error: $bundle not found" >&2
+    exit 1
+fi
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+unzip -q "$bundle" -d "$tmp"
+
+shopt -s nullglob
+for proj_dir in "$tmp"/*/; do
+    proj=$(basename "$proj_dir")
+    target="$dev_dir/$proj"
+
+    if [[ ! -d "$target/.bare" ]]; then
+        echo "SKIP: $proj — no worktree-layout project at $target (clone it, then re-run)"
+        continue
+    fi
+
+    echo "$proj:"
+    mkdir -p "$target/.shared"
+    cp -R "$proj_dir." "$target/.shared/"
+
+    # Link .shared into every existing worktree of the project.
+    # (Skip the bare entry: it has no HEAD line in porcelain output.)
+    while IFS= read -r wt; do
+        [[ -d "$wt" ]] || continue
+        echo "  worktree $(basename "$wt"):"
+        gw_link_shared "$target" "$wt"
+    done < <(git -C "$target/.bare" worktree list --porcelain |
+        awk '$1 == "worktree" { p = $2 } $1 == "HEAD" && p { print p; p = "" }')
+done
+
+echo "done"
