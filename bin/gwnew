@@ -4,7 +4,9 @@
 #
 # Creates a new worktree for <branch> inside the current project's
 # bare+worktree layout. Walks up from cwd to find a directory containing
-# a .bare/ sibling — that's the project root.
+# a .bare/ sibling — that's the project root. Slashed branch names get
+# flattened directories (spaul/foo -> spaul-foo/). Links .shared/ contents
+# into the new worktree.
 #
 # If called with no arguments, fetches origin and presents an fzf picker
 # of remote branches that don't already have a local worktree.
@@ -21,6 +23,8 @@
 set -euo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/gw-lib"
+
+case "${1:-}" in -h|--help) gw_usage "${BASH_SOURCE[0]}"; exit 0 ;; esac
 
 base="${2:-}"
 

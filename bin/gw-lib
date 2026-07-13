@@ -2,6 +2,13 @@
 #
 # gw-lib — shared functions for the gw* worktree scripts. Source, don't run.
 
+# Print a script's header comment block (its documentation). Used by the
+# gw* scripts for -h/--help so usage docs live in one place — the header.
+#   gw_usage <script-path>
+gw_usage() {
+    sed -n '2,/^[^#]/{ /^#/ s/^# \{0,1\}//p; }' "$1"
+}
+
 # Walk up from cwd to find the project root (directory containing .bare/).
 gw_project_root() {
     local dir="$PWD"

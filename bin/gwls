@@ -7,19 +7,11 @@
 
 set -euo pipefail
 
-find_project_root() {
-    local dir="$PWD"
-    while [[ "$dir" != "/" ]]; do
-        if [[ -d "$dir/.bare" ]]; then
-            echo "$dir"
-            return 0
-        fi
-        dir=$(dirname "$dir")
-    done
-    return 1
-}
+source "$(dirname "${BASH_SOURCE[0]}")/gw-lib"
 
-project_dir=$(find_project_root || true)
+case "${1:-}" in -h|--help) gw_usage "${BASH_SOURCE[0]}"; exit 0 ;; esac
+
+project_dir=$(gw_project_root || true)
 if [[ -z "$project_dir" ]]; then
     echo "error: not inside a worktree-layout project (no .bare/ found walking up)" >&2
     exit 1

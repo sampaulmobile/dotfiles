@@ -66,12 +66,14 @@ Repos can use a bare+worktree layout for branch-per-directory workflows:
 
 | Script | Usage | Purpose |
 |--------|-------|---------|
-| `gwclone` | `gwclone <url> [name]` | Bare clone into `~/dev/`, create initial worktree for default branch + `.shared/`, drop into tmux session |
+| `gwclone` | `gwclone <url> [name] [-a]` | Bare clone into `~/dev/`, create initial worktree for default branch + `.shared/`; `-a/--attach` drops into a tmux session (default is batch-safe) |
 | `gwnew` | `gwnew <branch> [base]` | Create a new worktree (new branch, existing local branch, or remote-tracking branch); links `.shared/` contents in |
 | `gwrm` | `gwrm <branch-or-dir>` | Remove worktree (unwinds `.shared` links first), kill its tmux session, prompt to delete the branch |
 | `gwls` | `gwls` | List worktrees for current project, `*` marks active tmux sessions |
-| `gwconvert` | `gwconvert [path] [dest]` | Migrate a normal clone to bare+worktree layout (re-clones from origin, keeps `.gwbak` backup); warns about local-only state, offers a secrets sweep into `.shared/`; `[dest]` relocates (e.g. flatten `~/dev/org/x` → `~/dev/x`) |
-| `gw-lib` | (sourced) | Shared functions: project-root discovery, branch↔dir mapping, `.shared` link/unlink |
+| `gwconvert` | `gwconvert <path> [dest]` | Migrate a normal clone to bare+worktree layout (re-clones from origin, keeps `.gwbak` backup); warns about local-only state, offers a secrets sweep into `.shared/`; `[dest]` relocates (e.g. flatten `~/dev/org/x` → `~/dev/x`) |
+| `gw-lib` | (sourced) | Shared functions: project-root discovery, branch↔dir mapping, `.shared` link/unlink, `-h` usage printing |
+
+All `gw*` commands answer `-h`/`--help` (usage = the script's header comment). `gwnew`/`gwrm` with no args open fzf pickers.
 
 ### Worktree Conventions
 

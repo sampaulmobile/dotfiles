@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 #
-# gwrm [branch]
+# gwrm [branch-or-dir]
 #
-# Removes the worktree for <branch> in the current project:
+# If called with no arguments, presents an fzf picker of the project's
+# worktrees ("(merged)" marks branches whose PR is merged, via gh).
+#
+# Removes the worktree for <branch-or-dir> in the current project:
 #   - Kills the tmux session for the worktree (if one exists)
 #   - Runs `git worktree remove`
 #   - Prompts to delete the branch as well (safe delete only;
@@ -14,6 +17,8 @@
 set -euo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/gw-lib"
+
+case "${1:-}" in -h|--help) gw_usage "${BASH_SOURCE[0]}"; exit 0 ;; esac
 
 project_dir=$(gw_project_root || true)
 if [[ -z "$project_dir" ]]; then

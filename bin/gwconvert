@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# gwconvert [path] [dest]
+# gwconvert <path> [dest]
 #
 # Converts an existing normal git clone into the bare+worktree layout.
-# Path defaults to $PWD. Must be run from OUTSIDE the target directory.
+# Must be run from OUTSIDE the target directory.
 # If [dest] is given, the new layout is created there instead of at the
 # original path (e.g. `gwconvert ~/dev/nydig/foo ~/dev/foo` to flatten).
 #
@@ -24,7 +24,12 @@ source "$(dirname "${BASH_SOURCE[0]}")/gw-lib"
 # Junk we never propose for .shared (build artifacts, caches, deps)
 JUNK='node_modules/|\.venv/|/venv/|__pycache__|\.DS_Store|/dist/|/build/|\.pytest_cache|\.mypy_cache|\.ruff_cache|\.idea/|\.vscode/|/target/|\.next/|/coverage/|\.terraform/|\.tox/|\.eggs/|\.egg-info|\.gradle/|\.npm/|\.cache/|/logs?/|\.log$|\.coverage$|\.import_linter_cache/'
 
-target="${1:-$PWD}"
+case "${1:-}" in
+    -h|--help) gw_usage "${BASH_SOURCE[0]}"; exit 0 ;;
+    "") gw_usage "${BASH_SOURCE[0]}" >&2; exit 1 ;;
+esac
+
+target="$1"
 
 if [[ ! -d "$target" ]]; then
     echo "error: $target does not exist" >&2
