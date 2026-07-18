@@ -4,7 +4,9 @@
 #
 # Creates a new worktree for <branch> inside the current project's
 # bare+worktree layout. Walks up from cwd to find a directory containing
-# a .bare/ sibling — that's the project root.
+# a .bare/ sibling — that's the project root. Slashed branch names get
+# flattened directories (spaul/foo -> spaul-foo/). Links .shared/ contents
+# into the new worktree.
 #
 # If called with no arguments, fetches origin and presents an fzf picker
 # of remote branches that don't already have a local worktree.
@@ -20,22 +22,13 @@
 
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/gw-lib"
+
+case "${1:-}" in -h|--help) gw_usage "${BASH_SOURCE[0]}"; exit 0 ;; esac
+
 base="${2:-}"
 
-# Walk up from cwd to find a project root (directory containing .bare/).
-find_project_root() {
-    local dir="$PWD"
-    while [[ "$dir" != "/" ]]; do
-        if [[ -d "$dir/.bare" ]]; then
-            echo "$dir"
-            return 0
-        fi
-        dir=$(dirname "$dir")
-    done
-    return 1
-}
-
-project_dir=$(find_project_root || true)
+project_dir=$(gw_project_root || true)
 if [[ -z "$project_dir" ]]; then
     echo "error: not inside a worktree-layout project (no .bare/ found walking up)" >&2
     exit 1
@@ -48,15 +41,16 @@ git -C "$bare" fetch origin --quiet 2>/dev/null || true
 
 # If no branch given, pick from remote branches via fzf
 if [[ -z "${1:-}" ]]; then
-    # Get existing worktree directory names
-    existing_wts=$(find "$project_dir" -mindepth 1 -maxdepth 1 -type d ! -name '.bare' -exec basename {} \;)
+    # Branches that already have a worktree (from git's records, not dir names)
+    existing_branches=$(git -C "$bare" worktree list --porcelain |
+        awk '$1 == "branch" { sub("refs/heads/", "", $2); print $2 }')
 
     # List remote branches, strip origin/ prefix, exclude ones that already have a worktree
     branch=$(git -C "$bare" branch -r --format='%(refname:short)' |
         sed 's|^origin/||' |
         grep -v '^HEAD$' |
         while IFS= read -r b; do
-            echo "$existing_wts" | grep -qx "$b" || echo "$b"
+            echo "$existing_branches" | grep -qx "$b" || echo "$b"
         done |
         fzf --prompt="branch> ") || true
 
@@ -67,7 +61,9 @@ else
     branch="$1"
 fi
 
-worktree_path="$project_dir/$branch"
+# Slashed branch names get flattened dirs (spaul/foo -> spaul-foo) so
+# worktrees stay direct children of the project root.
+worktree_path="$project_dir/$(gw_dir_for_branch "$branch")"
 
 if [[ -e "$worktree_path" ]]; then
     echo "error: $worktree_path already exists" >&2
@@ -91,7 +87,11 @@ fi
 
 echo "worktree: $worktree_path"
 
-# Hand off to sessionizer
-if command -v tmux-sessionizer >/dev/null 2>&1; then
+# Link machine-local secrets/config from <project>/.shared into the new worktree
+gw_link_shared "$project_dir" "$worktree_path"
+
+# Hand off to sessionizer — but only at an interactive terminal. When run
+# by scripts or claude (stdout not a tty), just print the path (batch-safe).
+if [[ -t 1 ]] && command -v tmux-sessionizer >/dev/null 2>&1; then
     exec tmux-sessionizer "$worktree_path"
 fi

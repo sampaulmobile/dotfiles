@@ -10,8 +10,11 @@
 # get dotfiles dir
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-# get sudo privs upfront
+# get sudo privs upfront, and keep them alive for the whole run (the cache
+# expires after 5 idle minutes; brew and pkg-installer casks need sudo late).
+# The background loop dies with the script via the kill -0 check.
 sudo -v
+while true; do sudo -n true; sleep 60; kill -0 "$$" 2>/dev/null || exit; done &
 
 # accept xcode command line tools terms
 echo "Accepting xcode command line tools terms"
@@ -56,6 +59,9 @@ done
 echo "Symlinking dotfiles"
 $DOTFILES/bin/symlink_files.sh
 
+echo "Installing Rectangle config"
+$DOTFILES/bin/setup_rectangle.sh
+
 # set shell (assuming ZSH has been installed)
 echo "Setting default shell to zsh"
 $DOTFILES/bin/set_zsh_mac.sh
@@ -76,6 +82,7 @@ echo ""
 echo "===== Done. Manual steps remaining ====="
 echo "  - edit other/*.local (git identity, claude model, project dirs — see other/README.md)"
 echo "  - gh auth login"
+echo "  - bin/setup_github_ssh_key.sh (per-machine SSH key for github)"
 echo "  - claude (first run: log in)"
 echo "  - sign in to 1Password"
 echo "  - launch Docker.app once to finish its install"

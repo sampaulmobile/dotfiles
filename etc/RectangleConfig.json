@@ -1,0 +1,24 @@
+{
+  "bundleId": "com.knollsoft.Rectangle",
+  "version": "89",
+  "defaults": {},
+  "shortcuts": {
+    "leftHalf":        { "keyCode": 4,   "modifierFlags": 1179648 },
+    "bottomHalf":      { "keyCode": 38,  "modifierFlags": 1179648 },
+    "topHalf":         { "keyCode": 40,  "modifierFlags": 1179648 },
+    "rightHalf":       { "keyCode": 37,  "modifierFlags": 1179648 },
+    "maximize":        { "keyCode": 49,  "modifierFlags": 1179648 },
+    "topLeft":         { "keyCode": 123, "modifierFlags": 1310720 },
+    "topRight":        { "keyCode": 124, "modifierFlags": 1310720 },
+    "bottomLeft":      { "keyCode": 123, "modifierFlags": 1441792 },
+    "bottomRight":     { "keyCode": 124, "modifierFlags": 1441792 },
+    "previousDisplay": { "keyCode": 123, "modifierFlags": 1835008 },
+    "nextDisplay":     { "keyCode": 124, "modifierFlags": 1835008 },
+    "firstThird":      { "keyCode": 123, "modifierFlags": 786432 },
+    "lastThird":       { "keyCode": 124, "modifierFlags": 786432 },
+    "smaller":         { "keyCode": 123, "modifierFlags": 917504 },
+    "larger":          { "keyCode": 124, "modifierFlags": 917504 },
+    "center":          { "keyCode": 8,   "modifierFlags": 1572864 },
+    "restore":         { "keyCode": 6,   "modifierFlags": 1572864 }
+  }
+}

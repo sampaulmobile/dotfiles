@@ -1,20 +1,35 @@
 #!/usr/bin/env bash
 #
-# gwconvert [path]
+# gwconvert <path> [dest]
 #
 # Converts an existing normal git clone into the bare+worktree layout.
-# Path defaults to $PWD. Must be run from OUTSIDE the target directory.
+# Must be run from OUTSIDE the target directory.
+# If [dest] is given, the new layout is created there instead of at the
+# original path (e.g. `gwconvert ~/dev/nydig/foo ~/dev/foo` to flatten).
 #
 # What it does:
 #   1. Sanity checks: git repo, non-bare, has origin, no uncommitted changes
-#   2. Renames <target> to <target>.gwbak
-#   3. Bare-clones from origin into <target>/.bare/
-#   4. Creates a worktree for the default branch
-#   5. Leaves <target>.gwbak in place for you to inspect and delete manually
+#   2. Warns about local-only state (stashes, unpushed commits, local
+#      branches, untracked files) — all of it stays in the backup only
+#   3. Renames <target> to <target>.gwbak
+#   4. Bare-clones from origin into <dest>/.bare/ + default-branch worktree
+#   5. Offers to copy secrets/local config from the backup into <dest>/.shared/
+#      (gwnew links .shared contents into every new worktree)
+#   6. Leaves <target>.gwbak in place for you to inspect and delete manually
 
 set -euo pipefail
 
-target="${1:-$PWD}"
+source "$(dirname "${BASH_SOURCE[0]}")/gw-lib"
+
+# Junk we never propose for .shared (build artifacts, caches, deps)
+JUNK='node_modules/|\.venv/|/venv/|__pycache__|\.DS_Store|/dist/|/build/|\.pytest_cache|\.mypy_cache|\.ruff_cache|\.idea/|\.vscode/|/target/|\.next/|/coverage/|\.terraform/|\.tox/|\.eggs/|\.egg-info|\.gradle/|\.npm/|\.cache/|/logs?/|\.log$|\.coverage$|\.import_linter_cache/'
+
+case "${1:-}" in
+    -h|--help) gw_usage "${BASH_SOURCE[0]}"; exit 0 ;;
+    "") gw_usage "${BASH_SOURCE[0]}" >&2; exit 1 ;;
+esac
+
+target="$1"
 
 if [[ ! -d "$target" ]]; then
     echo "error: $target does not exist" >&2
@@ -23,9 +38,10 @@ fi
 
 # Absolutize (and fail if cd doesn't work)
 target=$(cd "$target" && pwd)
+dest="${2:-$target}"
 
-if [[ ! -d "$target/.git" ]]; then
-    echo "error: $target is not a git repository (no .git/)" >&2
+if [[ ! -d "$target/.git" && ! -f "$target/.git" ]]; then
+    echo "error: $target is not a git repository (no .git)" >&2
     exit 1
 fi
 
@@ -56,10 +72,31 @@ if git -C "$target" rev-parse --verify HEAD >/dev/null 2>&1; then
     fi
 fi
 
+if [[ "$dest" != "$target" && -e "$dest" ]]; then
+    echo "error: dest $dest already exists" >&2
+    exit 1
+fi
+
+# --- Local-only state warning: none of this survives outside the backup ---
+stash_count=$(git -C "$target" stash list 2>/dev/null | wc -l | tr -d ' ')
+unpushed_count=$(git -C "$target" log --branches --not --remotes --oneline 2>/dev/null | wc -l | tr -d ' ')
+local_branches=$(git -C "$target" for-each-ref refs/heads --format '%(refname:short)|%(upstream)' 2>/dev/null | awk -F'|' '$2=="" {print $1}')
+local_branch_count=$(echo -n "$local_branches" | grep -c . || true)
+untracked_count=$(git -C "$target" ls-files --others --exclude-standard 2>/dev/null | grep -cvE "$JUNK" || true)
+
 echo "About to convert:"
 echo "  target: $target"
+[[ "$dest" != "$target" ]] && echo "  dest:   $dest"
 echo "  remote: $url"
 echo ""
+if (( stash_count + unpushed_count + local_branch_count + untracked_count > 0 )); then
+    echo "  LOCAL-ONLY STATE (stays in the .gwbak backup, NOT in the new layout):"
+    (( unpushed_count > 0 ))     && echo "    - $unpushed_count unpushed commit(s)  <- push these first if they matter"
+    (( local_branch_count > 0 )) && echo "    - $local_branch_count local-only branch(es): $(echo "$local_branches" | paste -sd, -)"
+    (( stash_count > 0 ))        && echo "    - $stash_count stash(es)"
+    (( untracked_count > 0 ))    && echo "    - $untracked_count untracked file(s) (secrets among them can be swept into .shared below)"
+    echo ""
+fi
 read -r -p "Proceed? Backup will be kept at <target>.gwbak. (y/n) " reply
 if [[ ! "$reply" =~ ^[Yy]$ ]]; then
     echo "aborted"
@@ -77,21 +114,46 @@ fi
 
 # --- Perform the conversion ---
 mv "$target" "$backup"
-mkdir -p "$target"
+mkdir -p "$dest"
 
-git clone --bare "$url" "$target/.bare"
-git -C "$target/.bare" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
-git -C "$target/.bare" fetch origin
+git clone --bare "$url" "$dest/.bare"
+git -C "$dest/.bare" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+git -C "$dest/.bare" fetch origin
 
-default_branch=$(git -C "$target/.bare" symbolic-ref --short HEAD)
-git -C "$target/.bare" worktree add "$target/$default_branch" "$default_branch"
-git -C "$target/.bare" branch \
+default_branch=$(git -C "$dest/.bare" symbolic-ref --short HEAD)
+worktree_path="$dest/$(gw_dir_for_branch "$default_branch")"
+git -C "$dest/.bare" worktree add "$worktree_path" "$default_branch"
+git -C "$dest/.bare" branch \
     --set-upstream-to="origin/$default_branch" "$default_branch" >/dev/null 2>&1 || true
-echo "created worktree: $default_branch"
+echo "created worktree: $worktree_path"
+
+# --- Secrets sweep: offer backup's ignored/local config files for .shared ---
+mkdir -p "$dest/.shared"
+candidates=$(
+    {
+        git -C "$backup" ls-files --others --ignored --exclude-standard 2>/dev/null | grep -vE "$JUNK"
+        # untracked-but-unignored files that look like secrets/local config
+        git -C "$backup" ls-files --others --exclude-standard 2>/dev/null | grep -vE "$JUNK" |
+            grep -iE '(^|/)\.?env|secret|credential|\.pem$|\.crt$|\.key$|\.user\.yml$|\.local\.'
+    } | sort -u
+)
+if [[ -n "$candidates" ]]; then
+    echo ""
+    echo "Secrets/local-config sweep — copy into $dest/.shared/ ? (y/n per file)"
+    # candidates on fd 3 so the per-file prompt can read stdin normally
+    while IFS= read -r -u 3 rel; do
+        read -r -p "  $rel ? " keep
+        if [[ "$keep" =~ ^[Yy]$ ]]; then
+            mkdir -p "$dest/.shared/$(dirname "$rel")"
+            cp -R "$backup/$rel" "$dest/.shared/$rel"
+        fi
+    done 3<<< "$candidates"
+    gw_link_shared "$dest" "$worktree_path"
+fi
 
 echo ""
 echo "Done."
-echo "  new layout: $target"
+echo "  new layout: $dest"
 echo "  backup:     $backup"
 echo "  use 'gwnew <branch>' to add worktrees as needed"
 echo "  (inspect the backup, then 'rm -rf $backup' when you're sure nothing's needed)"

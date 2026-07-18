@@ -1,28 +1,42 @@
 #!/usr/bin/env bash
 #
-# gwclone <url> [name]
+# gwclone <url> [name] [-a|--attach]
 #
 # Clones a repo into the bare+worktree layout under ~/dev/:
 #
 #   ~/dev/<name>/
 #   ├── .bare/          (bare git database)
+#   ├── .shared/        (machine-local files, linked into worktrees)
 #   └── <default-branch>/  (initial worktree)
 #
 # If [name] is omitted, it's derived from the URL (strips .git suffix).
-# After cloning, drops you into a tmux session for the initial worktree
-# via tmux-sessionizer.
+# With -a/--attach, drops into a tmux session for the initial worktree
+# via tmux-sessionizer; by default it just prints the path (batch-safe).
 
 set -euo pipefail
 
-url="${1:-}"
+source "$(dirname "${BASH_SOURCE[0]}")/gw-lib"
+
+attach=false
+positional=()
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help) gw_usage "${BASH_SOURCE[0]}"; exit 0 ;;
+        -a|--attach) attach=true ;;
+        -*) echo "unknown flag: $arg" >&2; exit 1 ;;
+        *) positional+=("$arg") ;;
+    esac
+done
+
+url="${positional[0]:-}"
 if [[ -z "$url" ]]; then
-    echo "usage: gwclone <url> [name]" >&2
+    gw_usage "${BASH_SOURCE[0]}" >&2
     exit 1
 fi
 
 # Derive project name
-if [[ $# -ge 2 ]]; then
-    name="$2"
+if [[ ${#positional[@]} -ge 2 ]]; then
+    name="${positional[1]}"
 else
     name="${url##*/}"
     name="${name%.git}"
@@ -51,17 +65,24 @@ git -C "$project_dir/.bare" fetch origin
 # Detect the default branch from the bare repo's HEAD
 default_branch=$(git -C "$project_dir/.bare" symbolic-ref --short HEAD)
 
-# Create the initial worktree for the default branch
-git -C "$project_dir/.bare" worktree add "$project_dir/$default_branch" "$default_branch"
+# Create the initial worktree for the default branch (flattened dir name)
+worktree_path="$project_dir/$(gw_dir_for_branch "$default_branch")"
+git -C "$project_dir/.bare" worktree add "$worktree_path" "$default_branch"
 
 # Wire up tracking so `git pull` works inside the worktree
 git -C "$project_dir/.bare" branch \
     --set-upstream-to="origin/$default_branch" "$default_branch" >/dev/null
 
-echo "cloned: $project_dir"
-echo "worktree: $project_dir/$default_branch"
+# Machine-local secrets/config home — gwnew links its contents into every
+# new worktree (see CLAUDE.md "Worktree Conventions")
+mkdir -p "$project_dir/.shared"
+gw_link_shared "$project_dir" "$worktree_path"
 
-# Hand off to sessionizer — opens a tmux session for the worktree
-if command -v tmux-sessionizer >/dev/null 2>&1; then
-    exec tmux-sessionizer "$project_dir/$default_branch"
+echo "cloned: $project_dir"
+echo "worktree: $worktree_path"
+
+# Hand off to sessionizer only when asked — default stays batch-safe
+if [[ "$attach" == true ]] && command -v tmux-sessionizer >/dev/null 2>&1; then
+    exec tmux-sessionizer "$worktree_path"
 fi
+echo "attach: tmux-sessionizer $worktree_path   (or pass -a next time)"
