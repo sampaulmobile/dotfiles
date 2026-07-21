@@ -20,6 +20,7 @@ brew 'lazygit'
 # utilities
 brew 'fnm'
 brew 'neovim'
+brew 'worktrunk'
 brew 'awscli'
 brew 'pre-commit'
 # brew 'fastlane'

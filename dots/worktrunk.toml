@@ -1,0 +1,17 @@
+# worktrunk user config — symlinked to ~/.config/worktrunk/config.toml
+# Hub-model tmux glue: wt switch lands you in a tmux SESSION for the
+# worktree (never a cd — the zshrc wt() wrapper passes --no-cd); removal
+# kills the session(s) and returns you to the repo's hub session.
+#
+# Worktree paths use the default template:
+#   {{ repo_path }}/../{{ repo }}.{{ branch | sanitize }}
+# e.g. ~/dev/myproject + feat/x -> ~/dev/myproject.feat-x
+# (sessionizer picks these up at depth 1; dots become underscores in
+# session names, so Ctrl+F / Ctrl+Space / Ctrl+G all work unmodified)
+
+post-switch = "wt-tmux-jump {{ worktree_path }}"
+post-merge = "wt-tmux-cleanup {{ worktree_path }} {{ repo }}"
+post-remove = "wt-tmux-cleanup {{ worktree_path }} {{ repo }}"
+
+# Candidate (enable after evaluating cost on big node_modules/.venv repos):
+# pre-start = "wt step copy-ignored"

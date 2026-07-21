@@ -68,6 +68,23 @@ export PATH="$HOME/dotfiles/bin:$PATH"
 # ===== FNM =====
 command -v fnm &>/dev/null && eval "$(fnm env)"
 
+# ===== WORKTRUNK =====
+# Session-jump semantics: `wt switch` never cd's this pane — the
+# post-switch hook (see dots/worktrunk.toml) lands us in the worktree's
+# tmux session instead. --no-cd suppresses worktrunk's own navigation.
+# NOTE: new branches base off LOCAL main — `git pull` the hub first,
+# same discipline as plain `git checkout -b`.
+if command -v wt &>/dev/null; then
+    wt() {
+        if [[ "$1" == "switch" ]]; then
+            shift
+            command wt switch --no-cd "$@"
+        else
+            command wt "$@"
+        fi
+    }
+fi
+
 # run starship
 eval "$(starship init zsh)"
 
