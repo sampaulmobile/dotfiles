@@ -65,8 +65,9 @@
     # git status
     s = status
 
-    # git worktree
+    # git worktree (raw git ops; the standalone `wt` binary is worktrunk)
     wt = worktree
+
 [pull]
 	rebase = false
 [credential "https://github.com"]

@@ -47,42 +47,45 @@ public package names in Brewfiles are fine. Sweep diffs before pushing.
 - `bin/tmux-claude-notify` — notification hook for Claude Code. Sends terminal bell + macOS notification on permission prompts. Configured in `~/.claude/settings.json`.
 - `bin/tmux-claude-lib` — shared functions sourced by the claude session manager scripts.
 
-## Git Worktree Layout
+## Worktrees: hub model (worktrunk)
 
-Repos can use a bare+worktree layout for branch-per-directory workflows:
+Work repos are normal clones ("hubs") at `~/dev/<repo>` with the default
+branch checked out. Branch work happens in disposable sibling worktrees
+managed by [worktrunk](https://github.com/max-sixty/worktrunk) (`wt`,
+installed via Brewfile):
 
 ```
-~/dev/myproject/
-├── .bare/          # bare git database (shared across all worktrees)
-├── main/           # worktree for main branch
-└── feature-xyz/    # worktree for feature branch
+~/dev/myproject/                # hub: normal clone, main checked out — you live here
+~/dev/myproject.feat-x/         # worktree for branch feat/x (slashes sanitized)
 ```
 
-- No `.git` pointer file at the parent — it's a plain container directory.
-- Each worktree is a fully independent checkout; git commands work normally inside them.
-- The sessionizer discovers worktrees automatically by detecting `.bare/` in project dirs.
+- Daily flow: `Ctrl+F` to the hub → `git pull` → `wt switch -c <branch>` →
+  the post-switch hook drops you into a tmux session for the worktree →
+  `Ctrl+Space` for claude there. `wt remove <branch>` when done (hook kills
+  the worktree's tmux + claude sessions and returns you to the hub).
+- New branches base off LOCAL main — pull the hub first, same discipline as
+  `git checkout -b`.
+- `wt switch pr:123` makes a review worktree for a PR. Plain `wt switch`
+  (no `-c`) is redundant with `Ctrl+F`.
+- Secrets/machine-local files live in the hub checkout (gitignored).
+  `wt step copy-ignored` copies them (plus caches like `.venv`,
+  `node_modules`) into a worktree when it needs to be runnable — kept
+  MANUAL, not a hook: ~13s / 3.2 GiB on the biggest repo.
+- Glue: `dots/worktrunk.toml` (user-level hooks) + `bin/wt-tmux-jump` /
+  `bin/wt-tmux-cleanup`; the zshrc `wt()` wrapper passes `--no-cd` on
+  switch so the invoking pane never moves. Session naming (dir basename,
+  dots→underscores) matches the sessionizer, so Ctrl+F/Ctrl+Space/Ctrl+G
+  work on worktrees with no special handling.
+- Claude memory/sessions key to the LAUNCH directory: hub sessions
+  accumulate context durably; per-worktree claude sessions are ephemeral
+  (put durable knowledge in the repo's CLAUDE.md, or CLAUDE.local.md at
+  the hub). For work whose context should persist, run claude AT the hub
+  and let it use its own worktree isolation.
 
-### Worktree Scripts (`bin/`)
-
-| Script | Usage | Purpose |
-|--------|-------|---------|
-| `gwclone` | `gwclone <url> [name] [-a]` | Bare clone into `~/dev/`, create initial worktree for default branch + `.shared/`; `-a/--attach` drops into a tmux session (default is batch-safe) |
-| `gwnew` | `gwnew <branch> [base]` | Create a new worktree (new branch, existing local branch, or remote-tracking branch); links `.shared/` contents in |
-| `gwrm` | `gwrm <branch-or-dir>` | Remove worktree (unwinds `.shared` links first), kill its tmux session, prompt to delete the branch |
-| `gwls` | `gwls` | List worktrees for current project, `*` marks active tmux sessions |
-| `gwconvert` | `gwconvert <path> [dest]` | Migrate a normal clone to bare+worktree layout (re-clones from origin, keeps `.gwbak` backup); warns about local-only state, offers a secrets sweep into `.shared/`; `[dest]` relocates (e.g. flatten `~/dev/org/x` → `~/dev/x`) |
-| `gw-lib` | (sourced) | Shared functions: project-root discovery, branch↔dir mapping, `.shared` link/unlink, `-h` usage printing |
-
-All `gw*` commands answer `-h`/`--help` (usage = the script's header comment). `gwnew`/`gwrm` with no args open fzf pickers.
-
-### Worktree Conventions
-
-- `~/dotfiles/bin` is on `PATH` (via `sources/exports`), so `gw*` commands are available everywhere.
-- `git wt` is aliased to `git worktree` in gitconfig for raw worktree commands.
-- Worktree scripts find the project root by walking up from cwd looking for `.bare/`.
-- `gwconvert` only migrates branches that exist on origin — local-only branches, stashes, and untracked files stay in the `.gwbak` backup.
-- Slashed branch names get flattened worktree dirs (`spaul/foo` → `spaul-foo/`) so worktrees stay direct children of the project root (nesting would hide them from the sessionizer). `gwrm` accepts either the branch or the dir name.
-- **`.shared/` convention:** machine-local per-project files (`.env`, secrets, certs) live once in `<project>/.shared/` (untracked); `gwnew`/`gwclone` symlink its contents (file-level, relative paths preserved) into each worktree. Repos are expected to gitignore these names — the linker warns on any that aren't (fix the repo's `.gitignore` upstream; don't mask locally).
+The previous bare+worktree layout (`.bare/` containers) and its `gw*`
+scripts are retired — kept in `archive/` for reference. The sessionizer
+still recognizes `.bare/` containers (other machines may lag during the
+transition).
 
 ## Conventions
 

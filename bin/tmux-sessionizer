@@ -4,7 +4,7 @@
 # Based on ThePrimeagen's tmux-sessionizer.
 #
 # Worktree support: if a project directory contains a .bare/ subdir (the
-# bare+worktree layout — see bin/gwclone), its immediate worktree subdirs
+# legacy bare+worktree layout — see archive/gwclone), its worktree subdirs
 # are enumerated as separate entries. Session names become "<project>_<branch>"
 # so two projects with the same branch name don't collide.
 

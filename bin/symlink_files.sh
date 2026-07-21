@@ -55,6 +55,10 @@ link $other/claude/rules ~/.claude/rules
 mkdir -p ~/.config
 link $dir/starship.toml ~/.config/starship.toml
 
+# ===== worktrunk =====
+mkdir -p ~/.config/worktrunk
+link $dir/worktrunk.toml ~/.config/worktrunk/config.toml
+
 # ===== neovim (LazyVim config) =====
 link $dir/nvim ~/.config/nvim
 

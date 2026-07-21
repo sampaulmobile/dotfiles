@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+#
+# wt-tmux-jump <worktree-path>
+#
+# worktrunk post-switch hook: land in a tmux session for the worktree
+# instead of cd'ing the invoking pane (the wt() zsh wrapper passes
+# --no-cd). Session naming matches tmux-sessionizer: directory basename
+# with dots translated to underscores (myproject.feat-x -> myproject_feat-x).
+# No-op outside tmux.
+
+set -euo pipefail
+
+path="${1:?usage: wt-tmux-jump <worktree-path>}"
+[[ -n "${TMUX:-}" ]] || exit 0
+
+name=$(basename "$path" | tr . _)
+
+if ! tmux has-session -t="$name" 2>/dev/null; then
+    tmux new-session -ds "$name" -c "$path"
+fi
+tmux switch-client -t "$name"
