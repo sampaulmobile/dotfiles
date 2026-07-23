@@ -244,6 +244,7 @@ if [[ "$OSTYPE" == darwin* ]]; then
     alias gnpr='gh pr create --web'
     alias giss='gh issue create --web'
     alias grev='gh browse https://github.com/pulls/review-requested'
+    alias gnpr='gh pr create --web'
 fi
 
 

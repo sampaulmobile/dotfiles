@@ -42,8 +42,15 @@ defaults write com.apple.BluetoothAudioAgent "Apple Bitpool Min (editable)" -int
 defaults write NSGlobalDomain AppleKeyboardUIMode -int 3
 
 # Use scroll gesture with the Ctrl (^) modifier key to zoom
-# defaults write com.apple.universalaccess closeViewScrollWheelToggle -bool true
-# defaults write com.apple.universalaccess HIDScrollZoomModifierMask -int 262144
+# (Accessibility > Zoom). Writing to com.apple.universalaccess is TCC-protected:
+# the terminal app needs Full Disk Access or these two writes fail.
+# Modifier masks: Control=262144, Option=524288, Command=1048576
+defaults write com.apple.universalaccess closeViewScrollWheelToggle -bool true
+defaults write com.apple.universalaccess HIDScrollZoomModifierMask -int 262144
+
+# Zoomed image moves: continuously with pointer
+# (0 = continuously, 1 = when pointer reaches edge, 2 = keep pointer centered)
+defaults write com.apple.universalaccess closeViewPanningMode -int 0
 
 # Stop iTunes from responding to the keyboard media keys
 launchctl unload -w /System/Library/LaunchAgents/com.apple.rcd.plist 2> /dev/null
