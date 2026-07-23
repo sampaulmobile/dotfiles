@@ -10,6 +10,11 @@ eval $(/opt/homebrew/bin/brew shellenv)
 echo "Running brew bundle (Brewfile_other)"
 brew bundle --no-upgrade --file=$DOTFILES/etc/Brewfile_other
 
+# register user-scoped MCP servers from other/mcp-servers.local.json
+# (no-op if the file doesn't exist; OAuth via /mcp is still manual)
+echo "Registering MCP servers"
+$DOTFILES/bin/setup_mcp.sh
+
 echo ""
 echo "===== Done. Manual steps remaining ====="
 echo "  - fill in other/*.local values (model env, TLS certs, project dirs, git identity)"

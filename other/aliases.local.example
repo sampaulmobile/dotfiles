@@ -1,0 +1,6 @@
+# Machine-local aliases & functions — sourced by ~/.zshrc after the shared
+# aliases, so anything here can override them. Work/employer-specific
+# commands, host shortcuts, and env exports live here, never in git.
+# To use: cp aliases.local.example aliases.local && edit.
+
+# alias myproj="cd $HOME/dev/myproject"

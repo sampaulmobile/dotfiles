@@ -8,6 +8,7 @@ tracked — the real files are gitignored and never leave the machine.
 | File | Consumed by | Purpose |
 |------|-------------|---------|
 | `zshrc.local` | sourced at the end of `~/.zshrc` | env vars, extra PATH, anything shell |
+| `aliases.local` | sourced by `~/.zshrc` after shared aliases | machine/work-specific aliases & functions |
 | `gitconfig.local` | `[include]` in `~/.gitconfig` | per-machine git identity/overrides |
 | `tmux-sessionizer.local` | sourced by `bin/tmux-sessionizer` | override `search_dirs` |
 | `claude/settings.json` | file-symlinked to `~/.claude/settings.json` | Claude Code settings (seeded from the .example) |
