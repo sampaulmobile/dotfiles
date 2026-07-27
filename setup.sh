@@ -81,6 +81,8 @@ $DOTFILES/bin/update_tpm_plugins.sh
 echo ""
 echo "===== Done. Manual steps remaining ====="
 echo "  - edit other/*.local (git identity, claude model, project dirs — see other/README.md)"
+echo "  - if macos_defaults skipped the zoom settings: grant the terminal Full Disk"
+echo "    Access (Privacy & Security), relaunch it, re-run bin/macos_defaults.sh -f"
 echo "  - gh auth login"
 echo "  - bin/setup_github_ssh_key.sh (per-machine SSH key for github)"
 echo "  - claude (first run: log in)"

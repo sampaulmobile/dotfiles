@@ -37,8 +37,8 @@ bindkey '^h' backward-delete-char
 # ===== ALIASES =====
 [[ -f "$SOURCES/aliases" ]] && source $SOURCES/aliases
 
-# ===== OTHER ALIASES =====
-[[ -f "$SOURCES/other_aliases" ]] && source $SOURCES/other_aliases
+# ===== MACHINE-LOCAL ALIASES (untracked — see other/README.md) =====
+[[ -f "$DOTFILES/other/aliases.local" ]] && source "$DOTFILES/other/aliases.local"
 
 # run starship
 eval "$(starship init zsh)"

@@ -41,9 +41,28 @@ defaults write com.apple.BluetoothAudioAgent "Apple Bitpool Min (editable)" -int
 # (e.g. enable Tab in modal dialogs)
 defaults write NSGlobalDomain AppleKeyboardUIMode -int 3
 
-# Use scroll gesture with the Ctrl (^) modifier key to zoom
-# defaults write com.apple.universalaccess closeViewScrollWheelToggle -bool true
-# defaults write com.apple.universalaccess HIDScrollZoomModifierMask -int 262144
+# Use scroll gesture with the Ctrl (^) modifier key to zoom (Accessibility >
+# Zoom). com.apple.universalaccess is TCC-protected: writes only succeed if the
+# terminal app has Full Disk Access. FDA can't be granted programmatically and
+# never triggers a permission prompt, so probe first; if denied, send the user
+# to the right Settings pane. Granting FDA only takes effect after the terminal
+# is quit and reopened, so don't pause-and-wait — skip and ask for a re-run.
+if defaults write com.apple.universalaccess __fda_probe -bool true 2>/dev/null; then
+	defaults delete com.apple.universalaccess __fda_probe 2>/dev/null
+	defaults write com.apple.universalaccess closeViewScrollWheelToggle -bool true
+	# Modifier masks: Control=262144, Option=524288, Command=1048576
+	defaults write com.apple.universalaccess HIDScrollZoomModifierMask -int 262144
+	# Zoomed image moves: 0=continuously with pointer, 1=when pointer reaches
+	# edge, 2=keep pointer centered
+	defaults write com.apple.universalaccess closeViewPanningMode -int 0
+else
+	echo ""
+	echo "!! SKIPPED ctrl+scroll zoom settings: this terminal has no Full Disk Access."
+	echo "!! In the Settings pane that just opened, add your terminal app, then"
+	echo "!! quit + reopen the terminal and re-run: bin/macos_defaults.sh -f"
+	echo ""
+	open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+fi
 
 # Stop iTunes from responding to the keyboard media keys
 launchctl unload -w /System/Library/LaunchAgents/com.apple.rcd.plist 2> /dev/null

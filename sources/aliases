@@ -241,6 +241,7 @@ alias git_reset_to_master='git reset --hard origin/$(git_main_branch)'
 # ============ GITHUB =============
 if [[ "$OSTYPE" == darwin* ]]; then
     alias gpr='gh pr create --web'
+    alias gnpr='gh pr create --web'
     alias giss='gh issue create --web'
     alias grev='gh browse https://github.com/pulls/review-requested'
 fi
