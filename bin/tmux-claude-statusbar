@@ -18,7 +18,10 @@
 # with more than a handful of sessions, per-session capture-pane calls
 # alone blow the 200ms budget. Classification per pane reuses
 # tmux-claude-lib's classify_pane_status (same heuristic as the dashboard),
-# just fed from the batched capture instead of its own capture-pane call.
+# just fed from the batched capture instead of its own capture-pane call —
+# gated by is_claude_pane_command against each pane's #{pane_current_command}
+# (fetched in the same batched invocation) so a pane NOT running claude can
+# never be misclassified as needing attention.
 
 source ~/dotfiles/bin/tmux-claude-lib
 
@@ -31,21 +34,42 @@ permission_count=0
 working_count=0
 
 if (( ${#sessions[@]} > 0 )); then
-    sep='@@CLAUDE-ATTN-SEP@@'
+    # Randomized per-run so a pane line that happens to equal a fixed
+    # separator literally (e.g. editing/catting these scripts themselves)
+    # can't split a block early and miscount for a tick.
+    sep="@@CLAUDE-ATTN-$$-${RANDOM}@@"
+    # Distinct random tag prefixing each block's pane_current_command line
+    # (fetched via the same batched invocation, no extra round trip) — used
+    # to gate classification to panes actually running claude, see below.
+    cmdtag="@@CLAUDE-ATTN-CMD-$$-${RANDOM}@@"
     args=()
     for s in "${sessions[@]}"; do
-        args+=(capture-pane -t "${s}:1" -p -S -30 \; display-message -p "$sep" \;)
+        args+=(display-message -t "${s}:1" -p "${cmdtag}#{pane_current_command}" \; capture-pane -t "${s}:1" -p -S -30 \; display-message -p "$sep" \;)
     done
     combined=$(tmux "${args[@]}" 2>/dev/null)
 
     block=""
+    cmd=""
+    have_cmd=0
     while IFS= read -r line; do
         if [[ "$line" == "$sep" ]]; then
-            case "$(classify_pane_status "$block")" in
-                permission) (( permission_count++ )) ;;
-                working)    (( working_count++ )) ;;
-            esac
+            # Gate on the pane actually running claude — a vim buffer or
+            # `git diff` showing this very script's "Yes"/"No"/"to
+            # interrupt" literals must never count as permission/working
+            # (round-1 finding: false positives from scanning ALL sessions
+            # without an "is claude running here" check).
+            if is_claude_pane_command "$cmd"; then
+                case "$(classify_pane_status "$block")" in
+                    permission) (( permission_count++ )) ;;
+                    working)    (( working_count++ )) ;;
+                esac
+            fi
             block=""
+            cmd=""
+            have_cmd=0
+        elif (( ! have_cmd )); then
+            cmd="${line#$cmdtag}"
+            have_cmd=1
         else
             block+="$line"$'\n'
         fi

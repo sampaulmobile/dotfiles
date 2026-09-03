@@ -36,10 +36,16 @@
 #   list             Print flagged sessions whose tmux session still
 #                    exists, newest-first. Prunes flags for dead sessions
 #                    as it goes.
-#   jump             Switch to the session most needing attention: first a
+#   jump [client-tty]
+#                    Switch to the session most needing attention: first a
 #                    session waiting on a permission prompt, else the
 #                    newest done-flag, else a "nothing needs attention"
-#                    tmux message.
+#                    tmux message. client-tty (tmux's #{client_tty}) scopes
+#                    switch-client/display-message to the invoking client —
+#                    dots/tmux.conf's binding always passes it. Falls back
+#                    to unscoped (tmux's own most-recently-active-client
+#                    pick) only when called with no argument, so ad hoc CLI
+#                    invocation (`tmux-claude-attention jump`) still works.
 
 source ~/dotfiles/bin/tmux-claude-lib
 
@@ -105,14 +111,26 @@ cmd_list() {
 }
 
 cmd_jump() {
+    local client="$1"
     local session
+
+    # Scope switch-client/display-message to the invoking client when we
+    # know it. run-shell spawns a plain shell — the tmux CLI invocations
+    # inside it are fresh clients with no attached-client identity, so an
+    # unscoped `switch-client -t` falls back to tmux's own pick (the
+    # most-recently-active attached client), which can silently yank a
+    # DIFFERENT real attached client to the target session. See
+    # .feature/NOTES.md's safety section for a live incident. Only fall
+    # back to unscoped when called with no client (ad hoc CLI use).
+    local -a cflag=()
+    [[ -n "$client" ]] && cflag=(-c "$client")
 
     # Priority 1: a session waiting on a permission prompt (most recently
     # active first).
     while IFS= read -r session; do
         [[ -z "$session" ]] && continue
         if [[ "$(get_session_status "$session")" == "permission" ]]; then
-            tmux switch-client -t "=$session"
+            tmux switch-client "${cflag[@]}" -t "=$session"
             return
         fi
     done < <(tmux list-sessions -F '#{session_activity} #{session_name}' 2>/dev/null | sort -rn | awk '{print $2}')
@@ -120,20 +138,20 @@ cmd_jump() {
     # Priority 2: the newest finished-but-unseen session.
     session=$(cmd_list | head -1)
     if [[ -n "$session" ]]; then
-        tmux switch-client -t "=$session"
+        tmux switch-client "${cflag[@]}" -t "=$session"
         return
     fi
 
-    tmux display-message "nothing needs attention"
+    tmux display-message "${cflag[@]}" "nothing needs attention"
 }
 
 case "${1:-}" in
     flag-done) cmd_flag_done ;;
     clear)     cmd_clear "${2:-}" ;;
     list)      cmd_list ;;
-    jump)      cmd_jump ;;
+    jump)      cmd_jump "${2:-}" ;;
     *)
-        echo "usage: $(basename "$0") {flag-done|clear <session>|list|jump}" >&2
+        echo "usage: $(basename "$0") {flag-done|clear <session>|list|jump [client-tty]}" >&2
         exit 1
         ;;
 esac

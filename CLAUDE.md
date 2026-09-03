@@ -36,7 +36,7 @@ public package names in Brewfiles are fine. Sweep diffs before pushing.
 - `Ctrl+F` — sessionizer (fuzzy find project, create/switch tmux session)
 - `Ctrl+Space` — toggle floating Claude Code popup (per-project session)
 - `Ctrl+G` — claude session dashboard (status, tokens, model for all claude sessions)
-- `Ctrl+O` — jump to whatever needs attention: a session waiting on a permission prompt first, else the newest finished-but-unseen session, else a "nothing needs attention" message. Switching clears that session's ✅ flag. (Not `Ctrl+J` — that's claimed by vim-tmux-navigator's pane navigation.)
+- `Ctrl+O` — jump to whatever needs attention: a session waiting on a permission prompt first, else the newest finished-but-unseen session, else a "nothing needs attention" message. Switching clears that session's ✅ flag. Passed through untouched to vim/fzf when the current pane is running one (same is-vim detection idiom as vim-tmux-navigator's own C-h/j/k/l bindings), since `C-o` is vim's jumplist-back motion — everywhere else it shadows readline's rare `operate-and-get-next`. (Not `Ctrl+J` — that's claimed by vim-tmux-navigator's pane navigation.)
 - `F12` — toggle keys off (for nested tmux over SSH)
 
 ## Tmux Scripts

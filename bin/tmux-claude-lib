@@ -22,6 +22,20 @@ get_claude_sessions() {
         | awk '{print $2}'
 }
 
+# is_claude_pane_command <pane-current-command>
+#   True (exit 0) if the given #{pane_current_command} value looks like a
+#   running claude process — the CLI's foreground process is typically
+#   `claude` itself, or `node` when invoked via a wrapper/shim. Gates the
+#   Yes/No-substring and "to interrupt" heuristics in classify_pane_status
+#   to panes that are actually running claude, so an unrelated pane whose
+#   visible text happens to contain those same substrings (vim or `git
+#   diff` displaying this very script's literals, for instance) is never
+#   misclassified as needing attention.
+is_claude_pane_command() {
+    # matches claude / claude.exe (the npm bin is literally claude.exe) / node
+    [[ "$1" == claude* || "$1" == "node" ]]
+}
+
 # classify_pane_status <raw-content>
 #   Prints: working | idle | permission | unknown
 #   Pure classifier over RAW, unfiltered captured pane content (e.g. a

@@ -94,6 +94,18 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/dotfiles/bin/tmux-claude-attention flag-done",
+            "async": true
+          }
+        ]
+      }
     ]
   },
   "alwaysThinkingEnabled": true,
