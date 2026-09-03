@@ -19,9 +19,10 @@
 # alone blow the 200ms budget. Classification per pane reuses
 # tmux-claude-lib's classify_pane_status (same heuristic as the dashboard),
 # just fed from the batched capture instead of its own capture-pane call —
-# gated by is_claude_pane_command against each pane's #{pane_current_command}
-# (fetched in the same batched invocation) so a pane NOT running claude can
-# never be misclassified as needing attention.
+# gated on the pane's #{pane_tty} belonging to a live claude process
+# (claude_ttys from the lib; tty-based because wrapper shells make
+# pane_current_command lie) so a pane NOT running claude can never be
+# misclassified as needing attention.
 
 source ~/dotfiles/bin/tmux-claude-lib
 
@@ -33,18 +34,20 @@ done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null)
 permission_count=0
 working_count=0
 
+CLAUDE_TTYS=$(claude_ttys)
+
 if (( ${#sessions[@]} > 0 )); then
     # Randomized per-run so a pane line that happens to equal a fixed
     # separator literally (e.g. editing/catting these scripts themselves)
     # can't split a block early and miscount for a tick.
     sep="@@CLAUDE-ATTN-$$-${RANDOM}@@"
-    # Distinct random tag prefixing each block's pane_current_command line
+    # Distinct random tag prefixing each block's pane_tty line
     # (fetched via the same batched invocation, no extra round trip) — used
     # to gate classification to panes actually running claude, see below.
     cmdtag="@@CLAUDE-ATTN-CMD-$$-${RANDOM}@@"
     args=()
     for s in "${sessions[@]}"; do
-        args+=(display-message -t "${s}:1" -p "${cmdtag}#{pane_current_command}" \; capture-pane -t "${s}:1" -p -S -30 \; display-message -p "$sep" \;)
+        args+=(display-message -t "${s}:1" -p "${cmdtag}#{pane_tty}" \; capture-pane -t "${s}:1" -p -S -30 \; display-message -p "$sep" \;)
     done
     combined=$(tmux "${args[@]}" 2>/dev/null)
 
@@ -58,7 +61,7 @@ if (( ${#sessions[@]} > 0 )); then
             # interrupt" literals must never count as permission/working
             # (round-1 finding: false positives from scanning ALL sessions
             # without an "is claude running here" check).
-            if is_claude_pane_command "$cmd"; then
+            if [[ $'\n'"$CLAUDE_TTYS"$'\n' == *$'\n'"${cmd#/dev/}"$'\n'* ]]; then
                 case "$(classify_pane_status "$block")" in
                     permission) (( permission_count++ )) ;;
                     working)    (( working_count++ )) ;;

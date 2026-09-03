@@ -13,13 +13,33 @@ CLAUDE_PROJECTS_DIR="$HOME/.claude/projects"
 LIVE_AGENT_SECS=120
 STALE_AGENT_SECS=1800
 
+# claude_ttys
+#   Prints the tty names (no /dev/ prefix) of every live claude/node
+#   process, one per line. A claude pane is identified by its TTY rather
+#   than #{pane_current_command}, because claude often runs under a shell
+#   wrapper (e.g. `tmux new-session '... || claude'`) that makes the pane
+#   command report zsh/sh while claude owns the same tty.
+claude_ttys() {
+    ps -A -o tty=,comm= 2>/dev/null \
+        | awk '$1 != "??" && ($2 ~ /claude/ || $2 ~ /(^|\/)node$/) {print $1}' \
+        | sort -u
+}
+
 # get_claude_sessions
-#   Prints all claude-* tmux session names, one per line.
+#   Prints every tmux session (any name) with a claude process on one of
+#   its pane ttys, most recently active first.
 get_claude_sessions() {
-    tmux list-sessions -F '#{session_activity} #{session_name}' 2>/dev/null \
-        | grep ' claude-' \
+    local ttys
+    ttys=$(claude_ttys)
+    [[ -z "$ttys" ]] && return 0
+    tmux list-panes -a -F '#{session_activity} #{session_name} #{pane_tty}' 2>/dev/null \
+        | while IFS=' ' read -r act name tty; do
+            case $'\n'"$ttys"$'\n' in
+                *$'\n'"${tty#/dev/}"$'\n'*) echo "$act $name" ;;
+            esac
+        done \
         | sort -rn \
-        | awk '{print $2}'
+        | awk '!seen[$2]++ {print $2}'
 }
 
 # is_claude_pane_command <pane-current-command>
@@ -89,8 +109,13 @@ classify_pane_status() {
         fi
     done
 
-    # Working: claude is actively streaming output
-    if [[ "$content" == *"to interrupt"* ]]; then
+    # Working: claude is actively streaming output or running a tool.
+    # Markers across UI generations: "esc to interrupt" (older),
+    # "⎿  Running…" (tool in flight), and the spinner status line
+    # "· <Verb>… (41s · ↓ 1.9k tokens)" — the "s · ↓ " + "tokens" pair is
+    # the stable fragment (verbs are randomized).
+    if [[ "$content" == *"to interrupt"* || "$content" == *"⎿  Running…"* ]] \
+       || [[ "$content" == *"s · ↓ "* && "$content" == *"tokens"* ]]; then
         echo "working"
         return
     fi
