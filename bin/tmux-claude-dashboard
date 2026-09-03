@@ -287,49 +287,107 @@ render() {
                 atype="${atype//$'\t'/ }"
                 asnip="${asnip//$'\t'/ }"
                 local aage=$(( now - amtime ))
+                local aworking=0
                 local amarker="◯" amarker_color="${DIM}"
                 if (( aage <= LIVE_AGENT_SECS )); then
                     amarker="●"
                     amarker_color="${YELLOW}"
+                    aworking=1
                 fi
-                local aage_str actx_fmt
+                local aage_str
                 aage_str=$(format_age "$aage")
-                actx_fmt=$(format_tokens "${actx:-0}")
 
                 local aindent
                 aindent=$(printf '%*s' $(( 2 * adepth )) '')
-                local prefix="  ${aindent}└ "
-                local tail=" · ctx ${actx_fmt} · ${aage_str}"
 
-                local desc_part="$adesc"
-                local type_part=" · ${atype}"
-                local snip_part=""
-                [[ -n "$asnip" ]] && snip_part=" · \"${asnip}\""
-
-                local row_plain row_colored
-                row_plain="${prefix}${amarker} ${desc_part}${type_part}${tail}${snip_part}"
-                if (( ${#row_plain} <= cols - 1 )); then
-                    row_colored="${prefix}${amarker_color}${amarker}${RST} ${desc_part}${DIM}${type_part}${RST}${tail}${DIM}${snip_part}${RST}"
-                else
-                    row_plain="${prefix}${amarker} ${desc_part}${type_part}${tail}"
-                    if (( ${#row_plain} <= cols - 1 )); then
-                        row_colored="${prefix}${amarker_color}${amarker}${RST} ${desc_part}${DIM}${type_part}${RST}${tail}"
-                    else
-                        row_plain="${prefix}${amarker} ${desc_part}${tail}"
-                        if (( ${#row_plain} <= cols - 1 )); then
-                            row_colored="${prefix}${amarker_color}${amarker}${RST} ${desc_part}${tail}"
-                        else
-                            local abudget=$(( cols - 1 - ${#prefix} - 2 - ${#tail} ))
-                            (( abudget < 3 )) && abudget=3
-                            local atrunc="$desc_part"
-                            if (( ${#atrunc} > abudget )); then
-                                atrunc="${atrunc:0:$(( abudget - 1 ))}…"
-                            fi
-                            row_colored="${prefix}${amarker_color}${amarker}${RST} ${atrunc}${tail}"
-                        fi
+                # ── SESSION column: tree marker + description, aligned to
+                # the same hdr_name_w field the session name column uses.
+                # Whole-string truncation (rather than truncating only the
+                # description) guarantees this field never exceeds
+                # hdr_name_w even in a pathological deep-nesting-vs-narrow-
+                # terminal case, which keeps every column after it aligned
+                # with the header no matter what.
+                local sess_prefix="${aindent}└ "
+                local sess_full="${sess_prefix}${amarker} ${adesc}"
+                local sess_plain sess_colored
+                if (( ${#sess_full} <= hdr_name_w )); then
+                    sess_plain="$sess_full"
+                    sess_colored="${sess_prefix}${amarker_color}${amarker}${RST} ${adesc}"
+                elif (( hdr_name_w > ${#sess_prefix} + 2 )); then
+                    local dbudget=$(( hdr_name_w - ${#sess_prefix} - 2 ))
+                    local dtrunc="$adesc"
+                    if (( ${#dtrunc} > dbudget )); then
+                        (( dbudget > 1 )) && dtrunc="${dtrunc:0:$(( dbudget - 1 ))}…" || dtrunc="…"
                     fi
+                    sess_plain="${sess_prefix}${amarker} ${dtrunc}"
+                    sess_colored="${sess_prefix}${amarker_color}${amarker}${RST} ${dtrunc}"
+                else
+                    # extreme case: not even room for indent+marker+1 char —
+                    # hard-truncate the whole field, drop color rather than
+                    # risk cutting mid-escape-sequence.
+                    local hbudget=$(( hdr_name_w > 1 ? hdr_name_w - 1 : 1 ))
+                    sess_plain="${sess_full:0:$hbudget}…"
+                    sess_colored="$sess_plain"
                 fi
-                out+="${row_colored}"$'\n'
+                local sess_pad=$(( hdr_name_w - ${#sess_plain} ))
+                (( sess_pad < 0 )) && sess_pad=0
+
+                # ── STATUS column: working/idle styled like session status,
+                # age appended — fixed 15-visible-col field, same as session
+                # rows.
+                local st_label st_color
+                if (( aworking )); then
+                    st_label="working ${aage_str}"
+                    st_color="${YELLOW}"
+                else
+                    st_label="idle ${aage_str}"
+                    st_color="${DIM_GREEN}"
+                fi
+                (( ${#st_label} > 15 )) && st_label="${st_label:0:15}"
+                local st_pad=$(( 15 - ${#st_label} ))
+                (( st_pad < 0 )) && st_pad=0
+
+                # ── CONTEXT / OUTPUT / TOTAL / MODEL — same field widths
+                # and same show_output/show_total/show_model gating the
+                # session row already computed for this render, so agent
+                # rows drop columns at identical breakpoints.
+                local actx_fmt aout_fmt
+                actx_fmt=$(format_tokens "${actx:-0}")
+                aout_fmt=$(format_tokens "${aout:-0}")
+
+                local row=""
+                row+="  ${sess_colored}$(printf '%*s' "$sess_pad" '')"
+                row+="${st_color}${st_label}${RST}$(printf '%*s' "$st_pad" '')"
+                row+="$(printf "%${ctx_w}s" "$actx_fmt")"
+                (( show_output )) && row+="$(printf " %${out_w}s" "$aout_fmt")"
+                (( show_total ))  && row+="$(printf " %${all_w}s" "-")"
+                if (( show_model )); then
+                    local amdl_field="$atype"
+                    if (( ${#amdl_field} > mdl_w )); then
+                        (( mdl_w > 1 )) && amdl_field="${amdl_field:0:$(( mdl_w - 1 ))}…" || amdl_field="…"
+                    fi
+                    row+="  ${DIM}${amdl_field}${RST}"
+                fi
+                out+="${row}"$'\n'
+
+                # ── activity snippet — own dim full-width line beneath the
+                # row, indented past the tree marker to the description's
+                # start column; working agents only.
+                if (( aworking )) && [[ -n "$asnip" ]]; then
+                    local snip_indent
+                    snip_indent=$(printf '%*s' $(( 2 + ${#sess_prefix} + 2 )) '')
+                    local snip_plain="${snip_indent}\"${asnip}\""
+                    if (( ${#snip_plain} > cols - 1 )); then
+                        local sbudget=$(( cols - 1 - ${#snip_indent} - 2 ))
+                        (( sbudget < 1 )) && sbudget=1
+                        local strunc="$asnip"
+                        if (( ${#strunc} > sbudget )); then
+                            (( sbudget > 1 )) && strunc="${strunc:0:$(( sbudget - 1 ))}…" || strunc="…"
+                        fi
+                        snip_plain="${snip_indent}\"${strunc}\""
+                    fi
+                    out+="${DIM}${snip_plain}${RST}"$'\n'
+                fi
             done <<< "${agent_lines[$i]}"
         fi
     done
