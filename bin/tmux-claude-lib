@@ -22,27 +22,58 @@ get_claude_sessions() {
         | awk '{print $2}'
 }
 
-# classify_pane_status <content>
+# classify_pane_status <raw-content>
 #   Prints: working | idle | permission | unknown
-#   Pure classifier over already-captured pane content (the same
-#   grep -v '^$' | tail -10 tail get_session_status feeds it). Split out of
+#   Pure classifier over RAW, unfiltered captured pane content (e.g. a
+#   straight `tmux capture-pane -p` — blank-line stripping and the
+#   last-10-lines window get_session_status used to do with `grep -v '^$'
+#   | tail -10` happen internally here instead). Split out of
 #   get_session_status so a caller that batches many panes into a single
 #   tmux invocation (e.g. tmux-claude-statusbar, which must scan every
 #   session in one round trip to stay fast) can classify each pane's
 #   content without paying for a second per-session capture-pane call.
-#   Written as pure bash substring/array tests (no echo|grep forks) — with
-#   many sessions this runs once per session, and on this machine each
-#   forked grep/echo pair costs a few ms, enough to blow a 200ms budget
-#   across a couple dozen sessions. bash 3.2 compatible (macOS ships 3.2 as
-#   both /bin/bash and the first `bash` on PATH) — no negative array
-#   indices, no mapfile/readarray (both 4.0+ only).
+#   Written as pure bash array/substring tests — zero forked processes.
+#   With a couple dozen sessions, forking even 2-3 processes per session
+#   for blank-filtering/tailing was itself enough to blow the statusbar's
+#   200ms budget (measured ~100ms+ for 17 sessions from that alone).
+#   bash 3.2 compatible (macOS ships 3.2 as both /bin/bash and the first
+#   `bash` on PATH) — no negative array indices, no mapfile/readarray
+#   (both 4.0+ only).
 classify_pane_status() {
-    local content="$1"
+    local raw="$1"
 
-    if [[ -z "$content" ]]; then
+    if [[ -z "$raw" ]]; then
         echo "unknown"
         return
     fi
+
+    # Split into lines and drop blanks — replaces `grep -v '^$'`.
+    local -a all filtered
+    IFS=$'\n' read -rd '' -a all <<< "$raw"
+    local line
+    for line in "${all[@]}"; do
+        [[ -n "$line" ]] && filtered+=("$line")
+    done
+
+    local total=${#filtered[@]}
+    if (( total == 0 )); then
+        echo "unknown"
+        return
+    fi
+
+    # Last 10 non-blank lines — replaces `tail -10`.
+    local start=0
+    (( total > 10 )) && start=$(( total - 10 ))
+    local -a window=("${filtered[@]:start}")
+
+    local content="" w
+    for w in "${window[@]}"; do
+        if [[ -n "$content" ]]; then
+            content+=$'\n'"$w"
+        else
+            content="$w"
+        fi
+    done
 
     # Working: claude is actively streaming output
     if [[ "$content" == *"to interrupt"* ]]; then
@@ -58,14 +89,12 @@ classify_pane_status() {
     fi
 
     # Permission (plan mode question): "Enter to select" on either of the
-    # last 2 lines. Split into lines with a builtin `read`, not `tail -2`.
-    local -a lines
-    IFS=$'\n' read -rd '' -a lines <<< "$content"
-    local n=${#lines[@]}
-    if (( n > 0 )); then
-        local last="${lines[$(( n - 1 ))]}"
+    # last 2 lines (replaces `tail -2 | grep -q "^Enter to select"`).
+    local wn=${#window[@]}
+    if (( wn > 0 )); then
+        local last="${window[$(( wn - 1 ))]}"
         local prev=""
-        (( n > 1 )) && prev="${lines[$(( n - 2 ))]}"
+        (( wn > 1 )) && prev="${window[$(( wn - 2 ))]}"
         if [[ "$last" == "Enter to select"* || "$prev" == "Enter to select"* ]]; then
             echo "permission"
             return
@@ -86,9 +115,9 @@ classify_pane_status() {
 #   Detects state by inspecting the last lines of the tmux pane.
 get_session_status() {
     local session="$1"
-    local content
-    content=$(tmux capture-pane -t "${session}:1" -p -S -30 2>/dev/null | grep -v '^$' | tail -10)
-    classify_pane_status "$content"
+    local raw
+    raw=$(tmux capture-pane -t "${session}:1" -p -S -30 2>/dev/null)
+    classify_pane_status "$raw"
 }
 
 # get_pane_cwd <tmux-session-name>

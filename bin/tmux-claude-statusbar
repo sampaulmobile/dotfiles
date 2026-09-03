@@ -41,8 +41,7 @@ if (( ${#sessions[@]} > 0 )); then
     block=""
     while IFS= read -r line; do
         if [[ "$line" == "$sep" ]]; then
-            content=$(printf '%s' "$block" | grep -v '^$' | tail -10)
-            case "$(classify_pane_status "$content")" in
+            case "$(classify_pane_status "$block")" in
                 permission) (( permission_count++ )) ;;
                 working)    (( working_count++ )) ;;
             esac
