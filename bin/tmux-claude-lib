@@ -6,6 +6,13 @@
 CLAUDE_SESSIONS_DIR="$HOME/.claude/sessions"
 CLAUDE_PROJECTS_DIR="$HOME/.claude/projects"
 
+# Agent liveness thresholds (tunable). An agent transcript with mtime within
+# LIVE_AGENT_SECS renders as working (●); older renders as done/idle (◯)
+# with its age; older than STALE_AGENT_SECS is hidden entirely. See
+# workplans/tmux-claude-dashboard-agent-trees-plan.md for the rationale.
+LIVE_AGENT_SECS=120
+STALE_AGENT_SECS=1800
+
 # get_claude_sessions
 #   Prints all claude-* tmux session names, one per line.
 get_claude_sessions() {
@@ -195,6 +202,186 @@ get_totals_incremental() {
     # save updated cache
     printf '%s\t%s\t%s' "$new_out" "$new_all" "$file_size" > "$cache"
     printf '%s\t%s' "$new_out" "$new_all"
+}
+
+# ── agent trees ─────────────────────────────────────────
+
+# _agent_file_mtime <path>
+#   Prints a file's mtime as epoch seconds (GNU/BSD stat portable).
+_agent_file_mtime() {
+    stat -f '%m' "$1" 2>/dev/null || stat -c '%Y' "$1" 2>/dev/null
+}
+
+# _agent_cache_get <cache-file> <current-mtime>
+#   Prints the cached value and returns 0 if the cache was stored for this
+#   exact mtime; otherwise returns 1 (caller should recompute and store).
+_agent_cache_get() {
+    local cache="$1" mtime="$2"
+    [[ -f "$cache" ]] || return 1
+    local cached_mtime
+    cached_mtime=$(head -1 "$cache" 2>/dev/null)
+    [[ -n "$mtime" && "$cached_mtime" == "$mtime" ]] || return 1
+    tail -n +2 "$cache" 2>/dev/null
+}
+
+# _agent_cache_set <cache-file> <mtime> <value>
+_agent_cache_set() {
+    printf '%s\n%s' "$2" "$3" > "$1" 2>/dev/null
+}
+
+# list_session_agents <session-jsonl-path>
+#   Prints one line per live subagent under that session's transcript,
+#   sorted for tree rendering (parents before children, siblings in spawn
+#   order). Tab-separated: agent_id, spawn_depth, parent_id, agentType,
+#   description, mtime. Hides agents whose jsonl mtime is older than
+#   STALE_AGENT_SECS. Missing/unknown meta fields degrade to blank rather
+#   than erroring.
+list_session_agents() {
+    local sid_jsonl="$1"
+    [[ -z "$sid_jsonl" || ! -f "$sid_jsonl" ]] && return
+
+    local proj_dir sid subdir
+    proj_dir=$(dirname "$sid_jsonl")
+    sid=$(basename "$sid_jsonl" .jsonl)
+    subdir="${proj_dir}/${sid}/subagents"
+    [[ -d "$subdir" ]] || return
+
+    local now
+    now=$(date +%s)
+
+    local meta id jsonl mtime
+    {
+        for meta in "$subdir"/agent-*.meta.json; do
+            [[ -f "$meta" ]] || continue
+            id="${meta##*/agent-}"
+            id="${id%.meta.json}"
+            jsonl="${subdir}/agent-${id}.jsonl"
+            [[ -f "$jsonl" ]] || continue
+            mtime=$(_agent_file_mtime "$jsonl")
+            [[ -z "$mtime" ]] && continue
+            jq --arg id "$id" --argjson mtime "$mtime" '. + {id: $id, mtime: $mtime}' "$meta" 2>/dev/null
+        done
+    } | jq -rs --argjson now "$now" --argjson stale "$STALE_AGENT_SECS" '
+        def dfs($parentKey; $items):
+            ($items | map(select(.parentKey == $parentKey)) | sort_by(.mtime)) as $kids
+            | reduce $kids[] as $k ([]; . + [$k] + dfs($k.id; $items));
+
+        . as $raw
+        | ($raw | map(.id)) as $ids
+        | (
+            $raw
+            | map(
+                (.parentAgentId // "") as $p
+                | . + {
+                    age: ($now - .mtime),
+                    parentKey: (if $p == "" then "" elif ($ids | index($p)) then $p else "" end)
+                  }
+              )
+            | map(select(.age <= $stale))
+          ) as $items
+        | dfs(""; $items)
+        | .[]
+        | [
+            .id,
+            (.spawnDepth // 1),
+            (.parentAgentId // ""),
+            (.agentType // "agent"),
+            (.description // ""),
+            .mtime
+          ] | @tsv
+    ' 2>/dev/null
+}
+
+# get_agent_stats <agent-jsonl> [cache-file]
+#   Context tokens, last-turn output tokens, and model — reuses the same
+#   fast tail-of-file approach as get_context_and_model. With a cache-file,
+#   skips the jq re-parse when the jsonl's mtime hasn't changed since the
+#   last call (mirrors get_totals_incremental's caching intent).
+#   Prints tab-separated: context output model
+get_agent_stats() {
+    local jsonl="$1" cache="$2"
+    [[ ! -f "$jsonl" ]] && printf '0\t0\tunknown' && return
+
+    local mtime=""
+    if [[ -n "$cache" ]]; then
+        mtime=$(_agent_file_mtime "$jsonl")
+        local cached
+        if cached=$(_agent_cache_get "$cache" "$mtime"); then
+            printf '%s' "$cached"
+            return
+        fi
+    fi
+
+    local result
+    result=$(tail -50 "$jsonl" | jq -rs '
+        [.[] | select(.type == "assistant" and .message.usage)] |
+        if length == 0 then
+            [0, 0, "unknown"]
+        else
+            (last | .message.usage) as $last |
+            (last | .message.model // "unknown") as $model |
+            (($last.input_tokens // 0) + ($last.cache_read_input_tokens // 0) + ($last.cache_creation_input_tokens // 0)) as $context |
+            ($last.output_tokens // 0) as $output |
+            [$context, $output, $model]
+        end | @tsv
+    ' 2>/dev/null)
+    [[ -z "$result" ]] && result=$'0\t0\tunknown'
+
+    [[ -n "$cache" ]] && _agent_cache_set "$cache" "$mtime" "$result"
+    printf '%s' "$result"
+}
+
+# get_agent_snippet <agent-jsonl> <maxlen> [cache-file]
+#   Last assistant text across the tail of the transcript, flattened to a
+#   single line and truncated to maxlen. Reads only tail -c 65536 for
+#   speed; parses per-line via fromjson? so a partial first line (cut mid
+#   record by the byte-tail) is skipped instead of erroring. Empty output
+#   means "no recent text" — caller should fall back to meta description.
+get_agent_snippet() {
+    local jsonl="$1" maxlen="${2:-60}" cache="$3"
+    [[ ! -f "$jsonl" ]] && printf '' && return
+
+    local mtime=""
+    if [[ -n "$cache" ]]; then
+        mtime=$(_agent_file_mtime "$jsonl")
+        local cached
+        if cached=$(_agent_cache_get "$cache" "$mtime"); then
+            printf '%s' "$cached"
+            return
+        fi
+    fi
+
+    local text
+    text=$(tail -c 65536 "$jsonl" | jq -Rn -r '
+        [inputs | fromjson?] |
+        [.[] | select(.type == "assistant") | (.message.content // [])[]? | select(.type == "text") | .text] |
+        last // empty
+    ' 2>/dev/null)
+
+    # flatten to a single line
+    text="${text//$'\n'/ }"
+    text="${text//$'\r'/ }"
+
+    if (( ${#text} > maxlen )); then
+        text="${text:0:$(( maxlen - 1 ))}…"
+    fi
+
+    [[ -n "$cache" ]] && _agent_cache_set "$cache" "$mtime" "$text"
+    printf '%s' "$text"
+}
+
+# format_age <seconds>
+#   Pretty-prints an age/duration: 45 -> 45s, 300 -> 5m, 7200 -> 2h
+format_age() {
+    local s="$1"
+    [[ -z "$s" ]] && printf '?' && return
+    if (( s < 60 )); then
+        printf '%ds' "$s"
+    elif (( s < 3600 )); then
+        printf '%dm' "$(( s / 60 ))"
+    else
+        printf '%dh' "$(( s / 3600 ))"
+    fi
 }
 
 # format_tokens <number>
