@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+
+# Claude attention layer: flag files for "finished but unseen" tmux
+# sessions. Fed by the Stop hook, consumed by tmux-claude-statusbar (✅
+# count) and the C-j jump binding (dots/tmux.conf).
+#
+# Flag dir: ~/.cache/claude-attention/ — one file per tmux session name,
+# `<session>.done`, touched to flag and removed to clear.
+#
+# To wire up the Stop hook, add this to ~/.claude/settings.json
+# (machine-local, NOT this repo — see other/claude/ in CLAUDE.md):
+#
+#   "hooks": {
+#     "Stop": [
+#       {
+#         "matcher": "",
+#         "hooks": [
+#           {
+#             "type": "command",
+#             "command": "~/dotfiles/bin/tmux-claude-attention flag-done",
+#             "async": true
+#           }
+#         ]
+#       }
+#     ]
+#   }
+#
+# Subcommands:
+#   flag-done        Touch a flag for the calling session. Called by the
+#                    Stop hook (runs as a child of the claude process, so
+#                    the owning session is derived from $TMUX_PANE). Silent
+#                    no-op outside tmux, and when any client is currently
+#                    attached to the owning session (you watched it finish).
+#   clear <session>  Remove the flag for <session>. Called by the tmux
+#                    client-attached/client-session-changed hooks.
+#   list             Print flagged sessions whose tmux session still
+#                    exists, newest-first. Prunes flags for dead sessions
+#                    as it goes.
+#   jump             Switch to the session most needing attention: first a
+#                    session waiting on a permission prompt, else the
+#                    newest done-flag, else a "nothing needs attention"
+#                    tmux message.
+
+source ~/dotfiles/bin/tmux-claude-lib
+
+FLAG_DIR="$HOME/.cache/claude-attention"
+
+flag_path() {
+    printf '%s/%s.done' "$FLAG_DIR" "$1"
+}
+
+# file_mtime <path>
+#   Prints a file's mtime as epoch seconds (GNU/BSD stat portable).
+file_mtime() {
+    stat -f '%m' "$1" 2>/dev/null || stat -c '%Y' "$1" 2>/dev/null
+}
+
+cmd_flag_done() {
+    # Not in tmux — nothing to flag.
+    [[ -z "${TMUX_PANE:-}" ]] && exit 0
+
+    local session
+    session=$(tmux display -pt "$TMUX_PANE" '#{session_name}' 2>/dev/null)
+    [[ -z "$session" ]] && exit 0
+
+    # Suppress self-flagging: any client attached to this session watched
+    # it finish, so there's nothing to flag.
+    if tmux list-clients -F '#{client_session}' 2>/dev/null | grep -qxF "$session"; then
+        exit 0
+    fi
+
+    mkdir -p "$FLAG_DIR"
+    touch "$(flag_path "$session")"
+}
+
+cmd_clear() {
+    local session="$1"
+    [[ -z "$session" ]] && exit 0
+    rm -f "$(flag_path "$session")"
+}
+
+cmd_list() {
+    [[ -d "$FLAG_DIR" ]] || return 0
+
+    local f session
+    for f in "$FLAG_DIR"/*.done; do
+        [[ -e "$f" ]] || continue
+        session=$(basename "$f" .done)
+        if tmux has-session -t "=$session" 2>/dev/null; then
+            printf '%s\t%s\n' "$(file_mtime "$f")" "$session"
+        else
+            rm -f "$f"
+        fi
+    done | sort -rn | cut -f2
+}
+
+cmd_jump() {
+    local session
+
+    # Priority 1: a session waiting on a permission prompt (most recently
+    # active first).
+    while IFS= read -r session; do
+        [[ -z "$session" ]] && continue
+        if [[ "$(get_session_status "$session")" == "permission" ]]; then
+            tmux switch-client -t "=$session"
+            return
+        fi
+    done < <(tmux list-sessions -F '#{session_activity} #{session_name}' 2>/dev/null | sort -rn | awk '{print $2}')
+
+    # Priority 2: the newest finished-but-unseen session.
+    session=$(cmd_list | head -1)
+    if [[ -n "$session" ]]; then
+        tmux switch-client -t "=$session"
+        return
+    fi
+
+    tmux display-message "nothing needs attention"
+}
+
+case "${1:-}" in
+    flag-done) cmd_flag_done ;;
+    clear)     cmd_clear "${2:-}" ;;
+    list)      cmd_list ;;
+    jump)      cmd_jump ;;
+    *)
+        echo "usage: $(basename "$0") {flag-done|clear <session>|list|jump}" >&2
+        exit 1
+        ;;
+esac
