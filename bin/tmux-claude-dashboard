@@ -278,6 +278,14 @@ render() {
             local aid adepth aparent atype adesc amtime actx aout amdl asnip
             while IFS=$'\t' read -r aid adepth aparent atype adesc amtime actx aout amdl asnip; do
                 [[ -z "$aid" ]] && continue
+                # Defense in depth for B3: ${#row_plain} below counts a tab
+                # as 1 char, but the terminal expands it to the next
+                # 8-column stop — neutralize any tab that reaches these
+                # fields (from any source) before it can break the width
+                # math that keeps rows from wrapping/misaligning.
+                adesc="${adesc//$'\t'/ }"
+                atype="${atype//$'\t'/ }"
+                asnip="${asnip//$'\t'/ }"
                 local aage=$(( now - amtime ))
                 local amarker="◯" amarker_color="${DIM}"
                 if (( aage <= LIVE_AGENT_SECS )); then
@@ -327,7 +335,14 @@ render() {
     done
 
     out+=$'\n'
-    out+="${DIM}  j/k navigate · ⏎ switch · x kill · X prune · a agents · r refresh · R hard · q quit${RST}"
+    # Responsive like the header rhs above: the round-1 "a agents" addition
+    # made this 85 chars, wider than an 80-col terminal (was 74 before),
+    # wrapping onto the next line and garbling the display — a real
+    # regression caught during round-2 smoke testing, not in the original
+    # findings list. Drop the added text at narrow widths instead.
+    local footer="  j/k navigate · ⏎ switch · x kill · X prune · r refresh · R hard · q quit"
+    (( cols >= 85 )) && footer="  j/k navigate · ⏎ switch · x kill · X prune · a agents · r refresh · R hard · q quit"
+    out+="${DIM}${footer}${RST}"
 
     printf '\033[H\033[2J%s' "$out"
 }
@@ -530,9 +545,10 @@ while true; do
             fi
             ;;
         R)
-            # hard refresh: re-collect sessions, clear totals cache
+            # hard refresh: re-collect sessions, clear totals + agent caches
             reload_sessions
             rm -f "${CACHE_DIR}"/*.totals 2>/dev/null
+            rm -f "${CACHE_DIR}/agents/"* 2>/dev/null
             load_data
             ;;
         ""|Enter)

@@ -259,6 +259,11 @@ list_session_agents() {
             [[ -f "$jsonl" ]] || continue
             mtime=$(_agent_file_mtime "$jsonl")
             [[ -z "$mtime" ]] && continue
+            # Skip stale agents before spawning a jq process for them (B2):
+            # otherwise this pays one stat + one jq per agent-*.meta.json
+            # ever written for the life of the session id, on every refresh
+            # tick, even though only recent agents are ever rendered.
+            (( now - mtime > STALE_AGENT_SECS )) && continue
             jq --arg id "$id" --argjson mtime "$mtime" '. + {id: $id, mtime: $mtime}' "$meta" 2>/dev/null
         done
     } | jq -rs --argjson now "$now" --argjson stale "$STALE_AGENT_SECS" '
@@ -266,24 +271,34 @@ list_session_agents() {
             ($items | map(select(.parentKey == $parentKey)) | sort_by(.mtime)) as $kids
             | reduce $kids[] as $k ([]; . + [$k] + dfs($k.id; $items));
 
-        . as $raw
-        | ($raw | map(.id)) as $ids
+        # Apply the stale filter FIRST, then compute $ids/parentKey from the
+        # SURVIVORS only (B1). Resolving parentKey against the full,
+        # pre-filter id list let a live child of a since-gone-stale parent
+        # keep parentKey == <stale-parent-id>; the parent was then dropped
+        # from $items by the stale filter and dfs never reached the child,
+        # so a live agent under a stale parent vanished from the tree.
+        (map(. + {age: ($now - .mtime)}) | map(select(.age <= $stale))) as $survivors
+        | ($survivors | map(.id)) as $ids
         | (
-            $raw
+            $survivors
             | map(
                 (.parentAgentId // "") as $p
-                | . + {
-                    age: ($now - .mtime),
-                    parentKey: (if $p == "" then "" elif ($ids | index($p)) then $p else "" end)
-                  }
+                | . + { parentKey: (if $p == "" then "" elif ($ids | index($p)) then $p else "" end) }
               )
-            | map(select(.age <= $stale))
           ) as $items
         | dfs(""; $items)
         | .[]
         | [
             .id,
-            (.spawnDepth // 1),
+            # A promoted root (true orphan, or a parent dropped by the
+            # stale filter) has no visible parent row above it, so clamp
+            # its indent to 0 rather than its original nested spawnDepth
+            # (note 8). Also guard against a non-numeric spawnDepth in a
+            # malformed meta, which would otherwise reach a bash
+            # arithmetic expression downstream (note 10).
+            (if .parentKey == "" then 0
+             else (.spawnDepth // 1 | if type == "number" then . else 1 end)
+             end),
             # "-" placeholder for a root/orphan: an empty TSV field here
             # would sit mid-row, and a tab-delimited bash read collapses
             # adjacent tabs (tab is IFS whitespace), silently shifting every
@@ -310,14 +325,24 @@ get_agent_stats() {
     if [[ -n "$cache" ]]; then
         mtime=$(_agent_file_mtime "$jsonl")
         local cached
-        if cached=$(_agent_cache_get "$cache" "$mtime"); then
+        # An empty cached payload means a corrupt/truncated cache write
+        # (crash mid-write, two dashboards racing on the same cache path),
+        # not a genuinely valid stats value — a real result is always
+        # non-empty ("0\t0\tunknown" at minimum). Treat it as a miss and
+        # recompute rather than returning empty and shifting the caller's
+        # TSV fields (note 3).
+        if cached=$(_agent_cache_get "$cache" "$mtime") && [[ -n "$cached" ]]; then
             printf '%s' "$cached"
             return
         fi
     fi
 
     local result
-    result=$(tail -50 "$jsonl" | jq -rs '
+    # Line-tolerant parse (note 2): matches get_agent_snippet's treatment —
+    # a mid-write partial last line from tail no longer fails the whole
+    # slurp, it just drops that one line.
+    result=$(tail -50 "$jsonl" | jq -Rn -r '
+        [inputs | fromjson?] |
         [.[] | select(.type == "assistant" and .message.usage)] |
         if length == 0 then
             [0, 0, "unknown"]
@@ -362,9 +387,15 @@ get_agent_snippet() {
         last // empty
     ' 2>/dev/null)
 
-    # flatten to a single line
+    # flatten to a single line — a tab surviving here counts as 1 char in
+    # ${#row_plain} at render time, but the terminal expands it to the next
+    # 8-column tab stop, so a row that "fits" per the width check can still
+    # wrap and misalign every row below it for that frame (B3). Strip other
+    # C0 control chars too, same reasoning, cheap insurance.
     text="${text//$'\n'/ }"
     text="${text//$'\r'/ }"
+    text="${text//$'\t'/ }"
+    text=$(printf '%s' "$text" | tr -d '\000-\010\013\014\016-\037')
 
     if (( ${#text} > maxlen )); then
         text="${text:0:$(( maxlen - 1 ))}…"
