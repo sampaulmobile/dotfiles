@@ -7,7 +7,11 @@
 source ~/dotfiles/bin/tmux-claude-lib
 
 CACHE_DIR="/tmp/claude-dashboard"
-mkdir -p "$CACHE_DIR"
+mkdir -p "$CACHE_DIR/agents"
+
+# max chars kept from an agent's last assistant text (before responsive
+# truncation shortens it further to fit the terminal width)
+AGENT_SNIPPET_MAXLEN=100
 
 # ── colors ──────────────────────────────────────────────
 
@@ -90,6 +94,37 @@ get_session_stats() {
     printf '%s\t%s\t%s\t%s' "$ctx" "$tout" "$tall" "$mdl"
 }
 
+# get_session_agent_tree <tmux-session-name>
+#   Prints one line per live subagent under this session, tab-separated:
+#   agent_id, depth, parent_id, agentType, description, mtime, context,
+#   output, model, snippet. Per-agent stats/snippet use mtime-keyed cache
+#   files under CACHE_DIR so an idle agent's transcript isn't re-parsed
+#   every refresh. Prints nothing if the session has no agents (or no
+#   resolvable transcript) — never errors.
+get_session_agent_tree() {
+    local session="$1"
+    local jsonl
+    jsonl=$(find_session_jsonl "$session")
+    [[ -z "$jsonl" ]] && return
+
+    local proj_dir sid subdir
+    proj_dir=$(dirname "$jsonl")
+    sid=$(basename "$jsonl" .jsonl)
+    subdir="${proj_dir}/${sid}/subagents"
+
+    local aid depth parent atype adesc amtime
+    while IFS=$'\t' read -r aid depth parent atype adesc amtime; do
+        [[ -z "$aid" ]] && continue
+        local agent_jsonl="${subdir}/agent-${aid}.jsonl"
+        local ctx out mdl
+        IFS=$'\t' read -r ctx out mdl < <(get_agent_stats "$agent_jsonl" "${CACHE_DIR}/agents/${session}.${aid}.stats")
+        local snippet
+        snippet=$(get_agent_snippet "$agent_jsonl" "$AGENT_SNIPPET_MAXLEN" "${CACHE_DIR}/agents/${session}.${aid}.snippet")
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$aid" "$depth" "$parent" "$atype" "$adesc" "$amtime" "$ctx" "$out" "$mdl" "$snippet"
+    done < <(list_session_agents "$jsonl")
+}
+
 # ── render ──────────────────────────────────────────────
 
 render() {
@@ -151,10 +186,12 @@ render() {
     (( name_gap > 3 )) && name_gap=3
 
     local out=""
+    local now
+    now=$(date +%s)
 
     # header
-    local rhs="[⏎ · x · X · r · q]"
-    (( cols >= 80 )) && rhs="[⏎ switch · x kill · X prune · r refresh · q quit]"
+    local rhs="[⏎ · x · X · a · r · q]"
+    (( cols >= 80 )) && rhs="[⏎ switch · x kill · X prune · a agents · r refresh · q quit]"
     local title="  Claude Sessions"
     local pad=$(( cols - ${#title} - ${#rhs} ))
     (( pad < 1 )) && pad=1
@@ -172,9 +209,17 @@ render() {
 
     # rows
     for i in "${!sessions[@]}"; do
+        local working_agents="${agent_working_counts[$i]:-0}"
+
+        # live-agent badge eats into the name's own width budget
+        local badge=""
+        (( working_agents > 0 )) && badge=" +${working_agents}"
+        local avail_name_w=$(( name_w - ${#badge} ))
+        (( avail_name_w < 1 )) && avail_name_w=1
+
         local name="${names[$i]}"
-        if (( ${#name} > name_w )); then
-            name="${name:0:$(( name_w - 1 ))}…"
+        if (( ${#name} > avail_name_w )); then
+            name="${name:0:$(( avail_name_w - 1 ))}…"
         fi
 
         local st="${statuses[$i]}"
@@ -183,13 +228,15 @@ render() {
         local all_tok="${total_alls[$i]}"
         local mdl="${models[$i]}"
 
-        # marker + name
+        # marker + name (+ badge, if this session has working agents)
         if (( i == selected )); then
             out+="${CYAN}▸ ${RST}${BOLD}"
         else
             out+="  "
         fi
-        out+="${name}$(printf '%*s' "$(( name_w - ${#name} + name_gap ))" '')"
+        out+="${name}"
+        (( working_agents > 0 )) && out+="${CYAN}${badge}${RST}"
+        out+="$(printf '%*s' "$(( name_w - ${#name} - ${#badge} + name_gap ))" '')"
         (( i == selected )) && out+="${RST}"
 
         # status — padded to exactly 15 visible columns
@@ -221,10 +268,66 @@ render() {
         (( show_total ))  && out+="$(printf " %${all_w}s" "$all_tok")"
         (( show_model ))  && out+="  ${DIM}${mdl}${RST}"
         out+=$'\n'
+
+        # agent tree — auto-expand sessions with a working agent; 'a' forces
+        # every session's tree open (including idle-only agents)
+        local expand=0
+        (( agents_forced )) && expand=1
+        (( working_agents > 0 )) && expand=1
+        if (( expand )) && [[ -n "${agent_lines[$i]}" ]]; then
+            local aid adepth aparent atype adesc amtime actx aout amdl asnip
+            while IFS=$'\t' read -r aid adepth aparent atype adesc amtime actx aout amdl asnip; do
+                [[ -z "$aid" ]] && continue
+                local aage=$(( now - amtime ))
+                local amarker="◯" amarker_color="${DIM}"
+                if (( aage <= LIVE_AGENT_SECS )); then
+                    amarker="●"
+                    amarker_color="${YELLOW}"
+                fi
+                local aage_str actx_fmt
+                aage_str=$(format_age "$aage")
+                actx_fmt=$(format_tokens "${actx:-0}")
+
+                local aindent
+                aindent=$(printf '%*s' $(( 2 * adepth )) '')
+                local prefix="  ${aindent}└ "
+                local tail=" · ctx ${actx_fmt} · ${aage_str}"
+
+                local desc_part="$adesc"
+                local type_part=" · ${atype}"
+                local snip_part=""
+                [[ -n "$asnip" ]] && snip_part=" · \"${asnip}\""
+
+                local row_plain row_colored
+                row_plain="${prefix}${amarker} ${desc_part}${type_part}${tail}${snip_part}"
+                if (( ${#row_plain} <= cols - 1 )); then
+                    row_colored="${prefix}${amarker_color}${amarker}${RST} ${desc_part}${DIM}${type_part}${RST}${tail}${DIM}${snip_part}${RST}"
+                else
+                    row_plain="${prefix}${amarker} ${desc_part}${type_part}${tail}"
+                    if (( ${#row_plain} <= cols - 1 )); then
+                        row_colored="${prefix}${amarker_color}${amarker}${RST} ${desc_part}${DIM}${type_part}${RST}${tail}"
+                    else
+                        row_plain="${prefix}${amarker} ${desc_part}${tail}"
+                        if (( ${#row_plain} <= cols - 1 )); then
+                            row_colored="${prefix}${amarker_color}${amarker}${RST} ${desc_part}${tail}"
+                        else
+                            local abudget=$(( cols - 1 - ${#prefix} - 2 - ${#tail} ))
+                            (( abudget < 3 )) && abudget=3
+                            local atrunc="$desc_part"
+                            if (( ${#atrunc} > abudget )); then
+                                atrunc="${atrunc:0:$(( abudget - 1 ))}…"
+                            fi
+                            row_colored="${prefix}${amarker_color}${amarker}${RST} ${atrunc}${tail}"
+                        fi
+                    fi
+                fi
+                out+="${row_colored}"$'\n'
+            done <<< "${agent_lines[$i]}"
+        fi
     done
 
     out+=$'\n'
-    out+="${DIM}  j/k navigate · ⏎ switch · x kill · X prune · r refresh · R hard · q quit${RST}"
+    out+="${DIM}  j/k navigate · ⏎ switch · x kill · X prune · a agents · r refresh · R hard · q quit${RST}"
 
     printf '\033[H\033[2J%s' "$out"
 }
@@ -238,6 +341,9 @@ load_data() {
     outputs=()
     total_alls=()
     models=()
+    agent_lines=()
+    agent_working_counts=()
+    agent_total_counts=()
 
     # show names immediately with placeholders
     for sess in "${sessions[@]}"; do
@@ -247,6 +353,9 @@ load_data() {
         outputs+=("—")
         total_alls+=("—")
         models+=("")
+        agent_lines+=("")
+        agent_working_counts+=("0")
+        agent_total_counts+=("0")
     done
     render
 
@@ -266,11 +375,14 @@ load_data() {
             st=$(get_session_status "$sess")
             stats=$(get_session_stats "$sess")
             printf '%s\t%s\t%s' "$cwd_ok" "$st" "$stats" > "${parallel_dir}/${i}"
+            get_session_agent_tree "$sess" > "${parallel_dir}/${i}.agents"
         ) &
     done
     wait
 
     # read results and populate arrays
+    local now
+    now=$(date +%s)
     for i in "${!sessions[@]}"; do
         local result_file="${parallel_dir}/${i}"
         if [[ -f "$result_file" ]]; then
@@ -282,6 +394,19 @@ load_data() {
             outputs[$i]=$(format_tokens "$tout")
             total_alls[$i]=$(format_tokens "$tall")
             models[$i]=$(short_model "$mdl")
+        fi
+
+        local agents_file="${parallel_dir}/${i}.agents"
+        if [[ -s "$agents_file" ]]; then
+            agent_lines[$i]=$(<"$agents_file")
+            local total=0 working=0 amtime
+            while IFS=$'\t' read -r _ _ _ _ _ amtime _ _ _ _; do
+                [[ -z "$amtime" ]] && continue
+                (( total++ ))
+                (( now - amtime <= LIVE_AGENT_SECS )) && (( working++ ))
+            done < "$agents_file"
+            agent_total_counts[$i]="$total"
+            agent_working_counts[$i]="$working"
         fi
     done
 
@@ -302,6 +427,10 @@ contexts=()
 outputs=()
 total_alls=()
 models=()
+agent_lines=()
+agent_working_counts=()
+agent_total_counts=()
+agents_forced=0
 
 # initial load
 reload_sessions
@@ -338,6 +467,12 @@ while true; do
         k|UP)
             (( selected-- ))
             (( selected < 0 )) && selected=0
+            render
+            ;;
+        a)
+            # toggle forcing every session's agent tree open (sessions with
+            # a working agent auto-expand regardless of this toggle)
+            (( agents_forced = !agents_forced ))
             render
             ;;
         r)

@@ -284,9 +284,13 @@ list_session_agents() {
         | [
             .id,
             (.spawnDepth // 1),
-            (.parentAgentId // ""),
+            # "-" placeholder for a root/orphan: an empty TSV field here
+            # would sit mid-row, and a tab-delimited bash read collapses
+            # adjacent tabs (tab is IFS whitespace), silently shifting every
+            # field after it — never emit a blank non-trailing field.
+            ((.parentAgentId // "") as $pid | if $pid == "" then "-" else $pid end),
             (.agentType // "agent"),
-            (.description // ""),
+            ((.description // "") as $d | if $d == "" then "(no description)" else $d end),
             .mtime
           ] | @tsv
     ' 2>/dev/null
