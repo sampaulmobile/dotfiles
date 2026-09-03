@@ -116,6 +116,18 @@ alias top_cpu='top -F -R -o cpu'
 wttr_weather() { curl "wttr.in/${1:-}" }
 alias ww='wttr_weather'
 
+# toggle keeping the display awake (lid-open only; closing the lid still sleeps)
+caffeinate_toggle() {
+    if pgrep -x caffeinate >/dev/null; then
+        pkill -x caffeinate
+        echo "☕ caffeinate off — normal sleep restored"
+    else
+        nohup caffeinate -du >/dev/null 2>&1 &!
+        echo "☕ caffeinate on — display stays awake until toggled off"
+    fi
+}
+alias caff='caffeinate_toggle'
+
 
 # ============ VIM/MVIM/NEOVIM =============
 launch_vim() {

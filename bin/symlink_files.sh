@@ -45,11 +45,12 @@ fi
 
 # ===== claude code (from other/ — machine-local, untracked) =====
 # settings.json is a file link (~/.claude itself holds machine state);
-# skills/ and rules/ are whole-directory links.
-mkdir -p ~/.claude $other/claude/skills $other/claude/rules
+# skills/, rules/ and agents/ are whole-directory links.
+mkdir -p ~/.claude $other/claude/skills $other/claude/rules $other/claude/agents
 [[ -f $other/claude/settings.json ]] && link $other/claude/settings.json ~/.claude/settings.json
 link $other/claude/skills ~/.claude/skills
 link $other/claude/rules ~/.claude/rules
+link $other/claude/agents ~/.claude/agents
 
 # ===== starship =====
 mkdir -p ~/.config

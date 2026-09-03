@@ -74,6 +74,13 @@
       "WebSearch"
     ]
   },
+  "crossSessionInbound": "accept",
+  "statusLine": {
+    "type": "command",
+    "command": "~/dotfiles/bin/claude-statusline",
+    "padding": 0,
+    "refreshInterval": 2
+  },
   "hooks": {
     "Notification": [
       {
