@@ -1,5 +1,6 @@
 {
   "permissions": {
+    "defaultMode": "acceptEdits",
     "allow": [
       "Bash(grep:*)",
       "Bash(rg:*)",
@@ -104,5 +105,8 @@
   "skipWorkflowUsageWarning": true,
   "remoteControlAtStartup": true,
   "agentPushNotifEnabled": true,
-  "voiceEnabled": true
+  "voiceEnabled": true,
+  "env": {
+    "DISABLE_AUTOUPDATER": "1"
+  }
 }
