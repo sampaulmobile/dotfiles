@@ -1,24 +1,63 @@
 #!/usr/bin/env bash
 
-# Print permission-needed count for tmux status bar.
-# Called by tmux every status-interval (~5s). Must be fast.
-# Output: "🔴 N " if N>0 sessions need permission, else empty string.
-count=0
-while IFS= read -r session; do
-    content=$(tmux capture-pane -t "${session}:1" -p -S -30 2>/dev/null | grep -v '^$' | tail -10)
-    [[ -z "$content" ]] && continue
+# Ambient attention layer for the tmux status bar.
+# Called by tmux every status-interval (~5s) — must stay fast (<200ms).
+# Output: "🔴N ✅N ●N " — zero-count segments are omitted entirely, and an
+# all-zero result prints nothing (preserves the pre-existing empty
+# status-right behavior when nothing needs attention).
+#   🔴 permission — sessions waiting on a permission/plan prompt
+#   ✅ done       — sessions finished since last visited (Stop hook flags,
+#                   see bin/tmux-claude-attention)
+#   ●  working    — sessions actively streaming output
+#
+# Scans ALL tmux sessions, not just claude-* popup sessions, so a headless
+# project hub running claude directly (not in a floating popup) is counted
+# too. All pane content is captured in a SINGLE chained tmux invocation
+# (capture-pane + display-message separators for every session, one tmux
+# client/server round trip total) rather than one tmux call per session —
+# with more than a handful of sessions, per-session capture-pane calls
+# alone blow the 200ms budget. Classification per pane reuses
+# tmux-claude-lib's classify_pane_status (same heuristic as the dashboard),
+# just fed from the batched capture instead of its own capture-pane call.
 
-    # Skip if working
-    echo "$content" | grep -q "to interrupt" && continue
+source ~/dotfiles/bin/tmux-claude-lib
 
-    # Count permission prompts (Yes + No visible) and plan mode questions
-    if echo "$content" | grep -q "Yes" && echo "$content" | grep -q "No"; then
-        (( count++ ))
-    elif echo "$content" | tail -2 | grep -q "^Enter to select"; then
-        (( count++ ))
-    fi
-done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^claude-')
+sessions=()
+while IFS= read -r s; do
+    sessions+=("$s")
+done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null)
 
-if (( count > 0 )); then
-    printf '🔴 %d ' "$count"
+permission_count=0
+working_count=0
+
+if (( ${#sessions[@]} > 0 )); then
+    sep='@@CLAUDE-ATTN-SEP@@'
+    args=()
+    for s in "${sessions[@]}"; do
+        args+=(capture-pane -t "${s}:1" -p -S -30 \; display-message -p "$sep" \;)
+    done
+    combined=$(tmux "${args[@]}" 2>/dev/null)
+
+    block=""
+    while IFS= read -r line; do
+        if [[ "$line" == "$sep" ]]; then
+            content=$(printf '%s' "$block" | grep -v '^$' | tail -10)
+            case "$(classify_pane_status "$content")" in
+                permission) (( permission_count++ )) ;;
+                working)    (( working_count++ )) ;;
+            esac
+            block=""
+        else
+            block+="$line"$'\n'
+        fi
+    done <<< "$combined"
 fi
+
+done_count=$(~/dotfiles/bin/tmux-claude-attention list 2>/dev/null | grep -c .)
+
+out=""
+(( permission_count > 0 )) && out+="🔴${permission_count} "
+(( done_count > 0 )) && out+="✅${done_count} "
+(( working_count > 0 )) && out+="●${working_count} "
+
+printf '%s' "$out"

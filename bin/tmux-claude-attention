@@ -82,11 +82,21 @@ cmd_clear() {
 cmd_list() {
     [[ -d "$FLAG_DIR" ]] || return 0
 
+    # One tmux round trip for the whole live-session set, then check each
+    # flag against it in pure bash — a has-session call per flag file
+    # would be one more tmux round trip per flag, easily blowing the
+    # statusbar's 200ms budget once more than a couple of sessions are
+    # flagged at once.
+    local live=$'\n'
+    live+=$(tmux list-sessions -F '#{session_name}' 2>/dev/null)
+    live+=$'\n'
+
     local f session
     for f in "$FLAG_DIR"/*.done; do
         [[ -e "$f" ]] || continue
-        session=$(basename "$f" .done)
-        if tmux has-session -t "=$session" 2>/dev/null; then
+        session="${f##*/}"
+        session="${session%.done}"
+        if [[ "$live" == *$'\n'"$session"$'\n'* ]]; then
             printf '%s\t%s\n' "$(file_mtime "$f")" "$session"
         else
             rm -f "$f"

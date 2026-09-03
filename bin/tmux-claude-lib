@@ -22,13 +22,22 @@ get_claude_sessions() {
         | awk '{print $2}'
 }
 
-# get_session_status <tmux-session-name>
+# classify_pane_status <content>
 #   Prints: working | idle | permission | unknown
-#   Detects state by inspecting the last lines of the tmux pane.
-get_session_status() {
-    local session="$1"
-    local content
-    content=$(tmux capture-pane -t "${session}:1" -p -S -30 2>/dev/null | grep -v '^$' | tail -10)
+#   Pure classifier over already-captured pane content (the same
+#   grep -v '^$' | tail -10 tail get_session_status feeds it). Split out of
+#   get_session_status so a caller that batches many panes into a single
+#   tmux invocation (e.g. tmux-claude-statusbar, which must scan every
+#   session in one round trip to stay fast) can classify each pane's
+#   content without paying for a second per-session capture-pane call.
+#   Written as pure bash substring/array tests (no echo|grep forks) — with
+#   many sessions this runs once per session, and on this machine each
+#   forked grep/echo pair costs a few ms, enough to blow a 200ms budget
+#   across a couple dozen sessions. bash 3.2 compatible (macOS ships 3.2 as
+#   both /bin/bash and the first `bash` on PATH) — no negative array
+#   indices, no mapfile/readarray (both 4.0+ only).
+classify_pane_status() {
+    local content="$1"
 
     if [[ -z "$content" ]]; then
         echo "unknown"
@@ -36,29 +45,50 @@ get_session_status() {
     fi
 
     # Working: claude is actively streaming output
-    if echo "$content" | grep -q "to interrupt"; then
+    if [[ "$content" == *"to interrupt"* ]]; then
         echo "working"
         return
     fi
 
-    # Permission: Yes/No selector or plan mode question waiting for input
+    # Permission: Yes/No selector waiting for input
     # (must check before idle — ❯ appears in both)
-    if echo "$content" | grep -q "Yes" && echo "$content" | grep -q "No"; then
-        echo "permission"
-        return
-    fi
-    if echo "$content" | tail -2 | grep -q "^Enter to select"; then
+    if [[ "$content" == *"Yes"* && "$content" == *"No"* ]]; then
         echo "permission"
         return
     fi
 
+    # Permission (plan mode question): "Enter to select" on either of the
+    # last 2 lines. Split into lines with a builtin `read`, not `tail -2`.
+    local -a lines
+    IFS=$'\n' read -rd '' -a lines <<< "$content"
+    local n=${#lines[@]}
+    if (( n > 0 )); then
+        local last="${lines[$(( n - 1 ))]}"
+        local prev=""
+        (( n > 1 )) && prev="${lines[$(( n - 2 ))]}"
+        if [[ "$last" == "Enter to select"* || "$prev" == "Enter to select"* ]]; then
+            echo "permission"
+            return
+        fi
+    fi
+
     # Idle: the ❯ input prompt is visible, claude is done
-    if echo "$content" | grep -q "❯"; then
+    if [[ "$content" == *"❯"* ]]; then
         echo "idle"
         return
     fi
 
     echo "unknown"
+}
+
+# get_session_status <tmux-session-name>
+#   Prints: working | idle | permission | unknown
+#   Detects state by inspecting the last lines of the tmux pane.
+get_session_status() {
+    local session="$1"
+    local content
+    content=$(tmux capture-pane -t "${session}:1" -p -S -30 2>/dev/null | grep -v '^$' | tail -10)
+    classify_pane_status "$content"
 }
 
 # get_pane_cwd <tmux-session-name>
