@@ -79,6 +79,27 @@ get_claude_sessions() {
         | awk '!seen[$2]++ {print $2}'
 }
 
+# get_claude_panes
+#   Prints one line per claude pane — ANY window/pane of ANY session, one
+#   row per claude process, tab-separated: session_name, pane_id,
+#   window_index. Most recently active session first; within a session,
+#   window order. This is the dashboard's row source: enumerating per PANE
+#   (not per session, like get_claude_sessions) is what gives a second
+#   claude outside window 1 its own row instead of being invisible.
+get_claude_panes() {
+    local ttys
+    ttys=$(claude_ttys)
+    [[ -z "$ttys" ]] && return 0
+    tmux list-panes -a -F $'#{session_activity}\t#{session_name}\t#{pane_id}\t#{window_index}\t#{pane_tty}' 2>/dev/null \
+        | while IFS=$'\t' read -r act name pid widx tty; do
+            case $'\n'"$ttys"$'\n' in
+                *$'\n'"${tty#/dev/}"$'\n'*) printf '%s\t%s\t%s\t%s\n' "$act" "$name" "$pid" "$widx" ;;
+            esac
+        done \
+        | sort -t$'\t' -k1,1rn -k4,4n \
+        | cut -f2-4
+}
+
 # is_claude_pane_command <pane-current-command>
 #   True (exit 0) if the given #{pane_current_command} value looks like a
 #   running claude process — the CLI's foreground process is typically
@@ -193,6 +214,16 @@ get_session_status() {
     local session="$1"
     local raw
     raw=$(tmux capture-pane -t "${session}:1" -p -S -30 2>/dev/null)
+    classify_pane_status "$raw"
+}
+
+# get_pane_status <pane-id>
+#   Prints: working | idle | permission | unknown
+#   Same classifier as get_session_status, but for one exact pane — the
+#   dashboard's per-row status now that rows are panes, not sessions.
+get_pane_status() {
+    local raw
+    raw=$(tmux capture-pane -t "$1" -p -S -30 2>/dev/null)
     classify_pane_status "$raw"
 }
 
@@ -315,38 +346,74 @@ build_cwd_session_map() {
         "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null > "$_CWD_MAP_FILE"
 }
 
+# _pane_exact_jsonl <pane-id>
+#   Pane-exact transcript lookup: sessions/*.json records each claude's
+#   tmux pane id ("tmux":"sess:@win.%pane") — match this pane's id against
+#   the map. This is what disambiguates two claude processes sharing one
+#   CWD (e.g. a second claude launched in another window of the same
+#   project session): cwd-based lookup + the newest-jsonl heuristic in
+#   _cwd_lookup_jsonl made the dashboard silently read the OTHER claude's
+#   transcript — no subagents dir, wrong tokens.
+#   Prints the jsonl path, or nothing on a miss. Requires
+#   build_cwd_session_map to have run.
+_pane_exact_jsonl() {
+    local pane_id="$1"
+    [[ -n "$_CWD_MAP_FILE" && -f "$_CWD_MAP_FILE" ]] || return 0
+    local hit pcwd psid pjsonl
+    hit=$(awk -F'\t' -v p="$pane_id" '$1 == p { print; exit }' "$_CWD_MAP_FILE")
+    [[ -z "$hit" ]] && return 0
+    IFS=$'\t' read -r _ pcwd psid <<< "$hit"
+    pjsonl="${CLAUDE_PROJECTS_DIR}/$(encode_cwd "$pcwd")/${psid}.jsonl"
+    [[ -n "$psid" && -f "$pjsonl" ]] && echo "$pjsonl"
+}
+
+# find_pane_jsonl <pane-id>
+#   Prints the path to the active JSONL transcript for the claude running
+#   in one exact pane, or empty string. Pane-exact lookup first, then the
+#   cwd fallback against THAT pane's cwd (not window 1's).
+find_pane_jsonl() {
+    local pane_id="$1"
+    local pjsonl
+    pjsonl=$(_pane_exact_jsonl "$pane_id")
+    if [[ -n "$pjsonl" ]]; then
+        echo "$pjsonl"
+        return
+    fi
+    local cwd
+    cwd=$(tmux display-message -p -t "$pane_id" '#{pane_current_path}' 2>/dev/null)
+    _cwd_lookup_jsonl "$cwd"
+}
+
 # find_session_jsonl <tmux-session-name>
 #   Prints the path to the active JSONL transcript file, or empty string.
 #   Resolution order:
-#     1. Pane-exact: sessions/*.json records each claude's tmux pane id
-#        ("tmux":"sess:@win.%pane") — match window 1's pane ids against the
-#        map. This is what disambiguates two claude processes sharing one
-#        CWD (e.g. a second claude launched in another window of the same
-#        project session): cwd-based lookup + the newest-jsonl heuristic
-#        below made the dashboard silently read the OTHER claude's
-#        transcript — no subagents dir, wrong tokens.
-#     2. CWD lookup, overridden by the most recently modified JSONL in the
-#        project dir (handles /clear creating a new session ID without
-#        updating the session JSON).
+#     1. Pane-exact (window 1's panes) — see _pane_exact_jsonl.
+#     2. CWD lookup — see _cwd_lookup_jsonl.
+#   NOTE: window-1-pinned by construction; the dashboard uses
+#   find_pane_jsonl per claude pane instead (a claude outside window 1 was
+#   invisible here — no row, so no subagent tree either).
 find_session_jsonl() {
     local session="$1"
 
-    if [[ -n "$_CWD_MAP_FILE" && -f "$_CWD_MAP_FILE" ]]; then
-        local pane_id hit pcwd psid pjsonl
-        for pane_id in $(tmux list-panes -t "${session}:1" -F '#{pane_id}' 2>/dev/null); do
-            hit=$(awk -F'\t' -v p="$pane_id" '$1 == p { print; exit }' "$_CWD_MAP_FILE")
-            [[ -z "$hit" ]] && continue
-            IFS=$'\t' read -r _ pcwd psid <<< "$hit"
-            pjsonl="${CLAUDE_PROJECTS_DIR}/$(encode_cwd "$pcwd")/${psid}.jsonl"
-            if [[ -n "$psid" && -f "$pjsonl" ]]; then
-                echo "$pjsonl"
-                return
-            fi
-        done
-    fi
+    local pane_id pjsonl
+    for pane_id in $(tmux list-panes -t "${session}:1" -F '#{pane_id}' 2>/dev/null); do
+        pjsonl=$(_pane_exact_jsonl "$pane_id")
+        if [[ -n "$pjsonl" ]]; then
+            echo "$pjsonl"
+            return
+        fi
+    done
 
-    local cwd
-    cwd=$(get_pane_cwd "$session")
+    _cwd_lookup_jsonl "$(get_pane_cwd "$session")"
+}
+
+# _cwd_lookup_jsonl <cwd>
+#   CWD-based transcript lookup, overridden by the most recently modified
+#   JSONL in the project dir (handles /clear creating a new session ID
+#   without updating the session JSON). Shared fallback for
+#   find_session_jsonl / find_pane_jsonl.
+_cwd_lookup_jsonl() {
+    local cwd="$1"
     [[ -z "$cwd" ]] && return
 
     local encoded

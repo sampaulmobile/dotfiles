@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 
 # Interactive dashboard for Claude Code tmux sessions.
-# Shows status, token usage, and model for all claude-* sessions.
+# Shows status, token usage, and model — one row per claude PANE (any
+# window of any session), so a second claude launched outside window 1
+# gets its own row (named "session:N") with its own transcript, tokens,
+# and subagent tree.
 # Bound to Ctrl+G via tmux neww.
 
 source ~/dotfiles/bin/tmux-claude-lib
@@ -57,53 +60,95 @@ DIM_RED=$'\033[2;31m'
 # ── helpers ─────────────────────────────────────────────
 
 # reload_sessions
-#   Re-collects the session list from tmux.
-#   Preserves selected cursor by session name (not index), since the list
-#   is sorted by activity time and the order changes between refreshes.
+#   Re-collects the row list from tmux — one row per claude PANE, not per
+#   tmux session (a second claude outside window 1 gets its own row; its
+#   subagent tree was invisible when rows were per-session and pinned to
+#   window 1's transcript). Fills the parallel arrays sessions/panes/names.
+#   Display name: the session name for a window-1 claude (the hub layout's
+#   front door — matches the old per-session rows), "session:N" for a
+#   claude in window N elsewhere.
+#   Preserves selected cursor by pane id (not index), since the list is
+#   sorted by activity time and the order changes between refreshes.
 reload_sessions() {
     local prev=""
-    if (( ${#sessions[@]} > 0 && selected < ${#sessions[@]} )); then
-        prev="${sessions[$selected]}"
+    if (( ${#panes[@]} > 0 && selected < ${#panes[@]} )); then
+        prev="${panes[$selected]}"
     fi
     sessions=()
-    while IFS= read -r s; do
-        sessions+=("$s")
-    done < <(get_claude_sessions)
-    session_count=${#sessions[@]}
+    panes=()
+    names=()
+    local sess pid widx name
+    while IFS=$'\t' read -r sess pid widx; do
+        [[ -z "$pid" ]] && continue
+        sessions+=("$sess")
+        panes+=("$pid")
+        name="${sess#claude-}"
+        [[ "$widx" != "1" ]] && name="${name}:${widx}"
+        # two claude panes in one window (split): disambiguate by pane id
+        for i in "${!names[@]}"; do
+            [[ "${names[$i]}" == "$name" ]] && name="${name}.${pid#%}" && break
+        done
+        names+=("$name")
+    done < <(get_claude_panes)
+    session_count=${#panes[@]}
     selected=0
     if [[ -n "$prev" ]]; then
-        for i in "${!sessions[@]}"; do
-            [[ "${sessions[$i]}" == "$prev" ]] && selected=$i && break
+        for i in "${!panes[@]}"; do
+            [[ "${panes[$i]}" == "$prev" ]] && selected=$i && break
         done
     fi
     (( selected >= session_count )) && selected=$(( session_count - 1 ))
     (( selected < 0 )) && selected=0
 }
 
-# kill_selected_session
-#   Kills the tmux session at the current selection. No silent failure
-#   paths: any refusal/error is reported via kill_error for the caller to
-#   display. Killing the dashboard's own host session is ALLOWED (the x
-#   handler warns first) — with detach-on-destroy off the client just moves
-#   to the last session; this window dies with its host.
+# session_row_count <tmux-session-name>
+#   How many rows (claude panes) the current row list has for a session —
+#   decides whether killing a row means the pane or the whole session.
+session_row_count() {
+    local sess="$1" n=0 j
+    for j in "${!sessions[@]}"; do
+        [[ "${sessions[$j]}" == "$sess" ]] && (( n++ ))
+    done
+    echo "$n"
+}
+
+# kill_selected_row
+#   Kills the row at the current selection: the whole tmux session when
+#   this is its only claude row (the old per-session behavior), just this
+#   claude's pane when the session has other claude rows — so killing a
+#   secondary claude never takes down the session's primary one. No silent
+#   failure paths: any refusal/error is reported via kill_error for the
+#   caller to display. Killing the dashboard's own host session is ALLOWED
+#   (the x handler warns first) — with detach-on-destroy off the client
+#   just moves to the last session; this window dies with its host.
 kill_error=""
-kill_selected_session() {
+kill_selected_row() {
     kill_error=""
     (( session_count == 0 )) && { kill_error="no sessions"; return 1; }
-    local target="${sessions[$selected]}"
-    [[ -z "$target" ]] && { kill_error="empty target (row/session index mismatch?)"; return 1; }
+    local sess="${sessions[$selected]}" pane="${panes[$selected]}"
+    [[ -z "$sess" || -z "$pane" ]] && { kill_error="empty target (row/session index mismatch?)"; return 1; }
     local err
-    # exact name match (= prefix prevents tmux prefix-matching)
-    if ! err=$(tmux kill-session -t "=${target}" 2>&1); then
-        kill_error="tmux: ${err:-kill-session failed}"
-        return 1
+    if (( $(session_row_count "$sess") > 1 )); then
+        if ! err=$(tmux kill-pane -t "$pane" 2>&1); then
+            kill_error="tmux: ${err:-kill-pane failed}"
+            return 1
+        fi
+    else
+        # exact name match (= prefix prevents tmux prefix-matching)
+        if ! err=$(tmux kill-session -t "=${sess}" 2>&1); then
+            kill_error="tmux: ${err:-kill-session failed}"
+            return 1
+        fi
     fi
 }
 
-get_session_stats() {
+# get_row_stats <row-name> <jsonl-path>
+#   Token/turn/cost stats for one row's transcript. row-name only keys the
+#   totals cache (it's unique per pane, so two claudes in one session can't
+#   share a cache file).
+get_row_stats() {
     local session="$1"
-    local jsonl
-    jsonl=$(find_session_jsonl "$session")
+    local jsonl="$2"
 
     if [[ -z "$jsonl" ]]; then
         printf '0\t0\t0\t0\t-\tunknown\t0'
@@ -131,17 +176,17 @@ get_session_stats() {
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s' "$ctx" "$tout" "$tall" "${turns:-0}" "${cost:--}" "$mdl" "${mt:-0}"
 }
 
-# get_session_agent_tree <tmux-session-name>
-#   Prints one line per live subagent under this session, tab-separated:
-#   agent_id, depth, parent_id, agentType, description, mtime, started,
-#   context, output, turns, model, snippet. Per-agent stats/snippet use mtime-keyed cache
-#   files under CACHE_DIR so an idle agent's transcript isn't re-parsed
-#   every refresh. Prints nothing if the session has no agents (or no
-#   resolvable transcript) — never errors.
-get_session_agent_tree() {
+# get_row_agent_tree <row-name> <jsonl-path>
+#   Prints one line per live subagent under this row's transcript,
+#   tab-separated: agent_id, depth, parent_id, agentType, description,
+#   mtime, started, context, output, turns, model, snippet. Per-agent
+#   stats/snippet use mtime-keyed cache files under CACHE_DIR (keyed by
+#   row-name, unique per pane) so an idle agent's transcript isn't
+#   re-parsed every refresh. Prints nothing if the row has no agents (or
+#   no resolvable transcript) — never errors.
+get_row_agent_tree() {
     local session="$1"
-    local jsonl
-    jsonl=$(find_session_jsonl "$session")
+    local jsonl="$2"
     [[ -z "$jsonl" ]] && return
 
     local proj_dir sid subdir
@@ -334,8 +379,10 @@ render() {
 
         # an idle session with an attention done-flag (finished but unseen —
         # the statusbar's ✅ and C-y's jump target) shows as "done" here so
-        # the dashboard reveals WHICH session the bar's ✅ belongs to
-        if [[ "$st" == "idle" && -e "$HOME/.cache/claude-attention/${names[$i]}.done" ]]; then
+        # the dashboard reveals WHICH session the bar's ✅ belongs to. The
+        # flag is per tmux SESSION (the Stop hook can't tell panes apart),
+        # so every idle row of that session shows it.
+        if [[ "$st" == "idle" && -e "$HOME/.cache/claude-attention/${sessions[$i]}.done" ]]; then
             st="done"
         fi
 
@@ -582,7 +629,6 @@ render() {
 # ── data collection ─────────────────────────────────────
 
 load_data() {
-    names=()
     statuses=()
     contexts=()
     outputs=()
@@ -595,9 +641,8 @@ load_data() {
     agent_working_counts=()
     agent_total_counts=()
 
-    # show names immediately with placeholders
+    # show names (computed by reload_sessions) immediately with placeholders
     for sess in "${sessions[@]}"; do
-        names+=("${sess#claude-}")
         statuses+=("loading")
         contexts+=("0")
         outputs+=("—")
@@ -621,14 +666,15 @@ load_data() {
 
     for i in "${!sessions[@]}"; do
         (
-            sess="${sessions[$i]}"
-            cwd=$(get_pane_cwd "$sess")
+            pid="${panes[$i]}"
+            cwd=$(tmux display-message -p -t "$pid" '#{pane_current_path}' 2>/dev/null)
             cwd_ok=1
             [[ -n "$cwd" && ! -d "$cwd" ]] && cwd_ok=0
-            st=$(get_session_status "$sess")
-            stats=$(get_session_stats "$sess")
+            st=$(get_pane_status "$pid")
+            jsonl=$(find_pane_jsonl "$pid")
+            stats=$(get_row_stats "${names[$i]}" "$jsonl")
             printf '%s\t%s\t%s' "$cwd_ok" "$st" "$stats" > "${parallel_dir}/${i}"
-            get_session_agent_tree "$sess" > "${parallel_dir}/${i}.agents"
+            get_row_agent_tree "${names[$i]}" "$jsonl" > "${parallel_dir}/${i}.agents"
         ) &
     done
     wait
@@ -677,6 +723,7 @@ trap 'tput cnorm 2>/dev/null; rm -f "$_CWD_MAP_FILE" 2>/dev/null' EXIT
 
 selected=0
 sessions=()
+panes=()
 names=()
 statuses=()
 contexts=()
@@ -737,26 +784,29 @@ while true; do
             load_data
             ;;
         x)
-            # kill selected session (confirm if live)
+            # kill selected row (confirm if live): the whole session when
+            # it's the session's only claude row, just this pane otherwise
             if (( session_count > 0 )); then
                 _do_kill=0
+                _kill_what="session"
+                (( $(session_row_count "${sessions[$selected]}") > 1 )) && _kill_what="pane"
                 _myself=$(tmux display-message -p '#S' 2>/dev/null)
                 _selfwarn=""
-                [[ "${sessions[$selected]}" == "$_myself" ]] && _selfwarn=" ${RED}— hosts THIS dashboard, it will close too${RST}${YELLOW}"
+                [[ "$_kill_what" == "session" && "${sessions[$selected]}" == "$_myself" ]] && _selfwarn=" ${RED}— hosts THIS dashboard, it will close too${RST}${YELLOW}"
                 if [[ "${statuses[$selected]}" == "gone" && -z "$_selfwarn" ]]; then
                     _do_kill=1
                 else
-                    # confirm before killing a live (or self-hosting) session
+                    # confirm before killing a live (or self-hosting) target
                     tput cnorm 2>/dev/null
                     printf '\033[%d;3H' $(( session_count + 6 ))
-                    printf "${YELLOW}Kill session ${names[$selected]}${_selfwarn}? [y/N]${RST} "
+                    printf "${YELLOW}Kill ${_kill_what} ${names[$selected]}${_selfwarn}? [y/N]${RST} "
                     _confirm=""
                     read -rsn1 _confirm
                     tput civis 2>/dev/null
                     [[ "$_confirm" == "y" || "$_confirm" == "Y" ]] && _do_kill=1
                 fi
                 if (( _do_kill )); then
-                    if kill_selected_session; then
+                    if kill_selected_row; then
                         reload_sessions
                         if (( session_count == 0 )); then
                             printf '\033[H\033[2J'
@@ -778,11 +828,23 @@ while true; do
             fi
             ;;
         X)
-            # kill all gone sessions
+            # prune all gone rows: kill the session when EVERY claude row
+            # of that session is gone; kill just the gone pane when the
+            # session still has live claude rows (never take those down)
             _killed=0
             for i in "${!sessions[@]}"; do
-                if [[ "${statuses[$i]}" == "gone" ]]; then
+                [[ "${statuses[$i]}" == "gone" ]] || continue
+                _all_gone=1
+                for j in "${!sessions[@]}"; do
+                    if [[ "${sessions[$j]}" == "${sessions[$i]}" && "${statuses[$j]}" != "gone" ]]; then
+                        _all_gone=0
+                        break
+                    fi
+                done
+                if (( _all_gone )); then
                     tmux kill-session -t "=${sessions[$i]}" 2>/dev/null && (( _killed++ ))
+                else
+                    tmux kill-pane -t "${panes[$i]}" 2>/dev/null && (( _killed++ ))
                 fi
             done
             if (( _killed > 0 )); then
@@ -804,11 +866,16 @@ while true; do
             load_data
             ;;
         ""|Enter)
-            # switch to selected session
+            # switch to the selected row's exact pane (a pane id resolves
+            # to its window for select-window, so this lands on the right
+            # window even if indices shifted since the list was built)
             if (( session_count > 0 )); then
                 _target="${sessions[$selected]}"
+                _pane="${panes[$selected]}"
                 if [[ -n "$_target" ]]; then
-                    tmux switch-client -t "=${_target}:1"
+                    tmux switch-client -t "=${_target}"
+                    [[ -n "$_pane" ]] && tmux select-window -t "$_pane" 2>/dev/null \
+                        && tmux select-pane -t "$_pane" 2>/dev/null
                     exit 0
                 fi
             fi
