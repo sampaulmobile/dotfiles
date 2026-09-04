@@ -10,73 +10,44 @@
 #                   see bin/tmux-claude-attention)
 #   ●  working    — sessions actively streaming output
 #
-# Scans ALL tmux sessions, not just claude-* popup sessions, so a headless
-# project hub running claude directly (not in a floating popup) is counted
-# too. All pane content is captured in a SINGLE chained tmux invocation
-# (capture-pane + display-message separators for every session, one tmux
-# client/server round trip total) rather than one tmux call per session —
-# with more than a handful of sessions, per-session capture-pane calls
-# alone blow the 200ms budget. Classification per pane reuses
-# tmux-claude-lib's classify_pane_status (same heuristic as the dashboard),
-# just fed from the batched capture instead of its own capture-pane call —
-# gated on the pane's #{pane_tty} belonging to a live claude process
-# (claude_ttys from the lib; tty-based because wrapper shells make
-# pane_current_command lie) so a pane NOT running claude can never be
-# misclassified as needing attention.
+# The scan itself lives in tmux-claude-lib's scan_claude_sessions: every
+# pane owned by a live claude process (any window of any session — found by
+# tty, because wrapper shells make pane_current_command lie) is captured in
+# one batched tmux round trip and classified, aggregating worst-status per
+# session (permission > working > idle). Non-claude panes are never
+# captured, so a vim buffer or `git diff` showing this script's "Yes"/"No"/
+# "to interrupt" literals can't false-positive by construction (the round-1
+# finding that used to require an after-the-fact tty gate here). Counts are
+# per session, not per pane — a session with two claudes is one 🔴/●.
+#
+# Side effect: publishes per-session status to
+# ~/.cache/claude-attention/status.tsv ("<session>\t<status>" per claude
+# session, written atomically every tick). tmux-sessionizer reads it for its
+# row colors instead of doing any pane scanning of its own at keypress time.
 
 source ~/dotfiles/bin/tmux-claude-lib
 
-sessions=()
-while IFS= read -r s; do
-    sessions+=("$s")
-done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null)
+STATUS_DIR="$HOME/.cache/claude-attention"
+
+status_lines=$(scan_claude_sessions)
 
 permission_count=0
 working_count=0
+if [[ -n "$status_lines" ]]; then
+    while IFS=$'\t' read -r _name _status; do
+        case "$_status" in
+            permission) (( permission_count++ )) ;;
+            working)    (( working_count++ )) ;;
+        esac
+    done <<< "$status_lines"
+fi
 
-CLAUDE_TTYS=$(claude_ttys)
-
-if (( ${#sessions[@]} > 0 )); then
-    # Randomized per-run so a pane line that happens to equal a fixed
-    # separator literally (e.g. editing/catting these scripts themselves)
-    # can't split a block early and miscount for a tick.
-    sep="@@CLAUDE-ATTN-$$-${RANDOM}@@"
-    # Distinct random tag prefixing each block's pane_tty line
-    # (fetched via the same batched invocation, no extra round trip) — used
-    # to gate classification to panes actually running claude, see below.
-    cmdtag="@@CLAUDE-ATTN-CMD-$$-${RANDOM}@@"
-    args=()
-    for s in "${sessions[@]}"; do
-        args+=(display-message -t "${s}:1" -p "${cmdtag}#{pane_tty}" \; capture-pane -t "${s}:1" -p -S -30 \; display-message -p "$sep" \;)
-    done
-    combined=$(tmux "${args[@]}" 2>/dev/null)
-
-    block=""
-    cmd=""
-    have_cmd=0
-    while IFS= read -r line; do
-        if [[ "$line" == "$sep" ]]; then
-            # Gate on the pane actually running claude — a vim buffer or
-            # `git diff` showing this very script's "Yes"/"No"/"to
-            # interrupt" literals must never count as permission/working
-            # (round-1 finding: false positives from scanning ALL sessions
-            # without an "is claude running here" check).
-            if [[ $'\n'"$CLAUDE_TTYS"$'\n' == *$'\n'"${cmd#/dev/}"$'\n'* ]]; then
-                case "$(classify_pane_status "$block")" in
-                    permission) (( permission_count++ )) ;;
-                    working)    (( working_count++ )) ;;
-                esac
-            fi
-            block=""
-            cmd=""
-            have_cmd=0
-        elif (( ! have_cmd )); then
-            cmd="${line#$cmdtag}"
-            have_cmd=1
-        else
-            block+="$line"$'\n'
-        fi
-    done <<< "$combined"
+# Publish the per-session status cache (atomic: tmp + mv). Written even when
+# empty so a consumer never acts on sessions that no longer run claude; the
+# sessionizer additionally ignores the file when its mtime is stale.
+mkdir -p "$STATUS_DIR"
+if { [[ -z "$status_lines" ]] || printf '%s\n' "$status_lines"; } > "${STATUS_DIR}/.status.$$.tmp" 2>/dev/null; then
+    mv -f "${STATUS_DIR}/.status.$$.tmp" "${STATUS_DIR}/status.tsv"
 fi
 
 done_count=$(~/dotfiles/bin/tmux-claude-attention list 2>/dev/null | grep -c .)

@@ -179,14 +179,26 @@ cmd_jump() {
     }
 
     # Priority 1: a session waiting on a permission prompt (most recently
-    # active first).
-    while IFS= read -r session; do
-        [[ -z "$session" ]] && continue
-        if [[ "$(get_session_status "$session")" == "permission" ]]; then
-            do_switch "$session"
-            return
-        fi
-    done < <(tmux list-sessions -F '#{session_activity} #{session_name}' 2>/dev/null | sort -rn | awk '{print $2}')
+    # active first). One shared multi-pane scan (scan_claude_sessions in
+    # tmux-claude-lib): two tmux round trips total instead of the old
+    # serial capture-pane per session, covers claudes outside window 1,
+    # and never reads a non-claude pane (the old per-session
+    # get_session_status had no tty gate — a vim buffer showing prompt
+    # literals could become a jump target).
+    local perm_sessions=$'\n'
+    local st
+    while IFS=$'\t' read -r session st; do
+        [[ "$st" == "permission" ]] && perm_sessions+="${session}"$'\n'
+    done < <(scan_claude_sessions)
+    if [[ "$perm_sessions" != $'\n' ]]; then
+        while IFS= read -r session; do
+            [[ -z "$session" ]] && continue
+            if [[ "$perm_sessions" == *$'\n'"${session}"$'\n'* ]]; then
+                do_switch "$session"
+                return
+            fi
+        done < <(tmux list-sessions -F '#{session_activity} #{session_name}' 2>/dev/null | sort -rn | awk '{print $2}')
+    fi
 
     # Priority 2: the newest finished-but-unseen session.
     session=$(cmd_list | head -1)

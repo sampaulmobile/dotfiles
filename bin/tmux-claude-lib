@@ -196,6 +196,99 @@ get_session_status() {
     classify_pane_status "$raw"
 }
 
+# scan_claude_sessions
+#   Scans every pane owned by a live claude process — ANY window/pane of
+#   ANY session, not just the hub layout's window 1 — and prints one line
+#   per session that has at least one: "<session>\t<status>", where status
+#   is the worst across that session's claude panes
+#   (permission > working > idle > unknown).
+#
+#   Two tmux round trips total regardless of session count: one
+#   list-panes -a to enumerate panes, one batched capture of ONLY the
+#   panes whose tty belongs to a claude process (claude_ttys). Inverting
+#   the old shape (capture window 1 of every session, then gate on tty)
+#   this way both covers manually-launched claudes outside window 1 and
+#   makes the prompt-lookalike false positive impossible by construction —
+#   a non-claude pane's text is never captured, so it can't be misread
+#   (the gate used to be the only defense; see tmux-claude-statusbar's
+#   round-1 finding note at classify time, now moot).
+#
+#   Panes are addressed by #{pane_id} (stable, immune to renumbering); the
+#   separator line carries the pane's session name so blocks stay
+#   self-labeled even if a pane vanishes between the two round trips (its
+#   capture just comes back empty -> "unknown", self-heals next call).
+#   Used by tmux-claude-statusbar (counts + status.tsv cache) and
+#   tmux-claude-attention's jump (C-o permission targets).
+scan_claude_sessions() {
+    local ttys
+    ttys=$(claude_ttys)
+    [[ -z "$ttys" ]] && return 0
+
+    local pane_list
+    pane_list=$(tmux list-panes -a -F $'#{session_name}\t#{pane_id}\t#{pane_tty}' 2>/dev/null)
+    [[ -z "$pane_list" ]] && return 0
+
+    # claude panes only, as "session\tpane_id"
+    local -a targets=()
+    local sname pid ptty
+    while IFS=$'\t' read -r sname pid ptty; do
+        [[ -z "$pid" ]] && continue
+        case $'\n'"$ttys"$'\n' in
+            *$'\n'"${ptty#/dev/}"$'\n'*) targets+=("${sname}"$'\t'"${pid}") ;;
+        esac
+    done <<< "$pane_list"
+    (( ${#targets[@]} == 0 )) && return 0
+
+    # Randomized separator so pane content that happens to contain a fixed
+    # literal can't split a block early (same reasoning as the statusbar's
+    # original sep).
+    local sep="@@CLAUDE-SCAN-$$-${RANDOM}@@"
+    local -a args=()
+    local entry
+    for entry in "${targets[@]}"; do
+        args+=(capture-pane -t "${entry#*$'\t'}" -p -S -30 \; display-message -p "${sep}${entry%%$'\t'*}" \;)
+    done
+    local combined
+    combined=$(tmux "${args[@]}" 2>/dev/null)
+
+    # Classify each pane; aggregate per session (bash 3.2: delimited
+    # strings + a first-seen order array, no assoc arrays).
+    local perm_s=$'\n' work_s=$'\n' idle_s=$'\n' seen=$'\n'
+    local -a order=()
+    local block="" line name st
+    while IFS= read -r line; do
+        if [[ "$line" == "$sep"* ]]; then
+            name="${line#$sep}"
+            st=$(classify_pane_status "$block")
+            case "$st" in
+                permission) perm_s+="${name}"$'\n' ;;
+                working)    work_s+="${name}"$'\n' ;;
+                idle)       idle_s+="${name}"$'\n' ;;
+            esac
+            if [[ "$seen" != *$'\n'"${name}"$'\n'* ]]; then
+                seen+="${name}"$'\n'
+                order+=("$name")
+            fi
+            block=""
+        else
+            block+="$line"$'\n'
+        fi
+    done <<< "$combined"
+
+    for name in "${order[@]}"; do
+        if [[ "$perm_s" == *$'\n'"${name}"$'\n'* ]]; then
+            st="permission"
+        elif [[ "$work_s" == *$'\n'"${name}"$'\n'* ]]; then
+            st="working"
+        elif [[ "$idle_s" == *$'\n'"${name}"$'\n'* ]]; then
+            st="idle"
+        else
+            st="unknown"
+        fi
+        printf '%s\t%s\n' "$name" "$st"
+    done
+}
+
 # get_pane_cwd <tmux-session-name>
 #   Prints the working directory of the claude pane (window 1).
 get_pane_cwd() {
