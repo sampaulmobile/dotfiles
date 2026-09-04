@@ -161,15 +161,27 @@ fi
 # Keep the @claude_popup flag set so it auto-restores when switching back
 current_session=$(tmux display-message -p '#S')
 if [[ "$current_session" == claude-* ]]; then
-    parent_session="${current_session#claude-}"
-    client=$(tmux list-clients -t "$parent_session" -F '#{client_name}' | head -1)
-    tmux detach-client
+    # the popup's own client — target it EXPLICITLY (a bare detach-client
+    # from a script has no current client and silently does nothing/worse)
+    popup_client=$(tmux list-clients -t "=$current_session" -F '#{client_tty}' 2>/dev/null | head -1)
+    # the outer client = newest client NOT attached to a popup session
+    # (don't assume it sits on this popup's own project session)
+    parent_client=$(tmux list-clients -F '#{client_activity} #{client_tty} #{client_session}' 2>/dev/null \
+        | awk '$3 !~ /^claude-/ {print $1, $2}' | sort -rn | awk 'NR==1 {print $2}')
+    [[ -n $popup_client ]] && tmux detach-client -t "$popup_client"
     sleep 0.1
-    if [[ -n $client ]]; then
-        tmux switch-client -c "$client" -t "$selected_name"
+    if [[ -n $parent_client ]]; then
+        tmux switch-client -c "$parent_client" -t "$selected_name"
     fi
 elif [[ -n $TMUX ]]; then
-    tmux switch-client -t "$selected_name"
+    # scope to the client viewing this session (run-shell/neww contexts have
+    # no implicit current client — unscoped switch-client picks arbitrarily)
+    this_client=$(tmux list-clients -t "=$current_session" -F '#{client_tty}' 2>/dev/null | head -1)
+    if [[ -n $this_client ]]; then
+        tmux switch-client -c "$this_client" -t "$selected_name"
+    else
+        tmux switch-client -t "$selected_name"
+    fi
 else
     tmux attach-session -t "$selected_name"
 fi
