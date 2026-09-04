@@ -58,7 +58,7 @@ else
         filter_session="$current_session"
     fi
     # Single awk replaces sort+awk+grep+grep pipeline (fewer forks).
-    existing=$(tmux list-sessions -F '#{session_last_attached} #{session_name}' 2>/dev/null |
+    existing=$(tmux list-sessions -F '#{?session_last_attached,#{session_last_attached},#{session_created}} #{session_name}' 2>/dev/null |
         sort -rn |
         awk -v skip="$filter_session" '$2 !~ /^claude-/ && $2 != skip {print $2}')
 
