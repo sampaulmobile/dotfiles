@@ -154,7 +154,18 @@ else
 fi
 
 if ! tmux has-session -t="$selected_name" 2>/dev/null; then
-    tmux new-session -ds "$selected_name" -c "$selected"
+    claude_mode=$(cat ~/dotfiles/other/tmux-claude-mode 2>/dev/null || echo popup)
+    if [[ "$claude_mode" == "window" ]]; then
+        # window mode: claude IS the project's front door — window 1 runs
+        # claude (warm), window 2 is the shell; arrive on claude
+        tmux new-session -ds "$selected_name" -c "$selected" -n claude
+        tmux set-option -w -t "${selected_name}:1" automatic-rename off
+        tmux send-keys -t "${selected_name}:1" "claude" Enter
+        tmux new-window -t "${selected_name}:" -c "$selected"
+        tmux select-window -t "${selected_name}:1"
+    else
+        tmux new-session -ds "$selected_name" -c "$selected"
+    fi
 fi
 
 # If inside a claude popup, close it and switch the parent client
