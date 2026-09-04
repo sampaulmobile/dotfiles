@@ -122,15 +122,46 @@ cmd_jump() {
     # DIFFERENT real attached client to the target session. See
     # .feature/NOTES.md's safety section for a live incident. Only fall
     # back to unscoped when called with no client (ad hoc CLI use).
+    # Popup-aware invocation: if C-o was pressed INSIDE a claude-* popup,
+    # switching that client would render the target session inside the
+    # popup frame (popup-in-popup). Instead: close the popup (detaching its
+    # inner client ends the popup's attach and dismisses it) and drive the
+    # newest non-popup client.
+    if [[ -n "$client" ]]; then
+        local csess
+        csess=$(tmux list-clients -F '#{client_tty} #{client_session}' 2>/dev/null \
+            | awk -v t="$client" '$1 == t {print $2}')
+        if [[ "$csess" == claude-* ]]; then
+            local parent
+            parent=$(tmux list-clients -F '#{client_activity} #{client_tty} #{client_session}' 2>/dev/null \
+                | awk '$3 !~ /^claude-/ {print $1, $2}' | sort -rn | awk 'NR==1 {print $2}')
+            tmux detach-client -t "$client" 2>/dev/null
+            client="$parent"   # may be empty -> unscoped fallback below
+        fi
+    fi
+
     local -a cflag=()
     [[ -n "$client" ]] && cflag=(-c "$client")
+
+    # Popup-aware targets: a flagged claude-<proj> popup session shouldn't
+    # be attached fullscreen — route to its project session <proj> instead
+    # (consuming the popup's flag ourselves, since the attach hook will only
+    # clear <proj>'s). User re-opens the popup there with C-Space.
+    do_switch() {
+        local target="$1"
+        if [[ "$target" == claude-* ]] && tmux has-session -t "=${target#claude-}" 2>/dev/null; then
+            rm -f "${FLAG_DIR}/${target}.done"
+            target="${target#claude-}"
+        fi
+        tmux switch-client "${cflag[@]}" -t "=$target"
+    }
 
     # Priority 1: a session waiting on a permission prompt (most recently
     # active first).
     while IFS= read -r session; do
         [[ -z "$session" ]] && continue
         if [[ "$(get_session_status "$session")" == "permission" ]]; then
-            tmux switch-client "${cflag[@]}" -t "=$session"
+            do_switch "$session"
             return
         fi
     done < <(tmux list-sessions -F '#{session_activity} #{session_name}' 2>/dev/null | sort -rn | awk '{print $2}')
@@ -138,7 +169,7 @@ cmd_jump() {
     # Priority 2: the newest finished-but-unseen session.
     session=$(cmd_list | head -1)
     if [[ -n "$session" ]]; then
-        tmux switch-client "${cflag[@]}" -t "=$session"
+        do_switch "$session"
         return
     fi
 
