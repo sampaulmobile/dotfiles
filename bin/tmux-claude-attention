@@ -2,7 +2,7 @@
 
 # Claude attention layer: flag files for "finished but unseen" tmux
 # sessions. Fed by the Stop hook, consumed by tmux-claude-statusbar (✅
-# count) and the C-o jump binding (dots/tmux.conf).
+# count) and the C-y jump binding (dots/tmux.conf).
 #
 # Flag dir: ~/.cache/claude-attention/ — one file per tmux session name,
 # `<session>.done`, touched to flag and removed to clear.
@@ -142,7 +142,7 @@ cmd_jump() {
 
     # Resolve the jump target FIRST. Popup handling (closing it, redirecting
     # to the outer client) must only happen when there is actually somewhere
-    # to go — otherwise a no-op C-o would eat the popup for nothing.
+    # to go — otherwise a no-op C-y would eat the popup for nothing.
 
     # exit_via_popup_check: called with a confirmed target right before
     # switching. If the invoking client is a claude-* popup, dismiss it and

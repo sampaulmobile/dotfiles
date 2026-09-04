@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+#
+# Open the newest web URL in the current pane, no picker (bound to prefix+U;
+# prefix+u is the tmux-fzf-url picker). Deliberately NOT built on the
+# picker's extractor: its xre binary dedupes matches keeping the FIRST
+# occurrence, so "tail -1" gives the URL whose first sighting is newest —
+# a URL that already appeared once in scrollback can then never be "latest"
+# again (this opened a stale URL over the PR link at the screen bottom).
+# A perl scan keeps true position order. http(s) only: claude output carries
+# an OSC 8 file:// link on nearly every tool call, which would otherwise
+# shadow the web URL just printed — use the picker for file links.
+# Same capture flags as the picker (-J joins tmux-wrapped lines) and the
+# same @fzf-url-history-limit depth, so the two keys see the same text.
+
+limit="$(tmux show -gqv '@fzf-url-history-limit')"
+if [[ -z $limit || $limit == 'screen' ]]; then
+    content="$(tmux capture-pane -J -p)"
+else
+    content="$(tmux capture-pane -J -p -S -"$limit")"
+fi
+
+# match set mirrors the picker's URL pattern (trailing punctuation excluded)
+url="$(printf '%s\n' "$content" | perl -ne '
+    while (m{(https?://[-A-Za-z0-9_+&\@#/%?=~|!:,.;]*[-A-Za-z0-9_+&\@#/%=~|])}g) { $u = $1 }
+    END { print $u if defined $u }')"
+
+if [[ -z $url ]]; then
+    tmux display 'tmux-url-latest: no URLs found'
+    exit 0
+fi
+
+if command -v open >/dev/null; then
+    nohup open "$url" >/dev/null 2>&1
+else
+    nohup xdg-open "$url" >/dev/null 2>&1
+fi
+tmux display "opened: $url"
