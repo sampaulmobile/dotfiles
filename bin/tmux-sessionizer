@@ -138,7 +138,11 @@ else
         shopt -s nullglob
         for _f in "$ATTN_DIR"/*.done; do
             _name="${_f##*/}"
-            done_list+="${_name%.done}"$'\n'
+            _name="${_name%.done}"
+            # flags are per pane, "<session>@<pane>.done" — rows are per
+            # session, so strip the pane suffix (legacy pane-less flags
+            # pass through unchanged)
+            done_list+="${_name%@*}"$'\n'
         done
         shopt -u nullglob
     fi

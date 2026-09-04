@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 
-# Claude attention layer: flag files for "finished but unseen" tmux
-# sessions. Fed by the Stop hook, consumed by tmux-claude-statusbar (✅
+# Claude attention layer: flag files for "finished but unseen" claude
+# panes. Fed by the Stop hook, consumed by tmux-claude-statusbar (✅
 # count) and the C-y jump binding (dots/tmux.conf).
 #
-# Flag dir: ~/.cache/claude-attention/ — one file per tmux session name,
-# `<session>.done`, touched to flag and removed to clear.
+# Flag dir: ~/.cache/claude-attention/ — one file per claude PANE,
+# `<session>@<pane-id-sans-%>.done` (e.g. `dotfiles@228.done`), touched to
+# flag and removed to clear. Pane granularity matters twice over: a claude
+# finishing in a non-visible window of an ATTACHED session used to be
+# suppressed entirely (the old session-level self-flag check), and
+# clearing used to wipe the whole session's flag on attach even when the
+# finished claude's window was never looked at. "Seen" now means the
+# pane's window became the visible (current) window of a client-attached
+# session.
 #
 # To wire up the Stop hook, add this to ~/.claude/settings.json
 # (machine-local, NOT this repo — see other/claude/ in CLAUDE.md):
@@ -26,16 +33,24 @@
 #   }
 #
 # Subcommands:
-#   flag-done        Touch a flag for the calling session. Called by the
-#                    Stop hook (runs as a child of the claude process, so
-#                    the owning session is derived from $TMUX_PANE). Silent
-#                    no-op outside tmux, and when any client is currently
-#                    attached to the owning session (you watched it finish).
-#   clear <session>  Remove the flag for <session>. Called by the tmux
-#                    client-attached/client-session-changed hooks.
-#   list             Print flagged sessions whose tmux session still
-#                    exists, newest-first. Prunes flags for dead sessions
-#                    as it goes.
+#   flag-done        Touch a flag for the calling pane. Called by the Stop
+#                    hook (runs as a child of the claude process, so the
+#                    owning pane is $TMUX_PANE). Silent no-op outside tmux,
+#                    and when the pane is actually on screen (its window is
+#                    the session's current one AND a client is attached —
+#                    you watched it finish).
+#   clear <session>  Remove the flags for the panes in <session>'s current
+#                    window (what's on screen). Called by the tmux
+#                    client-attached / client-session-changed /
+#                    session-window-changed hooks. Gated on a client being
+#                    attached to <session>: session-window-changed fires
+#                    for DETACHED sessions too (scripts select-window on
+#                    headless sessions — new_hub_session, wt-tmux-jump),
+#                    and a window nobody watched wasn't "seen".
+#   list             Print flagged panes ("<session>\t<pane-id>") whose
+#                    pane is still live, newest-first. Prunes flags for
+#                    dead panes (and legacy session-level flags) as it
+#                    goes.
 #   jump [client-tty]
 #                    Switch to the session most needing attention: first a
 #                    session waiting on a permission prompt, else the
@@ -51,8 +66,12 @@ source ~/dotfiles/bin/tmux-claude-lib
 
 FLAG_DIR="$HOME/.cache/claude-attention"
 
+# flag_path <session> <pane-id>
+#   Pane ids are server-unique (%N), but the session name stays in the
+#   filename so the sessionizer can color rows green from a plain glob and
+#   clear/list can filter per session without a tmux round trip.
 flag_path() {
-    printf '%s/%s.done' "$FLAG_DIR" "$1"
+    printf '%s/%s@%s.done' "$FLAG_DIR" "$1" "${2#%}"
 }
 
 # file_mtime <path>
@@ -65,49 +84,72 @@ cmd_flag_done() {
     # Not in tmux — nothing to flag.
     [[ -z "${TMUX_PANE:-}" ]] && exit 0
 
-    local session
-    session=$(tmux display -pt "$TMUX_PANE" '#{session_name}' 2>/dev/null)
+    local session wactive
+    IFS=$'\t' read -r session wactive < <(tmux display -pt "$TMUX_PANE" $'#{session_name}\t#{window_active}' 2>/dev/null)
     [[ -z "$session" ]] && exit 0
 
-    # Suppress self-flagging: any client attached to this session watched
-    # it finish, so there's nothing to flag.
-    if tmux list-clients -F '#{client_session}' 2>/dev/null | grep -qxF "$session"; then
+    # Suppress self-flagging only when this pane is actually on screen:
+    # its window is the session's current one AND a client is attached.
+    # (The old session-level check swallowed the flag whenever ANY window
+    # of the session was being watched — a claude finishing in window 4
+    # while you looked at window 1 never flagged at all.)
+    if [[ "$wactive" == "1" ]] \
+        && tmux list-clients -F '#{client_session}' 2>/dev/null | grep -qxF "$session"; then
         exit 0
     fi
 
     mkdir -p "$FLAG_DIR"
-    touch "$(flag_path "$session")"
+    touch "$(flag_path "$session" "$TMUX_PANE")"
 }
 
 cmd_clear() {
     local session="$1"
     [[ -z "$session" ]] && exit 0
-    rm -f "$(flag_path "$session")"
+
+    # Early exit with zero tmux round trips when the session has no flags:
+    # this runs on EVERY window switch anywhere (session-window-changed
+    # hook), so the common case must stay a glob test.
+    local flags=("$FLAG_DIR/${session}@"*.done)
+    [[ -e "${flags[0]}" ]] || exit 0
+
+    # "Seen" requires a watcher: session-window-changed fires for detached
+    # sessions too (scripts select-window on headless sessions), and a
+    # window nobody watched must keep its flags.
+    tmux list-clients -F '#{client_session}' 2>/dev/null | grep -qxF "$session" || exit 0
+
+    # Panes of the session's current window = what's on screen now
+    # (list-panes with a bare session target uses its current window).
+    local pane
+    for pane in $(tmux list-panes -t "=${session}" -F '#{pane_id}' 2>/dev/null); do
+        rm -f "$(flag_path "$session" "$pane")"
+    done
 }
 
 cmd_list() {
     [[ -d "$FLAG_DIR" ]] || return 0
 
-    # One tmux round trip for the whole live-session set, then check each
-    # flag against it in pure bash — a has-session call per flag file
-    # would be one more tmux round trip per flag, easily blowing the
-    # statusbar's 200ms budget once more than a couple of sessions are
-    # flagged at once.
+    # One tmux round trip for the whole live-pane set, then check each
+    # flag against it in pure bash — a per-flag tmux call would easily
+    # blow the statusbar's 200ms budget once more than a couple of panes
+    # are flagged at once.
     local live=$'\n'
-    live+=$(tmux list-sessions -F '#{session_name}' 2>/dev/null)
+    live+=$(tmux list-panes -a -F '#{session_name}@#{pane_id}' 2>/dev/null)
     live+=$'\n'
 
-    local f session
+    local f key session pane
     for f in "$FLAG_DIR"/*.done; do
         [[ -e "$f" ]] || continue
-        session="${f##*/}"
-        session="${session%.done}"
-        if [[ "$live" == *$'\n'"$session"$'\n'* ]]; then
-            printf '%s\t%s\n' "$(file_mtime "$f")" "$session"
+        key="${f##*/}"
+        key="${key%.done}"
+        session="${key%@*}"
+        pane="${key##*@}"
+        if [[ "$key" == *@* && "$live" == *$'\n'"${session}@%${pane}"$'\n'* ]]; then
+            printf '%s\t%s\t%s\n' "$(file_mtime "$f")" "$session" "%${pane}"
         else
+            # dead pane, or a legacy session-level flag (pre-pane format)
             rm -f "$f"
         fi
-    done | sort -rn | cut -f2
+    done | sort -rn | cut -f2,3
 }
 
 # restore_popup <session> [client-tty]
@@ -165,16 +207,27 @@ cmd_jump() {
 
     # Popup-aware targets: a flagged claude-<proj> popup session shouldn't
     # be attached fullscreen — route to its project session <proj> instead
-    # (consuming the popup's flag ourselves, since the attach hook will only
-    # clear <proj>'s). User re-opens the popup there with C-Space.
+    # (consuming the popup's flags ourselves, since the attach hook will
+    # only clear <proj>'s). User re-opens the popup there with C-Space.
     do_switch() {
-        local target="$1"
+        local target="$1" pane="$2"
         if [[ "$target" == claude-* ]] && tmux has-session -t "=${target#claude-}" 2>/dev/null; then
-            rm -f "${FLAG_DIR}/${target}.done"
+            rm -f "${FLAG_DIR}/${target}"@*.done "${FLAG_DIR}/${target}.done"
             target="${target#claude-}"
+            pane=""
         fi
         exit_via_popup_check
         tmux switch-client "${cflag[@]}" -t "=$target"
+        if [[ -n "$pane" ]]; then
+            # land on the flagged pane's window (a pane id resolves to its
+            # window), and consume its flag directly — the hooks only clear
+            # what a client is looking at, and on a server whose loaded
+            # config predates the session-window-changed hook nothing else
+            # would clear it after this select-window.
+            tmux select-window -t "$pane" 2>/dev/null \
+                && tmux select-pane -t "$pane" 2>/dev/null
+            rm -f "$(flag_path "$target" "$pane")"
+        fi
         restore_popup "$target" "$client"
     }
 
@@ -200,10 +253,11 @@ cmd_jump() {
         done < <(tmux list-sessions -F '#{session_activity} #{session_name}' 2>/dev/null | sort -rn | awk '{print $2}')
     fi
 
-    # Priority 2: the newest finished-but-unseen session.
-    session=$(cmd_list | head -1)
+    # Priority 2: the newest finished-but-unseen pane.
+    local pane=""
+    IFS=$'\t' read -r session pane < <(cmd_list | head -1)
     if [[ -n "$session" ]]; then
-        do_switch "$session"
+        do_switch "$session" "$pane"
         return
     fi
 

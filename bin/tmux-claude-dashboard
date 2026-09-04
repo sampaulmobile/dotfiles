@@ -377,12 +377,11 @@ render() {
         out+="$(printf '%*s' "$(( name_w - ${#name} - ${#badge} + name_gap ))" '')"
         (( i == selected )) && out+="${RST}"
 
-        # an idle session with an attention done-flag (finished but unseen —
+        # an idle row with an attention done-flag (finished but unseen —
         # the statusbar's ✅ and C-y's jump target) shows as "done" here so
-        # the dashboard reveals WHICH session the bar's ✅ belongs to. The
-        # flag is per tmux SESSION (the Stop hook can't tell panes apart),
-        # so every idle row of that session shows it.
-        if [[ "$st" == "idle" && -e "$HOME/.cache/claude-attention/${sessions[$i]}.done" ]]; then
+        # the dashboard reveals WHICH claude the bar's ✅ belongs to. Flags
+        # are per pane ("<session>@<pane>.done"), matching rows exactly.
+        if [[ "$st" == "idle" && -e "$HOME/.cache/claude-attention/${sessions[$i]}@${panes[$i]#%}.done" ]]; then
             st="done"
         fi
 

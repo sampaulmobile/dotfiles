@@ -6,8 +6,9 @@
 # all-zero result prints nothing (preserves the pre-existing empty
 # status-right behavior when nothing needs attention).
 #   🔴 permission — sessions waiting on a permission/plan prompt
-#   ✅ done       — sessions finished since last visited (Stop hook flags,
-#                   see bin/tmux-claude-attention)
+#   ✅ done       — claude PANES finished but not yet seen (Stop hook
+#                   flags, per pane — see bin/tmux-claude-attention; two
+#                   unseen claudes in one session count as ✅2)
 #   ●  working    — sessions actively streaming output
 #
 # The scan itself lives in tmux-claude-lib's scan_claude_sessions: every
@@ -17,8 +18,9 @@
 # session (permission > working > idle). Non-claude panes are never
 # captured, so a vim buffer or `git diff` showing this script's "Yes"/"No"/
 # "to interrupt" literals can't false-positive by construction (the round-1
-# finding that used to require an after-the-fact tty gate here). Counts are
-# per session, not per pane — a session with two claudes is one 🔴/●.
+# finding that used to require an after-the-fact tty gate here). 🔴/● count
+# per session (a session with two working claudes is one ●); ✅ counts per
+# pane, since each flag is an independent "go look at this".
 #
 # Side effect: publishes per-session status to
 # ~/.cache/claude-attention/status.tsv ("<session>\t<status>" per claude
