@@ -23,9 +23,10 @@
 # pane, since each flag is an independent "go look at this".
 #
 # Side effect: publishes per-session status to
-# ~/.cache/claude-attention/status.tsv ("<session>\t<status>" per claude
-# session, written atomically every tick). tmux-sessionizer reads it for its
-# row colors instead of doing any pane scanning of its own at keypress time.
+# ~/.cache/claude-attention/status.tsv ("<session>\t<status>\t<pane>" per
+# claude session — pane is the one exhibiting the worst status, written
+# atomically every tick). tmux-sessionizer reads it for its row colors
+# instead of doing any pane scanning of its own at keypress time.
 
 source ~/dotfiles/bin/tmux-claude-lib
 
@@ -36,7 +37,8 @@ status_lines=$(scan_claude_sessions)
 permission_count=0
 working_count=0
 if [[ -n "$status_lines" ]]; then
-    while IFS=$'\t' read -r _name _status; do
+    # 3rd scan field (worst-status pane, for C-y's jump) is unused here
+    while IFS=$'\t' read -r _name _status _; do
         case "$_status" in
             permission) (( permission_count++ )) ;;
             working)    (( working_count++ )) ;;

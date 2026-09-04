@@ -230,9 +230,13 @@ get_pane_status() {
 # scan_claude_sessions
 #   Scans every pane owned by a live claude process — ANY window/pane of
 #   ANY session, not just the hub layout's window 1 — and prints one line
-#   per session that has at least one: "<session>\t<status>", where status
-#   is the worst across that session's claude panes
-#   (permission > working > idle > unknown).
+#   per session that has at least one: "<session>\t<status>\t<pane>",
+#   where status is the worst across that session's claude panes
+#   (permission > working > idle > unknown) and pane is the id of the
+#   pane exhibiting it ("-" when unknown; first-seen wins when several
+#   panes tie) — so C-y's jump can land on the actual permission prompt,
+#   not just its session (which used to drop you on the session's current
+#   window while the prompt blocked in another).
 #
 #   Two tmux round trips total regardless of session count: one
 #   list-panes -a to enumerate panes, one batched capture of ONLY the
@@ -275,26 +279,34 @@ scan_claude_sessions() {
     # original sep).
     local sep="@@CLAUDE-SCAN-$$-${RANDOM}@@"
     local -a args=()
-    local entry
+    local entry tpane
     for entry in "${targets[@]}"; do
-        args+=(capture-pane -t "${entry#*$'\t'}" -p -S -30 \; display-message -p "${sep}${entry%%$'\t'*}" \;)
+        tpane="${entry#*$'\t'}"
+        # the pane id rides the separator line WITHOUT its % — display -p
+        # format-expands the message and strftime-eats "%2..." etc.; the
+        # parse below restores it
+        args+=(capture-pane -t "$tpane" -p -S -30 \; display-message -p "${sep}${entry%%$'\t'*}"$'\t'"${tpane#%}" \;)
     done
     local combined
     combined=$(tmux "${args[@]}" 2>/dev/null)
 
     # Classify each pane; aggregate per session (bash 3.2: delimited
-    # strings + a first-seen order array, no assoc arrays).
+    # strings + a first-seen order array, no assoc arrays). Each status
+    # set holds "session\tpane" entries so the pane that produced the
+    # session's worst status survives aggregation.
     local perm_s=$'\n' work_s=$'\n' idle_s=$'\n' seen=$'\n'
     local -a order=()
-    local block="" line name st
+    local block="" line name pane st
     while IFS= read -r line; do
         if [[ "$line" == "$sep"* ]]; then
-            name="${line#$sep}"
+            entry="${line#$sep}"
+            name="${entry%%$'\t'*}"
+            pane="%${entry#*$'\t'}"
             st=$(classify_pane_status "$block")
             case "$st" in
-                permission) perm_s+="${name}"$'\n' ;;
-                working)    work_s+="${name}"$'\n' ;;
-                idle)       idle_s+="${name}"$'\n' ;;
+                permission) perm_s+="${name}"$'\t'"${pane}"$'\n' ;;
+                working)    work_s+="${name}"$'\t'"${pane}"$'\n' ;;
+                idle)       idle_s+="${name}"$'\t'"${pane}"$'\n' ;;
             esac
             if [[ "$seen" != *$'\n'"${name}"$'\n'* ]]; then
                 seen+="${name}"$'\n'
@@ -306,17 +318,21 @@ scan_claude_sessions() {
         fi
     done <<< "$combined"
 
+    # First "session\t" entry in each set wins (first-seen pane). Prefix
+    # stripping instead of command substitution keeps this fork-free —
+    # the statusbar runs this whole scan inside a ~200ms budget.
+    local rest
     for name in "${order[@]}"; do
-        if [[ "$perm_s" == *$'\n'"${name}"$'\n'* ]]; then
-            st="permission"
-        elif [[ "$work_s" == *$'\n'"${name}"$'\n'* ]]; then
-            st="working"
-        elif [[ "$idle_s" == *$'\n'"${name}"$'\n'* ]]; then
-            st="idle"
-        else
-            st="unknown"
+        st="unknown"
+        pane="-"
+        if rest="${perm_s#*$'\n'"$name"$'\t'}"; [[ "$rest" != "$perm_s" ]]; then
+            st="permission"; pane="${rest%%$'\n'*}"
+        elif rest="${work_s#*$'\n'"$name"$'\t'}"; [[ "$rest" != "$work_s" ]]; then
+            st="working"; pane="${rest%%$'\n'*}"
+        elif rest="${idle_s#*$'\n'"$name"$'\t'}"; [[ "$rest" != "$idle_s" ]]; then
+            st="idle"; pane="${rest%%$'\n'*}"
         fi
-        printf '%s\t%s\n' "$name" "$st"
+        printf '%s\t%s\t%s\n' "$name" "$st" "$pane"
     done
 }
 

@@ -231,23 +231,27 @@ cmd_jump() {
         restore_popup "$target" "$client"
     }
 
-    # Priority 1: a session waiting on a permission prompt (most recently
-    # active first). One shared multi-pane scan (scan_claude_sessions in
-    # tmux-claude-lib): two tmux round trips total instead of the old
-    # serial capture-pane per session, covers claudes outside window 1,
-    # and never reads a non-claude pane (the old per-session
-    # get_session_status had no tty gate — a vim buffer showing prompt
-    # literals could become a jump target).
-    local perm_sessions=$'\n'
-    local st
-    while IFS=$'\t' read -r session st; do
-        [[ "$st" == "permission" ]] && perm_sessions+="${session}"$'\n'
+    # Priority 1: a pane waiting on a permission prompt (most recently
+    # active session first). One shared multi-pane scan
+    # (scan_claude_sessions in tmux-claude-lib): two tmux round trips
+    # total instead of the old serial capture-pane per session, covers
+    # claudes outside window 1, and never reads a non-claude pane (the old
+    # per-session get_session_status had no tty gate — a vim buffer
+    # showing prompt literals could become a jump target). The scan's 3rd
+    # field is the pane exhibiting the status, so the jump lands on the
+    # actual prompt instead of the session's current window.
+    local perm_s=$'\n'
+    local st pane
+    while IFS=$'\t' read -r session st pane; do
+        [[ "$st" == "permission" ]] && perm_s+="${session}"$'\t'"${pane}"$'\n'
     done < <(scan_claude_sessions)
-    if [[ "$perm_sessions" != $'\n' ]]; then
+    if [[ "$perm_s" != $'\n' ]]; then
+        local rest
         while IFS= read -r session; do
             [[ -z "$session" ]] && continue
-            if [[ "$perm_sessions" == *$'\n'"${session}"$'\n'* ]]; then
-                do_switch "$session"
+            rest="${perm_s#*$'\n'"$session"$'\t'}"
+            if [[ "$rest" != "$perm_s" ]]; then
+                do_switch "$session" "${rest%%$'\n'*}"
                 return
             fi
         done < <(tmux list-sessions -F '#{session_activity} #{session_name}' 2>/dev/null | sort -rn | awk '{print $2}')
