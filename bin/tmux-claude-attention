@@ -134,9 +134,9 @@ cmd_jump() {
     # inside it are fresh clients with no attached-client identity, so an
     # unscoped `switch-client -t` falls back to tmux's own pick (the
     # most-recently-active attached client), which can silently yank a
-    # DIFFERENT real attached client to the target session. See
-    # .feature/NOTES.md's safety section for a live incident. Only fall
-    # back to unscoped when called with no client (ad hoc CLI use).
+    # DIFFERENT real attached client to the target session — observed live
+    # during development, hence the explicit scoping. Only fall back to
+    # unscoped when called with no client (ad hoc CLI use).
     local -a cflag=()
     [[ -n "$client" ]] && cflag=(-c "$client")
 
