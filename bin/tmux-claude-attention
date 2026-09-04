@@ -118,7 +118,7 @@ cmd_list() {
 #   closes, and this script must not hang on it.
 restore_popup() {
     local s="$1" client="$2"
-    [[ "$(tmux show -qv -t "=$s" @claude_popup 2>/dev/null)" == "1" ]] || return 0
+    [[ "$(tmux show -qv -t "${s}:" @claude_popup 2>/dev/null)" == "1" ]] || return 0
     tmux has-session -t "=claude-$s" 2>/dev/null || return 0
     local -a pc=()
     [[ -n "$client" ]] && pc=(-c "$client")
