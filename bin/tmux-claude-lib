@@ -218,7 +218,7 @@ get_session_status() {
 #   self-labeled even if a pane vanishes between the two round trips (its
 #   capture just comes back empty -> "unknown", self-heals next call).
 #   Used by tmux-claude-statusbar (counts + status.tsv cache) and
-#   tmux-claude-attention's jump (C-o permission targets).
+#   tmux-claude-attention's jump (C-y permission targets).
 scan_claude_sessions() {
     local ttys
     ttys=$(claude_ttys)
@@ -305,20 +305,46 @@ encode_cwd() {
 }
 
 # build_cwd_session_map
-#   Builds a temp file mapping CWD -> sessionId (one per line, tab-separated).
+#   Builds a temp file mapping tmux pane id + CWD -> sessionId (one line per
+#   live claude: "paneId\tcwd\tsessionId", paneId is "-" when unknown).
 #   Call once, then use find_session_jsonl which looks up from the cache.
 _CWD_MAP_FILE=""
 build_cwd_session_map() {
     _CWD_MAP_FILE=$(mktemp /tmp/claude-cwd-map.XXXXXX)
-    jq -r '[.cwd, .sessionId] | @tsv' "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null > "$_CWD_MAP_FILE"
+    jq -r '[((.tmux // "") | [scan("%[0-9]+$")] | .[0] // "-"), .cwd, .sessionId] | @tsv' \
+        "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null > "$_CWD_MAP_FILE"
 }
 
 # find_session_jsonl <tmux-session-name>
 #   Prints the path to the active JSONL transcript file, or empty string.
-#   Falls back to the most recently modified JSONL in the project dir
-#   (handles /clear creating a new session ID without updating the session JSON).
+#   Resolution order:
+#     1. Pane-exact: sessions/*.json records each claude's tmux pane id
+#        ("tmux":"sess:@win.%pane") — match window 1's pane ids against the
+#        map. This is what disambiguates two claude processes sharing one
+#        CWD (e.g. a second claude launched in another window of the same
+#        project session): cwd-based lookup + the newest-jsonl heuristic
+#        below made the dashboard silently read the OTHER claude's
+#        transcript — no subagents dir, wrong tokens.
+#     2. CWD lookup, overridden by the most recently modified JSONL in the
+#        project dir (handles /clear creating a new session ID without
+#        updating the session JSON).
 find_session_jsonl() {
     local session="$1"
+
+    if [[ -n "$_CWD_MAP_FILE" && -f "$_CWD_MAP_FILE" ]]; then
+        local pane_id hit pcwd psid pjsonl
+        for pane_id in $(tmux list-panes -t "${session}:1" -F '#{pane_id}' 2>/dev/null); do
+            hit=$(awk -F'\t' -v p="$pane_id" '$1 == p { print; exit }' "$_CWD_MAP_FILE")
+            [[ -z "$hit" ]] && continue
+            IFS=$'\t' read -r _ pcwd psid <<< "$hit"
+            pjsonl="${CLAUDE_PROJECTS_DIR}/$(encode_cwd "$pcwd")/${psid}.jsonl"
+            if [[ -n "$psid" && -f "$pjsonl" ]]; then
+                echo "$pjsonl"
+                return
+            fi
+        done
+    fi
+
     local cwd
     cwd=$(get_pane_cwd "$session")
     [[ -z "$cwd" ]] && return
@@ -331,7 +357,7 @@ find_session_jsonl() {
     # try session JSON lookup first
     local session_id=""
     if [[ -n "$_CWD_MAP_FILE" && -f "$_CWD_MAP_FILE" ]]; then
-        session_id=$(awk -F'\t' -v cwd="$cwd" '$1 == cwd { print $2; exit }' "$_CWD_MAP_FILE")
+        session_id=$(awk -F'\t' -v cwd="$cwd" '$2 == cwd { print $3; exit }' "$_CWD_MAP_FILE")
     else
         session_id=$(jq -r --arg cwd "$cwd" 'select(.cwd == $cwd) | .sessionId' "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null | head -1)
     fi
@@ -374,62 +400,144 @@ get_context_and_model() {
     ' 2>/dev/null || printf '0\tunknown'
 }
 
-# get_totals_incremental <jsonl-path> <cache-file>
+# get_totals_incremental <jsonl-path> <cache-file> [include-sidechain-turns]
 #   Incremental path: parses only new bytes since last call.
-#   Cache file stores: total_output\ttotal_all\tbyte_offset
-#   Prints tab-separated: total_output total_all
+#   Cache stores: output\tall\tturns\tstate_cost\test_cost\tbyte_offset
+#   (a cache from an older format leaves the 6th field empty → reset).
+#   Prints tab-separated: total_output total_all turns cost
+#   - assistant records are deduped per requestId within each parsed chunk
+#     (one API response is logged once PER CONTENT BLOCK with usage that
+#     grows across blocks — claude-tokens note 1; keeping the max-output
+#     record per request avoids counting a response several times over).
+#     A request whose records straddle a chunk boundary can still count
+#     twice — rare, and bounded to one request per refresh.
+#   - turns: user prompts handled (non-meta user records whose content
+#     isn't tool results) — the human notion of a turn, not API request
+#     count. Sidechain records are excluded unless the 3rd arg is 1: agent
+#     transcripts mark everything isSidechain, so agent callers pass 1.
+#   - cost: totalCostUSD from the newest cost-state record when one exists
+#     (exact, a cumulative snapshot claude writes — but live sessions
+#     often have none), else "~<usd>" estimated from the price sheet
+#     (same table as claude-tokens), else "-".
 get_totals_incremental() {
     local jsonl="$1"
     local cache="$2"
-    [[ ! -f "$jsonl" ]] && printf '0\t0' && return
+    local inc_sc="${3:-0}"
+    [[ "$inc_sc" == "1" ]] || inc_sc=0
+    [[ ! -f "$jsonl" ]] && printf '0\t0\t0\t-' && return
 
     local file_size
     file_size=$(wc -c < "$jsonl" 2>/dev/null)
 
-    local cached_out=0 cached_all=0 cached_offset=0
+    local cached_out=0 cached_all=0 cached_turns=0 cached_scost="-" cached_est=0 cached_offset=0
     if [[ -f "$cache" ]]; then
-        IFS=$'\t' read -r cached_out cached_all cached_offset < "$cache"
-        # if file shrunk (new session / cleared), reset
-        if (( file_size < cached_offset )); then
-            cached_out=0; cached_all=0; cached_offset=0
+        IFS=$'\t' read -r cached_out cached_all cached_turns cached_scost cached_est cached_offset < "$cache"
+        # older cache formats leave the 6th field empty — reset (one full
+        # re-parse, then incremental again). Same for a shrunk file (new
+        # session / cleared).
+        if [[ -z "$cached_offset" ]] || (( file_size < cached_offset )); then
+            cached_out=0; cached_all=0; cached_turns=0; cached_scost="-"; cached_est=0; cached_offset=0
         fi
     fi
 
+    _totals_result() {  # <out> <all> <turns> <state_cost> <est_cost>
+        local cost="-"
+        if [[ "$4" != "-" && -n "$4" ]]; then
+            cost="$4"
+        elif awk "BEGIN{exit !($5 > 0.0001)}" 2>/dev/null; then
+            cost="~$5"
+        fi
+        printf '%s\t%s\t%s\t%s' "$1" "$2" "$3" "$cost"
+    }
+
     if (( file_size == cached_offset )); then
         # no new data
-        printf '%s\t%s' "$cached_out" "$cached_all"
+        _totals_result "$cached_out" "$cached_all" "$cached_turns" "$cached_scost" "$cached_est"
         return
     fi
 
-    # parse only the new bytes
-    local delta_out=0 delta_all=0
+    # parse only the new bytes — line-tolerant (fromjson?) so a mid-write
+    # partial line drops that record instead of zeroing the whole delta.
+    # Price sheet duplicated from bin/claude-tokens (its JQ_PRELUDE is the
+    # source of truth — keep in sync).
+    local delta_out=0 delta_all=0 delta_turns=0 delta_scost="-" delta_est=0
     local delta
-    delta=$(tail -c +"$(( cached_offset + 1 ))" "$jsonl" | jq -rs '
-        [.[] | select(.type == "assistant" and .message.usage)] |
-        if length == 0 then
-            [0, 0]
-        else
-            (map(.message.usage.output_tokens // 0) | add) as $d_out |
-            (map(
-                (.message.usage.input_tokens // 0) +
-                (.message.usage.cache_read_input_tokens // 0) +
-                (.message.usage.cache_creation_input_tokens // 0) +
-                (.message.usage.output_tokens // 0)
-            ) | add) as $d_all |
-            [$d_out, $d_all]
-        end | @tsv
+    delta=$(tail -c +"$(( cached_offset + 1 ))" "$jsonl" | jq -Rn -r --argjson inc_sc "$inc_sc" '
+        def prices: {
+          "claude-fable-5-1":   [10, 50],
+          "claude-fable-5":     [10, 50],
+          "claude-mythos-5-1":  [10, 50],
+          "claude-mythos-5":    [10, 50],
+          "claude-opus-5":      [5, 25],
+          "claude-opus-4-8":    [5, 25],
+          "claude-opus-4-7":    [5, 25],
+          "claude-opus-4-6":    [5, 25],
+          "claude-opus-4-5":    [5, 25],
+          "claude-opus-4-1":    [15, 75],
+          "claude-opus-4":      [15, 75],
+          "claude-sonnet-5":    [2, 10],
+          "claude-sonnet-4-6":  [3, 15],
+          "claude-sonnet-4-5":  [3, 15],
+          "claude-sonnet-4":    [3, 15],
+          "claude-haiku-4-5":   [1, 5],
+          "claude-3-5-haiku":   [0.8, 4]
+        };
+        def base_model: sub("-20[0-9]{6}$"; "");
+        def usage_cost($model):
+          (prices[$model | base_model] // null) as $p
+          | if $p == null then null else
+              ( (.input_tokens // 0)            * $p[0]
+              + (.output_tokens // 0)           * $p[1]
+              + (.cache_read_input_tokens // 0) * $p[0] * 0.1
+              + (if .cache_creation then
+                   (.cache_creation.ephemeral_5m_input_tokens // 0) * $p[0] * 1.25
+                 + (.cache_creation.ephemeral_1h_input_tokens // 0) * $p[0] * 2
+                 else
+                   (.cache_creation_input_tokens // 0) * $p[0] * 1.25
+                 end)
+              ) / 1000000
+            end;
+        [inputs | fromjson?] as $recs |
+        ($recs | map(select(.type == "assistant" and .message.usage))
+               | group_by(.requestId // .uuid // "?")
+               | map(max_by(.message.usage.output_tokens // 0))) as $asst |
+        ($asst | map(.message.usage.output_tokens // 0) | add // 0) as $d_out |
+        ($asst | map(
+            (.message.usage.input_tokens // 0) +
+            (.message.usage.cache_read_input_tokens // 0) +
+            (.message.usage.cache_creation_input_tokens // 0) +
+            (.message.usage.output_tokens // 0)
+        ) | add // 0) as $d_all |
+        ($asst | map((.message.model // "") as $m | (.message.usage | usage_cost($m)) // 0)
+               | add // 0) as $d_est |
+        ($recs | map(select(
+            .type == "user"
+            and (.isMeta != true)
+            and (($inc_sc == 1) or ((.isSidechain // false) == false))
+            and (((.message.content | type) == "string")
+                 or ([.message.content[]? | select(.type == "tool_result")] | length) == 0)
+        )) | length) as $d_turns |
+        ($recs | map(select(.type == "cost-state") | .totalCostUSD) | last) as $cost |
+        [$d_out, $d_all, $d_turns, ($cost // "-"), $d_est] | @tsv
     ' 2>/dev/null)
 
     if [[ -n "$delta" ]]; then
-        IFS=$'\t' read -r delta_out delta_all <<< "$delta"
+        IFS=$'\t' read -r delta_out delta_all delta_turns delta_scost delta_est <<< "$delta"
     fi
 
     local new_out=$(( cached_out + delta_out ))
     local new_all=$(( cached_all + delta_all ))
+    local new_turns=$(( cached_turns + delta_turns ))
+    # cost-state is a cumulative snapshot, not a delta: newest wins; the
+    # estimate accumulates (float math via awk)
+    local new_scost="$cached_scost"
+    [[ "$delta_scost" != "-" && -n "$delta_scost" ]] && new_scost="$delta_scost"
+    local new_est
+    new_est=$(awk "BEGIN{printf \"%.6f\", ${cached_est:-0} + ${delta_est:-0}}" 2>/dev/null || echo 0)
 
     # save updated cache
-    printf '%s\t%s\t%s' "$new_out" "$new_all" "$file_size" > "$cache"
-    printf '%s\t%s' "$new_out" "$new_all"
+    printf '%s\t%s\t%s\t%s\t%s\t%s' "$new_out" "$new_all" "$new_turns" "$new_scost" "$new_est" "$file_size" > "$cache"
+    _totals_result "$new_out" "$new_all" "$new_turns" "$new_scost" "$new_est"
 }
 
 # ── agent trees ─────────────────────────────────────────
@@ -461,7 +569,11 @@ _agent_cache_set() {
 #   Prints one line per live subagent under that session's transcript,
 #   sorted for tree rendering (parents before children, siblings in spawn
 #   order). Tab-separated: agent_id, spawn_depth, parent_id, agentType,
-#   description, mtime. Hides agents whose jsonl mtime is older than
+#   description, mtime, started. mtime is the transcript's last write
+#   (liveness/recency); started is the meta.json mtime — written once at
+#   spawn, so it's the agent's spawn time (what "working Ns" should count
+#   from; jsonl mtime resets on every write, so a long-running agent showed
+#   a perpetual "working 2s"). Hides agents whose jsonl mtime is older than
 #   STALE_AGENT_SECS. Missing/unknown meta fields degrade to blank rather
 #   than erroring.
 list_session_agents() {
@@ -477,7 +589,7 @@ list_session_agents() {
     local now
     now=$(date +%s)
 
-    local meta id jsonl mtime
+    local meta id jsonl mtime started
     {
         for meta in "$subdir"/agent-*.meta.json; do
             [[ -f "$meta" ]] || continue
@@ -492,11 +604,14 @@ list_session_agents() {
             # ever written for the life of the session id, on every refresh
             # tick, even though only recent agents are ever rendered.
             (( now - mtime > STALE_AGENT_SECS )) && continue
-            jq --arg id "$id" --argjson mtime "$mtime" '. + {id: $id, mtime: $mtime}' "$meta" 2>/dev/null
+            started=$(_agent_file_mtime "$meta")
+            [[ -z "$started" ]] && started="$mtime"
+            jq --arg id "$id" --argjson mtime "$mtime" --argjson started "$started" \
+                '. + {id: $id, mtime: $mtime, started: $started}' "$meta" 2>/dev/null
         done
     } | jq -rs --argjson now "$now" --argjson stale "$STALE_AGENT_SECS" '
         def dfs($parentKey; $items):
-            ($items | map(select(.parentKey == $parentKey)) | sort_by(.mtime)) as $kids
+            ($items | map(select(.parentKey == $parentKey)) | sort_by(.started, .mtime)) as $kids
             | reduce $kids[] as $k ([]; . + [$k] + dfs($k.id; $items));
 
         # Apply the stale filter FIRST, then compute $ids/parentKey from the
@@ -534,7 +649,8 @@ list_session_agents() {
             ((.parentAgentId // "") as $pid | if $pid == "" then "-" else $pid end),
             (.agentType // "agent"),
             ((.description // "") as $d | if $d == "" then "(no description)" else $d end),
-            .mtime
+            .mtime,
+            .started
           ] | @tsv
     ' 2>/dev/null
 }
