@@ -122,12 +122,18 @@ cmd_jump() {
     # DIFFERENT real attached client to the target session. See
     # .feature/NOTES.md's safety section for a live incident. Only fall
     # back to unscoped when called with no client (ad hoc CLI use).
-    # Popup-aware invocation: if C-o was pressed INSIDE a claude-* popup,
-    # switching that client would render the target session inside the
-    # popup frame (popup-in-popup). Instead: close the popup (detaching its
-    # inner client ends the popup's attach and dismisses it) and drive the
-    # newest non-popup client.
-    if [[ -n "$client" ]]; then
+    local -a cflag=()
+    [[ -n "$client" ]] && cflag=(-c "$client")
+
+    # Resolve the jump target FIRST. Popup handling (closing it, redirecting
+    # to the outer client) must only happen when there is actually somewhere
+    # to go — otherwise a no-op C-o would eat the popup for nothing.
+
+    # exit_via_popup_check: called with a confirmed target right before
+    # switching. If the invoking client is a claude-* popup, dismiss it and
+    # redirect to the newest non-popup client (popup-in-popup prevention).
+    exit_via_popup_check() {
+        [[ -z "$client" ]] && return 0
         local csess
         csess=$(tmux list-clients -F '#{client_tty} #{client_session}' 2>/dev/null \
             | awk -v t="$client" '$1 == t {print $2}')
@@ -136,12 +142,11 @@ cmd_jump() {
             parent=$(tmux list-clients -F '#{client_activity} #{client_tty} #{client_session}' 2>/dev/null \
                 | awk '$3 !~ /^claude-/ {print $1, $2}' | sort -rn | awk 'NR==1 {print $2}')
             tmux detach-client -t "$client" 2>/dev/null
-            client="$parent"   # may be empty -> unscoped fallback below
+            client="$parent"   # may be empty -> unscoped fallback
+            cflag=()
+            [[ -n "$client" ]] && cflag=(-c "$client")
         fi
-    fi
-
-    local -a cflag=()
-    [[ -n "$client" ]] && cflag=(-c "$client")
+    }
 
     # Popup-aware targets: a flagged claude-<proj> popup session shouldn't
     # be attached fullscreen — route to its project session <proj> instead
@@ -153,6 +158,7 @@ cmd_jump() {
             rm -f "${FLAG_DIR}/${target}.done"
             target="${target#claude-}"
         fi
+        exit_via_popup_check
         tmux switch-client "${cflag[@]}" -t "=$target"
     }
 
@@ -176,13 +182,36 @@ cmd_jump() {
     tmux display-message "${cflag[@]}" "nothing needs attention"
 }
 
+# cmd_last <client-tty>
+#   Popup-aware "toggle to last session" (C-t): a popup client has no last
+#   session of its own, so from inside a claude-* popup we dismiss the popup
+#   and toggle the newest non-popup client instead. Ordinary clients are
+#   handled natively by the binding and never reach this path.
+cmd_last() {
+    local client="$1"
+    [[ -z "$client" ]] && { tmux switch-client -l 2>/dev/null; return; }
+    local csess
+    csess=$(tmux list-clients -F '#{client_tty} #{client_session}' 2>/dev/null \
+        | awk -v t="$client" '$1 == t {print $2}')
+    if [[ "$csess" == claude-* ]]; then
+        local parent
+        parent=$(tmux list-clients -F '#{client_activity} #{client_tty} #{client_session}' 2>/dev/null \
+            | awk '$3 !~ /^claude-/ {print $1, $2}' | sort -rn | awk 'NR==1 {print $2}')
+        tmux detach-client -t "$client" 2>/dev/null
+        [[ -n "$parent" ]] && tmux switch-client -c "$parent" -l 2>/dev/null
+    else
+        tmux switch-client -c "$client" -l 2>/dev/null
+    fi
+}
+
 case "${1:-}" in
     flag-done) cmd_flag_done ;;
     clear)     cmd_clear "${2:-}" ;;
     list)      cmd_list ;;
     jump)      cmd_jump "${2:-}" ;;
+    last)      cmd_last "${2:-}" ;;
     *)
-        echo "usage: $(basename "$0") {flag-done|clear <session>|list|jump [client-tty]}" >&2
+        echo "usage: $(basename "$0") {flag-done|clear <session>|list|jump [client-tty]|last [client-tty]}" >&2
         exit 1
         ;;
 esac
