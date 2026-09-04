@@ -52,18 +52,23 @@ reload_sessions() {
 }
 
 # kill_selected_session
-#   Kills the tmux session at the current selection.
-#   Guards: won't kill own session, won't kill empty target.
+#   Kills the tmux session at the current selection. No silent failure
+#   paths: any refusal/error is reported via kill_error for the caller to
+#   display. Killing the dashboard's own host session is ALLOWED (the x
+#   handler warns first) — with detach-on-destroy off the client just moves
+#   to the last session; this window dies with its host.
+kill_error=""
 kill_selected_session() {
-    (( session_count == 0 )) && return 1
+    kill_error=""
+    (( session_count == 0 )) && { kill_error="no sessions"; return 1; }
     local target="${sessions[$selected]}"
-    [[ -z "$target" ]] && return 1
-    # never kill the session the dashboard is running inside
-    local myself
-    myself=$(tmux display-message -p '#S' 2>/dev/null)
-    [[ "$target" == "$myself" ]] && return 1
+    [[ -z "$target" ]] && { kill_error="empty target (row/session index mismatch?)"; return 1; }
+    local err
     # exact name match (= prefix prevents tmux prefix-matching)
-    tmux kill-session -t "=${target}" 2>/dev/null
+    if ! err=$(tmux kill-session -t "=${target}" 2>&1); then
+        kill_error="tmux: ${err:-kill-session failed}"
+        return 1
+    fi
 }
 
 get_session_stats() {
@@ -557,27 +562,38 @@ while true; do
             # kill selected session (confirm if live)
             if (( session_count > 0 )); then
                 _do_kill=0
-                if [[ "${statuses[$selected]}" == "gone" ]]; then
+                _myself=$(tmux display-message -p '#S' 2>/dev/null)
+                _selfwarn=""
+                [[ "${sessions[$selected]}" == "$_myself" ]] && _selfwarn=" ${RED}— hosts THIS dashboard, it will close too${RST}${YELLOW}"
+                if [[ "${statuses[$selected]}" == "gone" && -z "$_selfwarn" ]]; then
                     _do_kill=1
                 else
-                    # confirm before killing a live session
+                    # confirm before killing a live (or self-hosting) session
                     tput cnorm 2>/dev/null
                     printf '\033[%d;3H' $(( session_count + 6 ))
-                    printf "${YELLOW}Kill live session ${names[$selected]}? [y/N]${RST} "
+                    printf "${YELLOW}Kill session ${names[$selected]}${_selfwarn}? [y/N]${RST} "
                     _confirm=""
                     read -rsn1 _confirm
                     tput civis 2>/dev/null
                     [[ "$_confirm" == "y" || "$_confirm" == "Y" ]] && _do_kill=1
                 fi
                 if (( _do_kill )); then
-                    kill_selected_session && reload_sessions
-                    if (( session_count == 0 )); then
-                        printf '\033[H\033[2J'
-                        printf "${DIM}  No claude sessions running.${RST}\n"
+                    if kill_selected_session; then
+                        reload_sessions
+                        if (( session_count == 0 )); then
+                            printf '\033[H\033[2J'
+                            printf "${DIM}  No claude sessions running.${RST}\n"
+                            read -rsn1
+                            exit 0
+                        fi
+                        load_data
+                    else
+                        # no silent failures: show why, wait for ack
+                        printf '\033[%d;3H' $(( session_count + 6 ))
+                        printf "${RED}kill failed: %s${RST} (any key) " "$kill_error"
                         read -rsn1
-                        exit 0
+                        render
                     fi
-                    load_data
                 else
                     render
                 fi
