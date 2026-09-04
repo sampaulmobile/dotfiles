@@ -16,6 +16,8 @@ path="${1:?usage: wt-tmux-jump <worktree-path>}"
 name=$(basename "$path" | tr . _)
 
 if ! tmux has-session -t="$name" 2>/dev/null; then
-    tmux new-session -ds "$name" -c "$path"
+    # standard hub layout ([claude,] nvim, zsh) — shared with tmux-sessionizer
+    source "$HOME/dotfiles/bin/tmux-claude-lib"
+    new_hub_session "$name" "$path"
 fi
 tmux switch-client -t "$name"

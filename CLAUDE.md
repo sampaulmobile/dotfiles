@@ -41,13 +41,13 @@ public package names in Brewfiles are fine. Sweep diffs before pushing.
 
 ## Tmux Scripts
 
-- `bin/tmux-sessionizer` — fuzzy finds projects in `~/dev` (depth 1) and `~/dotfiles` (depth 0). For worktree-layout repos (those with `.bare/`), enumerates each worktree as a separate entry. Sessions named `<project>_<branch>` for worktrees, `<basename>` for regular repos (dots → underscores).
+- `bin/tmux-sessionizer` — fuzzy finds projects in `~/dev` (depth 1) and `~/dotfiles` (depth 0). For worktree-layout repos (those with `.bare/`), enumerates each worktree as a separate entry. Sessions named `<project>_<branch>` for worktrees, `<basename>` for regular repos (dots → underscores). New sessions get the standard hub layout via `new_hub_session` in `bin/tmux-claude-lib`: window mode = claude (warm) / nvim / zsh, landing on claude; popup mode = nvim / zsh, landing on zsh. The nvim window launches nvim in the project dir and keeps automatic-rename (shows "nvim" while it runs, tracks later commands); only the claude window's name is pinned.
 - `bin/tmux-claude-popup` / `bin/tmux-claude-window` — the two C-Space implementations (floating `claude-<session>` popup vs a `claude` window in the project session); `bin/tmux-claude-migrate` moves live sessions between the layouts and sets the mode file. Popup-only logic elsewhere keys off `claude-*` sessions existing, so it self-disables in window mode.
 - `bin/tmux-claude-dashboard` — interactive dashboard showing all claude sessions with status (working/idle/permission/gone), token usage (context/output/total), and model. Responsive columns adapt to terminal width. Keys: `j/k` navigate, `⏎` switch to session, `x` kill session, `X` prune all gone sessions, `a` toggle agent trees, `r` refresh, `R` hard refresh (clears token cache), `q` quit. Sessions whose CWD no longer exists (e.g. deleted worktrees) show `✗ gone`. A session row expands into a tree of its live subagents (indented by spawn depth, parents before children), rendered on the same SESSION/STATUS/CONTEXT/OUTPUT/TOTAL/MODEL column grid as session rows (status shows working/idle with age, e.g. `working 30s`; MODEL shows the agentType); a working agent's activity snippet prints as its own dim quoted line beneath the row. A `+N` badge marks sessions with N agents actively working. Sessions with a working agent auto-expand; `a` forces every session's tree open (including idle-only agents) and toggles back.
 - `bin/tmux-claude-statusbar` — ambient attention layer for the tmux status bar: `🔴N ✅N ●N ` for permission-needed / finished-but-unseen / working session counts (each segment omitted when zero; empty output when all zero). Scans every tmux session, not just `claude-*` popups, so a headless project hub running claude directly is counted too. Refreshed every ~5s by tmux; batches all pane captures into one tmux round trip to stay fast.
 - `bin/tmux-claude-attention` — flag-file backend for the attention layer: `~/.cache/claude-attention/<session>.done`, one per finished-but-unseen tmux session. `flag-done` (called by the Claude Code Stop hook — see the script's header comment for the settings.json snippet) touches a session's flag, silently no-op outside tmux or when a client is already attached to that session; `clear <session>` removes it (tmux attach hooks); `list` prints flagged live sessions newest-first, pruning dead ones; `jump` is Ctrl+O's backend.
 - `bin/tmux-claude-notify` — notification hook for Claude Code. Sends terminal bell + macOS notification on permission prompts. Configured in `~/.claude/settings.json`.
-- `bin/tmux-claude-lib` — shared functions sourced by the claude session manager scripts.
+- `bin/tmux-claude-lib` — shared functions sourced by the claude session manager scripts; also home of `new_hub_session` (the standard hub session layout, used by the sessionizer and `wt-tmux-jump`).
 
 ## Worktrees: hub model (worktrunk)
 
@@ -74,7 +74,9 @@ installed via Brewfile):
   `node_modules`) into a worktree when it needs to be runnable — kept
   MANUAL, not a hook: ~13s / 3.2 GiB on the biggest repo.
 - Glue: `dots/worktrunk.toml` (user-level hooks) + `bin/wt-tmux-jump` /
-  `bin/wt-tmux-cleanup`; the zshrc `wt()` wrapper passes `--no-cd` on
+  `bin/wt-tmux-cleanup`. `wt-tmux-jump` builds new worktree sessions with
+  the same `new_hub_session` layout as the sessionizer (so in window mode
+  a worktree session starts claude warm too); the zshrc `wt()` wrapper passes `--no-cd` on
   switch so the invoking pane never moves. Session naming (dir basename,
   dots→underscores) matches the sessionizer, so Ctrl+F/Ctrl+Space/Ctrl+G
   work on worktrees with no special handling.
