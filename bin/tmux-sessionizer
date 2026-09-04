@@ -195,7 +195,9 @@ else
         # Filter out dirs that already have a session (builtin pattern match
         # against a delimited string — no fork per check), emit ~-shortened
         # and dimmed; a linked worktree (.git is a file) gets a cyan tint.
-        local nl_existing=$'\n'"$existing"$'\n'
+        # $existing excludes the current session, so add it back here or the
+        # dir you're calling from reappears as a "no session yet" row.
+        local nl_existing=$'\n'"$current_session"$'\n'"$existing"$'\n'
         for dir in "${candidates[@]}"; do
             session_name_for "$dir"
             if [[ "$nl_existing" != *$'\n'"$session_name"$'\n'* ]]; then
