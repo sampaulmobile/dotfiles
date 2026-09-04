@@ -1,0 +1,726 @@
+#!/usr/bin/env bash
+
+# claude-tokens — offline token/cost analyzer for Claude Code transcripts.
+#
+# Reads the JSONL transcripts under ~/.claude/projects and reports token
+# usage and cost, aggregated at whatever grain you ask for:
+#
+#   claude-tokens                        overview: rollup per project/hub
+#   claude-tokens sessions [fragment]    one row per session (optionally
+#                                        filtered by project-path fragment)
+#   claude-tokens session <id|path>      full breakdown of one session:
+#                                        header, per-model table, and a
+#                                        per-(sub)agent tree with tokens +
+#                                        estimated cost per agent
+#   claude-tokens pr <number|url-frag>   sessions linked to a PR (via the
+#                                        pr-link records claude writes),
+#                                        each expanded like `session`
+#   claude-tokens branch <name>          summary rows for sessions that
+#                                        touched a git branch (≈ per-PR
+#                                        view for sessions predating or
+#                                        lacking pr-link records)
+#
+#   --since <N>[d|h|m]                   overview/sessions only: restrict to
+#                                        sessions active in the window (a
+#                                        session straddling the cutoff still
+#                                        reports its whole-lifetime totals)
+#
+# Cost columns: sessions that carry cost-state records (written by claude
+# incrementally) report the ACTUAL cost claude computed, which includes all
+# subagent usage — marked plain. Sessions without cost-state, and all
+# per-agent rows, are ESTIMATED from token counts × the public API price
+# sheet (cache read = 0.1× input; cache write = 1.25×/2× input for
+# 5m/1h TTL) — marked with '~'. Unknown models contribute tokens but no
+# cost and flag the row with '?'.
+#
+# Resume chains: resuming a session copies the whole history into a new
+# session file, so the old and new files overlap almost entirely. Listings
+# collapse each chain into one row keyed by the live tip (superseded files
+# dropped, agent counts absorbed); a cost taken from an ancestor's
+# cost-state is marked '>' (accurate up to the resume point). `session` on
+# a superseded id still works and says who superseded it.
+#
+# Timestamps are displayed as they are stored: UTC.
+#
+# Unlike the tmux-claude-* scripts this is a pure reporting tool — it never
+# touches tmux and full-parses every transcript it reports on, so expect a
+# few seconds for the all-projects overview rather than dashboard speeds.
+
+CLAUDE_PROJECTS_DIR="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
+
+# ── shared jq prelude: price sheet + per-record cost ────────────────────
+# Prices are USD per MTok [input, output], from the Anthropic price sheet.
+# base_model strips a -YYYYMMDD snapshot suffix so dated model ids match.
+JQ_PRELUDE='
+def prices: {
+  "claude-fable-5-1":   [10, 50],
+  "claude-fable-5":     [10, 50],
+  "claude-mythos-5-1":  [10, 50],
+  "claude-mythos-5":    [10, 50],
+  "claude-opus-5":      [5, 25],
+  "claude-opus-4-8":    [5, 25],
+  "claude-opus-4-7":    [5, 25],
+  "claude-opus-4-6":    [5, 25],
+  "claude-opus-4-5":    [5, 25],
+  "claude-opus-4-1":    [15, 75],
+  "claude-opus-4":      [15, 75],
+  "claude-sonnet-5":    [2, 10],
+  "claude-sonnet-4-6":  [3, 15],
+  "claude-sonnet-4-5":  [3, 15],
+  "claude-sonnet-4":    [3, 15],
+  "claude-haiku-4-5":   [1, 5],
+  "claude-3-5-haiku":   [0.8, 4]
+};
+def base_model: sub("-20[0-9]{6}$"; "");
+# .message.usage -> estimated USD, or null when the model has no price row.
+def usage_cost($model):
+  (prices[$model | base_model] // null) as $p
+  | if $p == null then null else
+      ( (.input_tokens // 0)            * $p[0]
+      + (.output_tokens // 0)           * $p[1]
+      + (.cache_read_input_tokens // 0) * $p[0] * 0.1
+      + (if .cache_creation then
+           (.cache_creation.ephemeral_5m_input_tokens // 0) * $p[0] * 1.25
+         + (.cache_creation.ephemeral_1h_input_tokens // 0) * $p[0] * 2
+         else
+           (.cache_creation_input_tokens // 0) * $p[0] * 1.25
+         end)
+      ) / 1000000
+    end;
+# ISO timestamp (with ms) -> epoch seconds.
+def ts2e: sub("\\.[0-9]+Z$"; "Z") | strptime("%Y-%m-%dT%H:%M:%SZ") | mktime;
+# real assistant turns (synthetic error records carry model "<synthetic>")
+def is_turn: .type == "assistant" and .message.usage != null
+             and ((.message.model // "") | startswith("claude"));
+# One API response is logged as one assistant record PER CONTENT BLOCK,
+# and the usage object EVOLVES across those blocks as the response streams
+# (output_tokens grows) — summing raw records roughly doubles every token
+# count, while taking the first per request undercounts output. Keep the
+# record with the highest output_tokens (the final block) per API request.
+def dedupe_reqs:
+  group_by(.requestId // .uuid)
+  | map(max_by(.message.usage.output_tokens // 0));
+# A request usage may carry an iterations array (server-side retries);
+# each iteration was billed, but top-level usage reflects only the final
+# one. Expand so estimates track what cost-state actually charges.
+def usages_of: .message.usage as $u
+  | if ($u.iterations | type) == "array" and ($u.iterations | length) > 0
+    then $u.iterations else [$u] end;
+# per-record estimated cost across its iterations (null if unpriced model)
+def rec_cost: .message.model as $m
+  | (usages_of | map(usage_cost($m)))
+  | if any(. == null) then null else add end;
+# aggregate an array of assistant records -> {turns,in,out,crd,cwr,think,cost}
+def agg:
+  dedupe_reqs
+  | (map(usages_of) | add // []) as $us
+  | { turns: length,
+      in:    ($us | map(.input_tokens // 0) | add // 0),
+      out:   ($us | map(.output_tokens // 0) | add // 0),
+      crd:   ($us | map(.cache_read_input_tokens // 0) | add // 0),
+      cwr:   ($us | map(.cache_creation_input_tokens // 0) | add // 0),
+      think: (map(.message.usage.output_tokens_details.thinking_tokens // 0) | add // 0),
+      cost:  (map(rec_cost) | if any(. == null) then null else (add // 0) end) };
+'
+
+# ── awk formatting helpers, injected into every table renderer ──────────
+AWK_FMT='
+function fmt(n) {
+  if (n >= 1000000) return sprintf("%.1fM", n / 1000000)
+  if (n >= 1000)    return sprintf("%.1fk", n / 1000)
+  return sprintf("%d", n)
+}
+function fmtcost(c, src) {
+  if (c == "-" || c == "") return "-"
+  # actual = claude-recorded; actual* (chain merged from an ancestor
+  # cost-state) = at-least-this; anything else = price-sheet estimate
+  if (src == "actual")  return sprintf("$%.2f", c)
+  if (src == "actual*") return sprintf(">$%.2f", c)
+  return sprintf("~$%.2f", c)
+}
+function trunc(s, n) {
+  if (length(s) > n) return substr(s, 1, n - 1) "…"
+  return s
+}
+'
+
+die() { echo "claude-tokens: $*" >&2; exit 1; }
+
+usage() {
+    sed -n '3,40p' "$0" | sed 's/^# \{0,1\}//'
+    exit 0
+}
+
+# ── session file discovery ──────────────────────────────────────────────
+
+# all_session_jsonls [mmin]
+#   Prints every main-session transcript path (agent transcripts live one
+#   level deeper and are excluded by -maxdepth). Optional mmin restricts to
+#   files modified within that many minutes.
+all_session_jsonls() {
+    local mmin="$1"
+    if [[ -n "$mmin" ]]; then
+        find "$CLAUDE_PROJECTS_DIR" -maxdepth 2 -name '*.jsonl' -mmin "-$mmin" 2>/dev/null
+    else
+        find "$CLAUDE_PROJECTS_DIR" -maxdepth 2 -name '*.jsonl' 2>/dev/null
+    fi
+}
+
+# resolve_session <id-prefix|path>
+#   Prints the transcript path for a session id prefix or literal path.
+resolve_session() {
+    local arg="$1"
+    if [[ -f "$arg" ]]; then
+        echo "$arg"
+        return
+    fi
+    local matches
+    matches=$(find "$CLAUDE_PROJECTS_DIR" -maxdepth 2 -name "${arg}*.jsonl" 2>/dev/null)
+    [[ -z "$matches" ]] && die "no session matching '$arg'"
+    if [[ $(echo "$matches" | wc -l) -gt 1 ]]; then
+        echo "claude-tokens: '$arg' is ambiguous:" >&2
+        echo "$matches" | sed 's/^/  /' >&2
+        exit 1
+    fi
+    echo "$matches"
+}
+
+# agent_jsonls <session-jsonl>
+#   Prints the session's subagent transcript paths, one per line.
+agent_jsonls() {
+    local f="$1" dir sid sub a
+    dir=$(dirname "$f")
+    sid=$(basename "$f" .jsonl)
+    sub="${dir}/${sid}/subagents"
+    [[ -d "$sub" ]] || return 0
+    for a in "$sub"/agent-*.jsonl; do
+        [[ -f "$a" ]] && echo "$a"
+    done
+}
+
+# ── per-session summary (one TSV row) ───────────────────────────────────
+
+# summarize_session <session-jsonl>
+#   Emits one TSV row covering the session INCLUDING its subagents:
+#   sid cwd slug first last turns agents models branches prs in out crd cwr cost src
+#   Cost comes from the last cost-state record when present ("actual" —
+#   claude's own running total, subagents included); otherwise it is
+#   estimated from the price sheet over every usage record we can see
+#   ("est"), or "est?" when an unpriced model was involved.
+summarize_session() {
+    local f="$1" sid n_agents agents
+    sid=$(basename "$f" .jsonl)
+    agents=$(agent_jsonls "$f")
+    n_agents=0
+    [[ -n "$agents" ]] && n_agents=$(echo "$agents" | wc -l | tr -d ' ')
+
+    { cat "$f"; [[ -n "$agents" ]] && echo "$agents" | xargs cat 2>/dev/null; } \
+    | jq -Rn -r --arg sid "$sid" --arg agents "$n_agents" "$JQ_PRELUDE"'
+        [inputs | fromjson?] as $recs
+        | ($recs | map(select(is_turn))) as $asst
+        | ($recs | map(select(.type == "cost-state")) | last) as $cs
+        | ($recs | map(select(.type == "pr-link") | (.prNumber | tostring)) | unique) as $prs
+        | ($recs | map(select((.isSidechain // false) == false and .cwd != null))
+                 | first | .cwd // "?") as $cwd
+        | ($recs | map(select((.isSidechain // false) == false) | .gitBranch // empty)
+                 | unique) as $branches
+        | ($recs | map(.slug // empty) | last // "-") as $slug
+        | ($recs | map(.timestamp // empty) | sort) as $ts
+        | ($asst | map(select((.isSidechain // false) == false)) | dedupe_reqs | length) as $turns
+        # computed fallback over everything fed in (main + agents)
+        | ($asst | agg) as $c
+        | (if $cs != null then {
+              in:  ([$cs.modelUsage[]?.inputTokens] | add // 0),
+              out: ([$cs.modelUsage[]?.outputTokens] | add // 0),
+              crd: ([$cs.modelUsage[]?.cacheReadInputTokens] | add // 0),
+              cwr: ([$cs.modelUsage[]?.cacheCreationInputTokens] | add // 0),
+              cost: $cs.totalCostUSD, src: "actual"
+           } else {
+              in: $c.in, out: $c.out, crd: $c.crd, cwr: $c.cwr,
+              cost: ($c.cost // 0),
+              src: (if $c.cost == null then "est?" else "est" end)
+           } end) as $tot
+        | ($asst | map(.message.model | base_model) | unique | join(",")) as $models
+        # Resuming a session copies the full history into a NEW session file
+        # (sessionId rewritten on every record) — but each record keeps its
+        # original snake_case session_id. Foreign session_ids therefore name
+        # this file s ancestors in a resume chain; merge_chains uses them to
+        # collapse the chain into one row and drop the superseded files.
+        | ($asst | map(.session_id // empty) | unique | map(select(. != $sid))) as $inh
+        | [ $sid, $cwd, $slug,
+            ($ts | first // "-"), ($ts | last // "-"),
+            $turns, $agents,
+            (if $models == "" then "-" else $models end),
+            (if ($branches | length) == 0 then "-" else ($branches | join(",")) end),
+            (if ($prs | length) == 0 then "-" else ($prs | join(",")) end),
+            $tot.in, $tot.out, $tot.crd, $tot.cwr,
+            ($tot.cost * 10000 | round / 10000), $tot.src,
+            (if ($inh | length) == 0 then "-" else ($inh | join(",")) end),
+            # cost-accumulator epoch: cost-state is a snapshot of a running
+            # in-process counter, and a resume may start a fresh counter
+            # (new startTime). merge_chains sums max-per-epoch, so two
+            # counters covering different spans never shadow each other.
+            (if $cs != null then (($cs.startTime // $sid) | tostring) else "-" end)
+          ] | @tsv
+    ' 2>/dev/null
+}
+
+# summarize_many <file-list (one per line)>
+summarize_many() {
+    local f
+    while IFS= read -r f; do
+        [[ -n "$f" ]] && summarize_session "$f"
+    done
+}
+
+# merge_chains
+#   stdin: 18-field summary TSV rows; stdout: 16-field rows with resume
+#   chains collapsed. A row whose sid appears in another row's inherited
+#   list (field 17) is superseded — its history lives on, copied into the
+#   tip file — and is dropped. The tip row absorbs the chain: agent counts
+#   summed (subagent dirs are NOT copied on resume) and earliest start
+#   kept. Cost: cost-state is a snapshot of an in-process running counter,
+#   and a resume can start a FRESH counter, so a chain's actual cost is the
+#   sum of the max cost per counter epoch (field 18) across its members —
+#   never let a young tip counter shadow the big ancestor one. Chains
+#   priced this way are marked src "actual*" (rendered ">$" — a floor,
+#   since any member without cost-state contributes nothing). A chain that
+#   forked into two live tips counts its shared history in both — rare,
+#   accepted.
+merge_chains() {
+    awk 'BEGIN { FS = OFS = "\t" }
+    {
+        rows[NR] = $0
+        sid[NR] = $1
+        idx[$1] = NR
+        inh[NR] = $17
+    }
+    END {
+        for (i = 1; i <= NR; i++) {
+            if (inh[i] == "-") continue
+            n = split(inh[i], a, ",")
+            for (j = 1; j <= n; j++) if (a[j] in idx) superseded[a[j]] = 1
+        }
+        for (i = 1; i <= NR; i++) {
+            if (sid[i] in superseded) continue
+            split(rows[i], f, "\t")
+            if (inh[i] != "-") {
+                split("", emax); split("", erow)
+                if (f[16] ~ /^actual/ && f[18] != "-") {
+                    emax[f[18]] = f[15]; erow[f[18]] = i
+                }
+                n = split(inh[i], a, ",")
+                for (j = 1; j <= n; j++) {
+                    if (!(a[j] in idx)) continue
+                    k = idx[a[j]]
+                    split(rows[k], g, "\t")
+                    f[7] += g[7]
+                    if (g[4] != "-" && (f[4] == "-" || g[4] < f[4])) f[4] = g[4]
+                    if (g[16] ~ /^actual/ && g[18] != "-") {
+                        if (!(g[18] in emax) || g[15] > emax[g[18]] + 0) {
+                            emax[g[18]] = g[15]; erow[g[18]] = k
+                        }
+                    }
+                }
+                ne = 0; total = 0; t11 = t12 = t13 = t14 = 0; tip_only = 1
+                for (e in emax) {
+                    ne++
+                    total += emax[e]
+                    split(rows[erow[e]], h, "\t")
+                    t11 += h[11]; t12 += h[12]; t13 += h[13]; t14 += h[14]
+                    if (erow[e] != i) tip_only = 0
+                }
+                if (ne > 0) {
+                    f[11] = t11; f[12] = t12; f[13] = t13; f[14] = t14
+                    f[15] = total
+                    f[16] = (tip_only && f[16] == "actual") ? "actual" : "actual*"
+                }
+            }
+            out = f[1]
+            for (c = 2; c <= 16; c++) out = out OFS f[c]
+            print out
+        }
+    }'
+}
+
+# ── subcommands ─────────────────────────────────────────────────────────
+
+cmd_overview() {
+    local mmin="$1"
+    all_session_jsonls "$mmin" | summarize_many | merge_chains \
+    | awk -F'\t' -v since="$SINCE_ISO" "$AWK_FMT"'
+        $6 == 0 && $7 == 0 && $15 == 0 { next }
+        since != "" && $5 < since { next }
+        {
+            proj = $2
+            sub(ENVIRON["HOME"], "~", proj)
+            n[proj]++; agents[proj] += $7; turns[proj] += $6
+            tin[proj] += $11; tout[proj] += $12; tcrd[proj] += $13; tcwr[proj] += $14
+            cost[proj] += $15
+            if ($16 !~ /^actual/) est[proj] = 1
+        }
+        END {
+            printf "%-42s %5s %6s %6s %8s %8s %9s %9s %10s %10s\n",
+                   "PROJECT", "SESS", "TURNS", "AGENTS", "INPUT", "OUTPUT",
+                   "CACHE RD", "CACHE WR", "TOTAL", "COST"
+            # sort by cost desc (portable: build index array, insertion sort)
+            m = 0
+            for (p in n) { keys[m++] = p }
+            for (i = 1; i < m; i++) {
+                k = keys[i]
+                for (j = i - 1; j >= 0 && cost[keys[j]] < cost[k]; j--) keys[j+1] = keys[j]
+                keys[j+1] = k
+            }
+            for (i = 0; i < m; i++) {
+                p = keys[i]
+                total = tin[p] + tout[p] + tcrd[p] + tcwr[p]
+                gt_in += tin[p]; gt_out += tout[p]; gt_crd += tcrd[p]; gt_cwr += tcwr[p]
+                gt_cost += cost[p]; gt_n += n[p]; gt_turns += turns[p]; gt_agents += agents[p]
+                anyest = (p in est) ? "est" : "actual"
+                if (p in est) allest = 1
+                printf "%-42s %5d %6d %6d %8s %8s %9s %9s %10s %10s\n",
+                       trunc(p, 42), n[p], turns[p], agents[p],
+                       fmt(tin[p]), fmt(tout[p]), fmt(tcrd[p]), fmt(tcwr[p]),
+                       fmt(total), fmtcost(cost[p], anyest)
+            }
+            printf "%-42s %5d %6d %6d %8s %8s %9s %9s %10s %10s\n",
+                   "TOTAL", gt_n, gt_turns, gt_agents,
+                   fmt(gt_in), fmt(gt_out), fmt(gt_crd), fmt(gt_cwr),
+                   fmt(gt_in + gt_out + gt_crd + gt_cwr),
+                   fmtcost(gt_cost, allest ? "est" : "actual")
+        }'
+}
+
+# render_session_rows
+#   stdin: summary TSV rows; renders the shared per-session table.
+render_session_rows() {
+    sort -t$'\t' -k5,5r | awk -F'\t' -v since="$SINCE_ISO" "$AWK_FMT"'
+        since != "" && $5 < since { next }
+        BEGIN {
+            printf "%-9s %-26s %-11s %-11s %5s %6s %9s %9s %-8s %s\n",
+                   "SESSION", "PROJECT", "STARTED", "LAST", "TURNS", "AGENTS",
+                   "TOTAL", "COST", "PR", "BRANCH"
+        }
+        # skip sessions that never made an API call (aborted launches, etc.)
+        $6 == 0 && $7 == 0 && $15 == 0 { next }
+        {
+            proj = $2; sub(".*/", "", proj)
+            started = substr($4, 6, 11); sub("T", " ", started)
+            last = substr($5, 6, 11); sub("T", " ", last)
+            total = $11 + $12 + $13 + $14
+            gt_cost += $15; gt_total += total; gt_turns += $6; gt_agents += $7; gt_n++
+            if ($16 !~ /^actual/) anyest = 1
+            printf "%-9s %-26s %-11s %-11s %5d %6d %9s %9s %-8s %s\n",
+                   substr($1, 1, 8), trunc(proj, 26), started, last, $6, $7,
+                   fmt(total), fmtcost($15, $16), trunc($10, 8), trunc($9, 30)
+        }
+        END {
+            if (gt_n > 1)
+                printf "%-9s %-26s %-11s %-11s %5d %6d %9s %9s\n",
+                       "TOTAL", gt_n " sessions", "", "", gt_turns, gt_agents,
+                       fmt(gt_total), fmtcost(gt_cost, anyest ? "est" : "actual")
+        }'
+}
+
+cmd_sessions() {
+    local fragment="$1" mmin="$2" files
+    files=$(all_session_jsonls "$mmin")
+    if [[ -n "$fragment" ]]; then
+        files=$(echo "$files" | grep -i -- "$fragment")
+    fi
+    [[ -z "$files" ]] && die "no sessions matched"
+    echo "$files" | summarize_many | merge_chains | render_session_rows
+    echo
+    echo "(times UTC · ~ = estimated cost · drill in with: claude-tokens session <id>)"
+}
+
+cmd_session() {
+    local f
+    f=$(resolve_session "$1") || exit 1
+    local sid dir
+    sid=$(basename "$f" .jsonl)
+    dir=$(dirname "$f")
+
+    # Resume-chain lineage: ancestor session ids referenced by this file's
+    # records (see merge_chains), and any successor file that inherited
+    # from THIS session (meaning this file is a superseded copy).
+    local ancestors successor anc agent_files
+    ancestors=$(jq -Rr --arg sid "$sid" \
+        'fromjson? | select(.type == "assistant") | .session_id // empty
+         | select(. != $sid)' < "$f" | sort -u)
+    successor=$(grep -l "\"session_id\":\"${sid}\"" "$dir"/*.jsonl 2>/dev/null \
+        | grep -v "/${sid}.jsonl$" | head -1)
+
+    # agent transcripts: this session's, plus its ancestors' (subagent dirs
+    # stay behind with the old session file when a session is resumed)
+    agent_files=$(
+        agent_jsonls "$f"
+        for anc in $ancestors; do
+            [[ -f "${dir}/${anc}.jsonl" ]] && agent_jsonls "${dir}/${anc}.jsonl"
+        done
+    )
+
+    # ── header ── (own-cost line suppressed for chain tips: the shell
+    #    prints the epoch-summed chain cost right below instead)
+    local has_anc=""
+    [[ -n "$ancestors" ]] && has_anc=1
+    jq -Rn -r --arg sid "$sid" --arg has_anc "$has_anc" "$JQ_PRELUDE"'
+        [inputs | fromjson?] as $recs
+        | ($recs | map(select(.type == "cost-state")) | last) as $cs
+        | ($recs | map(select(.type == "pr-link"))) as $prs
+        | ($recs | map(.timestamp // empty) | sort) as $ts
+        | ($recs | map(select(.cwd != null)) | first | .cwd // "?") as $cwd
+        | ($recs | map(.gitBranch // empty) | unique) as $branches
+        | ($recs | map(.slug // empty) | last) as $slug
+        | "session:  \($sid)",
+          "cwd:      \($cwd)",
+          (if $slug != null and $slug != "" then "slug:     \($slug)" else empty end),
+          "branches: \(if ($branches|length) == 0 then "-" else $branches | join(", ") end)",
+          (if ($prs|length) > 0 then
+             "PRs:      \([$prs[].prUrl] | unique | join(", "))"
+           else empty end),
+          "window:   \($ts | first // "?")  →  \($ts | last // "?")  (UTC)",
+          (if $cs != null and $has_anc == "" then
+             "cost:     $\($cs.totalCostUSD * 100 | round / 100)  (actual, incl. agents)" +
+             "   lines: +\($cs.totalLinesAdded)/-\($cs.totalLinesRemoved)" +
+             "   api time: \($cs.totalAPIDuration / 60000 * 10 | round / 10)m"
+           else empty end)
+    ' < "$f"
+    # Chain-aware actual cost: cost-state is a snapshot of an in-process
+    # running counter, and a resume can start a fresh counter (its own
+    # startTime). Actual cost = sum of the max snapshot per counter epoch
+    # across every chain member — a floor (segments that never wrote a
+    # snapshot contribute nothing). A single-file session is the 1-epoch
+    # case; actual_cost also feeds the agent table's unattributed row.
+    local actual_cost="" actual_epochs="" cost_tsv
+    cost_tsv=$({ cat "$f"
+                 for anc in $ancestors; do
+                     [[ -f "${dir}/${anc}.jsonl" ]] && cat "${dir}/${anc}.jsonl"
+                 done
+               } | jq -Rr 'fromjson? | select(.type == "cost-state")
+                           | [(.startTime // 0), (.totalCostUSD // 0)] | @tsv' \
+                 | awk -F'\t' '{ if (!($1 in m) || $2 > m[$1] + 0) m[$1] = $2 }
+                               END { t = 0; n = 0
+                                     for (e in m) { t += m[e]; n++ }
+                                     if (n) printf "%.2f\t%d\n", t, n }')
+    if [[ -n "$cost_tsv" ]]; then
+        actual_cost=${cost_tsv%%$'\t'*}
+        actual_epochs=${cost_tsv##*$'\t'}
+    fi
+    if [[ -n "$ancestors" ]]; then
+        if [[ -n "$actual_cost" ]]; then
+            echo "cost:     ≥\$${actual_cost}  (actual floor, ${actual_epochs} counter epoch(s) across the resume chain; estimates below re-cover it all)"
+        else
+            echo "cost:     no cost-state records — estimates only"
+        fi
+    elif [[ -z "$actual_cost" ]]; then
+        echo "cost:     no cost-state records — estimates only"
+    fi
+    if [[ -n "$ancestors" ]]; then
+        echo "resumed:  continues $(echo "$ancestors" | cut -c1-8 | tr '\n' ' ')(history inherited, counted here)"
+    fi
+    if [[ -n "$successor" ]]; then
+        echo "⚠ superseded by $(basename "$successor" .jsonl | cut -c1-8) — that session inherited this history; totals here are also counted there"
+    fi
+    echo
+
+    # ── per-model rollup (authoritative when cost-state exists; the
+    #    computed fallback covers the main loop AND all agent lanes) ──
+    echo "BY MODEL"
+    { cat "$f"; [[ -n "$agent_files" ]] && echo "$agent_files" | xargs cat 2>/dev/null; } \
+    | jq -Rn -r "$JQ_PRELUDE"'
+        [inputs | fromjson?] as $recs
+        | ($recs | map(select(.type == "cost-state")) | last) as $cs
+        | if $cs != null then
+            $cs.modelUsage | to_entries[]
+            | [ (.key | base_model), .value.inputTokens, .value.outputTokens,
+                (.value.thinkingTokens // 0),
+                .value.cacheReadInputTokens, .value.cacheCreationInputTokens,
+                (.value.costUSD * 10000 | round / 10000), "actual" ] | @tsv
+          else
+            [$recs[] | select(is_turn)]
+            | group_by(.message.model | base_model)[]
+            | (.[0].message.model | base_model) as $m
+            | (agg) as $a
+            | [ $m, $a.in, $a.out, $a.think, $a.crd, $a.cwr,
+                (if $a.cost == null then "-" else ($a.cost * 10000 | round / 10000) end),
+                "est" ] | @tsv
+          end
+    ' | awk -F'\t' "$AWK_FMT"'
+        BEGIN { printf "  %-22s %8s %8s %9s %9s %9s %9s\n",
+                       "MODEL", "INPUT", "OUTPUT", "THINKING", "CACHE RD", "CACHE WR", "COST" }
+        { printf "  %-22s %8s %8s %9s %9s %9s %9s\n",
+                 $1, fmt($2), fmt($3), fmt($4), fmt($5), fmt($6), fmtcost($7, $8) }'
+    echo
+
+    # ── per-agent tree ──
+    # One JSON object per lane (the main loop + each subagent), tree-ordered
+    # by parentAgentId (parents before children, siblings by start time),
+    # then rendered as a table. Per-lane costs are always estimates.
+    echo "BY AGENT"
+    {
+        # main loop lane
+        jq -Rn -c "$JQ_PRELUDE"'
+            [inputs | fromjson? | select(is_turn)] as $asst
+            | ($asst | map(.timestamp // empty) | sort) as $ts
+            | ($asst | agg) as $a
+            | { id: "main", parent: "", depth: 0, type: "main",
+                model: ($asst | map(.message.model | base_model) | unique | join(",")),
+                desc: "main session loop",
+                turns: $a.turns, in: $a.in, out: $a.out, crd: $a.crd, cwr: $a.cwr,
+                cost: $a.cost,
+                first: ($ts | first // ""), last: ($ts | last // "") }
+        ' < "$f"
+
+        local a meta
+        for a in $agent_files; do
+            meta="${a%.jsonl}.meta.json"
+            [[ -f "$meta" ]] || meta=/dev/null
+            jq -Rn -c --slurpfile meta_arr <(cat "$meta" 2>/dev/null; echo '{}') \
+                --arg id "$(basename "$a" .jsonl | sed 's/^agent-//')" "$JQ_PRELUDE"'
+                ($meta_arr[0] // {}) as $meta
+                | [inputs | fromjson? | select(is_turn)] as $asst
+                | ($asst | map(.timestamp // empty) | sort) as $ts
+                | ($asst | agg) as $a
+                | { id: $id,
+                    parent: ($meta.parentAgentId // ""),
+                    depth: ($meta.spawnDepth // 1 | if type == "number" then . else 1 end),
+                    type: ($meta.agentType // "agent"),
+                    model: ($asst | map(.message.model | base_model) | unique | join(",")),
+                    desc: ($meta.description // "-"),
+                    turns: $a.turns, in: $a.in, out: $a.out, crd: $a.crd, cwr: $a.cwr,
+                    cost: $a.cost,
+                    first: ($ts | first // ""), last: ($ts | last // "") }
+            ' < "$a"
+        done
+    } | jq -s -r "$JQ_PRELUDE"'
+        # tree order: dfs from roots; a child whose parent is missing from
+        # the set is promoted to root (same rule as tmux-claude-lib).
+        (map(.id)) as $ids
+        | map(.parent as $p
+              | . + { pkey: (if $p == "" or (.id == "main") then ""
+                             elif ($ids | index($p)) then $p
+                             else "" end) }) as $items
+        | def dfs($pk):
+            ($items | map(select(.pkey == $pk)) | sort_by(.first)) as $kids
+            | reduce $kids[] as $k ([]; . + [$k] + dfs($k.id));
+        # "main" is a root; real roots sort after it by start time
+        [ ($items[] | select(.id == "main")) ] +
+        ( dfs("") | map(select(.id != "main")) )
+        | .[]
+        | (if .id == "main" then 0
+           elif .pkey == "" then 0
+           else .depth end) as $indent
+        | [ ("  " * $indent) + .type, .model, .turns,
+            .in, .crd, .cwr, .out,
+            (if .cost == null then "-" else (.cost * 10000 | round / 10000) end),
+            (if .first != "" and .last != ""
+             then ((.last | ts2e) - (.first | ts2e)) else "-" end),
+            .desc ]
+        | @tsv
+    ' | awk -F'\t' -v actual="$actual_cost" "$AWK_FMT"'
+        function fmtdur(s) {
+            if (s == "-") return "-"
+            if (s >= 3600) return sprintf("%.1fh", s / 3600)
+            if (s >= 60)   return sprintf("%dm", s / 60)
+            return s "s"
+        }
+        BEGIN { printf "  %-28s %-18s %5s %7s %9s %9s %8s %9s %6s  %s\n",
+                       "AGENT", "MODEL", "TURNS", "INPUT", "CACHE RD",
+                       "CACHE WR", "OUTPUT", "EST COST", "TIME", "DESCRIPTION" }
+        {
+            total_cost += ($8 == "-" ? 0 : $8); if ($8 == "-") unknown = 1
+            printf "  %-28s %-18s %5d %7s %9s %9s %8s %9s %6s  %s\n",
+                   trunc($1, 28), trunc($2, 18), $3, fmt($4), fmt($5), fmt($6),
+                   fmt($7), fmtcost($8, "est"), fmtdur($9), trunc($10, 44)
+        }
+        END {
+            # When the recorded actual is known, reconcile the columns: the
+            # per-agent estimates only see transcribed requests, so the
+            # remainder (retried attempts, background utility calls like
+            # title generation) gets its own line instead of a silent gap.
+            if (actual != "" && actual + 0 > total_cost + 0.005) {
+                printf "  %-28s %-18s %5s %7s %9s %9s %8s %9s\n",
+                       "unattributed retries/utility", "", "", "", "", "", "",
+                       fmtcost(actual - total_cost, "est")
+                printf "  %-28s %-18s %5s %7s %9s %9s %8s %9s\n",
+                       "TOTAL (actual)", "", "", "", "", "", "",
+                       fmtcost(actual, "actual") (unknown ? " +?" : "")
+            } else {
+                printf "  %-28s %-18s %5s %7s %9s %9s %8s %9s\n",
+                       "TOTAL (est)", "", "", "", "", "", "",
+                       fmtcost(total_cost, "est") (unknown ? " +?" : "")
+            }
+        }'
+}
+
+cmd_pr() {
+    local arg="$1" f found=0
+    [[ -z "$arg" ]] && die "usage: claude-tokens pr <number|url-fragment>"
+    for f in $(all_session_jsonls ""); do
+        grep -q '"type":"pr-link"' "$f" 2>/dev/null || continue
+        if jq -Rn --arg a "$arg" '
+             [inputs | fromjson? | select(.type == "pr-link")]
+             | any((.prNumber | tostring) == $a or (.prUrl | contains($a)))
+           ' < "$f" | grep -q true; then
+            found=1
+            echo "════════════════════════════════════════════════════════"
+            cmd_session "$f"
+            echo
+        fi
+    done
+    if [[ "$found" == 0 ]]; then
+        echo "no session carries a pr-link matching '$arg'." >&2
+        echo "pr-link records only exist for PRs created/linked from within claude;" >&2
+        echo "try: claude-tokens branch <branch-name>" >&2
+        exit 1
+    fi
+}
+
+cmd_branch() {
+    local branch="$1" files
+    [[ -z "$branch" ]] && die "usage: claude-tokens branch <name>"
+    files=$(all_session_jsonls "" | xargs grep -l "\"gitBranch\":\"${branch}\"" 2>/dev/null)
+    [[ -z "$files" ]] && die "no sessions touched branch '$branch'"
+    echo "$files" | summarize_many | merge_chains | render_session_rows
+    echo
+    echo "(times UTC · ~ = estimated cost · drill in with: claude-tokens session <id>)"
+}
+
+# ── arg parsing ─────────────────────────────────────────────────────────
+
+MMIN=""
+SINCE_ISO=""
+ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --since)
+            shift
+            [[ -z "$1" ]] && die "--since needs a value like 7d, 24h, 90m"
+            case "$1" in
+                *d) MMIN=$(( ${1%d} * 1440 )) ;;
+                *h) MMIN=$(( ${1%h} * 60 )) ;;
+                *m) MMIN=$(( ${1%m} )) ;;
+                *)  die "--since needs a unit: 7d, 24h, 90m" ;;
+            esac
+            # find -mmin is only a prefilter — a live session keeps an old
+            # transcript's mtime fresh, so rows are also cut on their last
+            # in-file activity timestamp (ISO strings compare fine).
+            SINCE_ISO=$(date -u -v "-${MMIN}M" +%Y-%m-%dT%H:%M:%S 2>/dev/null \
+                        || date -u -d "${MMIN} minutes ago" +%Y-%m-%dT%H:%M:%S) ;;
+        -h|--help|help) usage ;;
+        *) ARGS+=("$1") ;;
+    esac
+    shift
+done
+
+cmd="${ARGS[0]:-overview}"
+case "$cmd" in
+    overview) cmd_overview "$MMIN" ;;
+    sessions) cmd_sessions "${ARGS[1]:-}" "$MMIN" ;;
+    session)  [[ -z "${ARGS[1]:-}" ]] && die "usage: claude-tokens session <id|path>"
+              cmd_session "${ARGS[1]}" ;;
+    pr)       cmd_pr "${ARGS[1]:-}" ;;
+    branch)   cmd_branch "${ARGS[1]:-}" ;;
+    *)        die "unknown command '$cmd' (see --help)" ;;
+esac
