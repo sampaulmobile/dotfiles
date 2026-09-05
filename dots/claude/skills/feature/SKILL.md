@@ -29,7 +29,7 @@ Run the end-to-end feature pipeline. The argument is either a short description 
    STOP without spawning anything and tell the user to run `/hq <request>`
    instead — /hq owns routing and will dispatch back here correctly. Never
    delegate or guess a target from here.
-1. Parse flags and the feature description / plan path from the arguments.
+1. Parse flags and the feature description / plan path from the arguments. A plan path is resolved to an ABSOLUTE path in the hub before spawning — the orchestrator runs in a fresh worktree, and a hub-only (uncommitted) workplan does not exist there, so a relative path would silently miss.
 2. Determine the default branch: `git symbolic-ref --short refs/remotes/origin/HEAD | sed 's|origin/||'` (fall back to `main`).
 3. New worktrees branch from local state — if the hub hasn't been pulled recently, `git pull` first.
 4. Derive a short kebab-case slug from the feature (e.g. `fix-upload-retry`).
@@ -66,7 +66,7 @@ Max review rounds: <MAX_ROUNDS>. Default branch: <DEFAULT_BRANCH>. Strict review
 - Rename this worktree's auto-generated branch to match the repo's convention (`git branch -m feature/<SLUG>` or `fix/<SLUG>`, or whatever CLAUDE.md prescribes). Never attempt to check out the default branch from inside the worktree — it is checked out at the hub and git will refuse.
 
 **1. Plan**
-- If a workplan path was provided (<PLAN_PATH>), read it — that plan is authoritative.
+- If a workplan path was provided (<PLAN_PATH>), read it — that plan is authoritative. If it lives outside this worktree (typically an uncommitted file at the hub), copy it to `workplans/<basename>` here first; that copy is what gets committed below.
 - Otherwise write one to `workplans/<SLUG>-plan.md` (create the dir if the repo lacks it; if it exists, match the naming and style of the docs already in it). Spec it to handoff quality: goal, approach, files to touch, ordered steps, test plan, explicitly out of scope.
 - The workplan MUST include an **Assumptions** section: every unverified premise the plan depends on, each marked VERIFIED (with the evidence) or ASSUMED. A claim that something is live/needed/consumed counts as verified only via consumer-side evidence (what reads it) — file existence, file counts, or mtimes never prove liveness.
 - Never resolve a conflict between the task's explicit instruction and an assumption by silently doing MORE than instructed (e.g. preserving or migrating machinery the task said to remove). Either verify the assumption with direct evidence, or follow the literal instruction and record the judgment in Assumptions (it will reach the PR body), or report the single question back to the hub before implementing. Doing less as instructed is reviewable and reversible; silently adding machinery on an assumed premise is how rabbit holes start.
