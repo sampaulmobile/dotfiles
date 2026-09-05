@@ -50,6 +50,9 @@ other case.
   TLS, ...) is missing and claude comes up on the wrong model.
   new_hub_session instead types `claude` into an initialized shell, same as
   Ctrl+F, so claude starts warm in window 1.
+  new_hub_session takes an optional third argument, the agent (`claude` or
+  `codex`) — omit it: hq dispatches to claude, and a codex session has no
+  SendMessage/ListAgents equivalent to be dispatched to.
   Creation only — never kill or mutate existing sessions (tmux-safety rules).
 
 ## 4. Delegate

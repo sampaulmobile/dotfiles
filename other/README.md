@@ -13,8 +13,12 @@ tracked — the real files are gitignored and never leave the machine.
 | `tmux-sessionizer.local` | sourced by `bin/tmux-sessionizer` | override `search_dirs` |
 | `claude/settings.json` | file-symlinked to `~/.claude/settings.json` | Claude Code settings (seeded from the .example) |
 | `claude/skills/`, `claude/rules/`, `claude/agents/` | dir-symlinked to `~/.claude/{skills,rules,agents}` | private Claude skills/rules/agents, plus per-item links to the tracked generic set (see below) |
+| `codex/config.toml` | file-symlinked to `~/.codex/config.toml` | Codex settings, seeded from the .example — codex writes its own `[projects]` trust entries here |
+| `codex/AGENTS.md` | file-symlinked to `~/.codex/AGENTS.md` | Codex global instructions (seeded from the .example); codex has no rules dir, so this is hand-written |
+| `codex/skills/` | dir-symlinked to `~/.agents/skills` | private Codex skills, plus per-item links to the tracked skills named in `dots/codex/shared-skills` |
+| `tmux-agent-default` | read by `bin/tmux-claude-lib` | one line, `claude` or `codex` — the agent new tmux sessions get (missing = claude) |
 
-## Claude config: two layers under one `~/.claude`
+## Agent config: two layers, per agent
 
 `~/.claude/{skills,rules,agents}` point at the dirs here, so anything dropped
 in (by you or by a Claude session) lands in `other/` — private by default.
@@ -31,6 +35,14 @@ tells them apart: links are tracked, real dirs/files are private.
   shows up in `git status` and needs a commit.
 - The links inside `other/` are relative, so the `other.tgz` migration stays
   valid; `setup.sh` recreates them anyway.
+
+Codex works the same way one level over: `~/.agents/skills` points at
+`codex/skills/` here, and the tracked skills listed in
+`dots/codex/shared-skills` are layered in as relative links to the SAME
+files claude uses (`codex/skills/pr -> ../../../dots/claude/skills/pr`).
+`~/.codex/hooks.json` is a plain link to the tracked `dots/codex/hooks.json`
+— it holds no private data, and codex asks you to trust it after every edit
+(see `notes/codex.md`).
 
 To start: `bin/seed_other.sh` copies every missing `<name>.example` to
 `<name>` (never overwrites, logs created vs existing), then edit. `setup.sh`
