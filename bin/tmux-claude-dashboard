@@ -1,13 +1,48 @@
 #!/usr/bin/env bash
 
 # Interactive dashboard for Claude Code tmux sessions.
-# Shows status, token usage, and model for all claude-* sessions.
+# Shows status, token usage, and model — one row per claude PANE (any
+# window of any session), so a second claude launched outside window 1
+# gets its own row (named "session:N") with its own transcript, tokens,
+# and subagent tree.
 # Bound to Ctrl+G via tmux neww.
 
 source ~/dotfiles/bin/tmux-claude-lib
 
 CACHE_DIR="/tmp/claude-dashboard"
-mkdir -p "$CACHE_DIR"
+mkdir -p "$CACHE_DIR/agents"
+
+# context window per model — drives the CTX% column (percent of window
+# used) and the context coloring. Current lineup (per Anthropic docs,
+# 2026-06): 1M for Fable/Mythos, Opus 5/4.6+, Sonnet 5/4.6, and any [1m]
+# beta variant; 200K for Haiku and older Sonnet/Opus. Unknown → 0 (no
+# percent shown; coloring falls back to absolute thresholds).
+context_window_for() {
+    local m="${1#claude-}"
+    case "$m" in
+        *\[1m\]*)                       echo 1000000 ;;
+        fable-*|mythos-*)               echo 1000000 ;;
+        opus-5*|opus-4-[678]*)          echo 1000000 ;;
+        sonnet-5*|sonnet-4-6*)          echo 1000000 ;;
+        haiku-*|sonnet-*|opus-*)        echo 200000 ;;
+        *)                              echo 0 ;;
+    esac
+}
+
+# compact window label for the CONTEXT used/total fraction: 1M, 200k
+format_window() {
+    if (( $1 % 1000000 == 0 )); then
+        printf '%dM' $(( $1 / 1000000 ))
+    else
+        printf '%dk' $(( $1 / 1000 ))
+    fi
+}
+
+# max chars kept from an agent's last assistant text — an upper bound on
+# what the cache stores, NOT the display width: render truncates each
+# snippet to the live terminal width, so this only needs to exceed any
+# realistic pane width (100 visibly cut snippets on wide screens)
+AGENT_SNIPPET_MAXLEN=300
 
 # ── colors ──────────────────────────────────────────────
 
@@ -18,57 +53,105 @@ CYAN=$'\033[36m'
 YELLOW=$'\033[33m'
 RED=$'\033[31m'
 BOLD_RED=$'\033[1;31m'
+GREEN=$'\033[32m'
 DIM_GREEN=$'\033[2;32m'
 DIM_RED=$'\033[2;31m'
 
 # ── helpers ─────────────────────────────────────────────
 
 # reload_sessions
-#   Re-collects the session list from tmux.
-#   Preserves selected cursor by session name (not index), since the list
-#   is sorted by activity time and the order changes between refreshes.
+#   Re-collects the row list from tmux — one row per claude PANE, not per
+#   tmux session (a second claude outside window 1 gets its own row; its
+#   subagent tree was invisible when rows were per-session and pinned to
+#   window 1's transcript). Fills the parallel arrays sessions/panes/names.
+#   Display name: the session name for a window-1 claude (the hub layout's
+#   front door — matches the old per-session rows), "session:N" for a
+#   claude in window N elsewhere.
+#   Preserves selected cursor by pane id (not index), since the list is
+#   sorted by activity time and the order changes between refreshes.
 reload_sessions() {
     local prev=""
-    if (( ${#sessions[@]} > 0 && selected < ${#sessions[@]} )); then
-        prev="${sessions[$selected]}"
+    if (( ${#panes[@]} > 0 && selected < ${#panes[@]} )); then
+        prev="${panes[$selected]}"
     fi
     sessions=()
-    while IFS= read -r s; do
-        sessions+=("$s")
-    done < <(get_claude_sessions)
-    session_count=${#sessions[@]}
+    panes=()
+    names=()
+    local sess pid widx name
+    while IFS=$'\t' read -r sess pid widx; do
+        [[ -z "$pid" ]] && continue
+        sessions+=("$sess")
+        panes+=("$pid")
+        name="$sess"
+        [[ "$widx" != "1" ]] && name="${name}:${widx}"
+        # two claude panes in one window (split): disambiguate by pane id
+        for i in "${!names[@]}"; do
+            [[ "${names[$i]}" == "$name" ]] && name="${name}.${pid#%}" && break
+        done
+        names+=("$name")
+    done < <(get_claude_panes)
+    session_count=${#panes[@]}
     selected=0
     if [[ -n "$prev" ]]; then
-        for i in "${!sessions[@]}"; do
-            [[ "${sessions[$i]}" == "$prev" ]] && selected=$i && break
+        for i in "${!panes[@]}"; do
+            [[ "${panes[$i]}" == "$prev" ]] && selected=$i && break
         done
     fi
     (( selected >= session_count )) && selected=$(( session_count - 1 ))
     (( selected < 0 )) && selected=0
 }
 
-# kill_selected_session
-#   Kills the tmux session at the current selection.
-#   Guards: won't kill own session, won't kill empty target.
-kill_selected_session() {
-    (( session_count == 0 )) && return 1
-    local target="${sessions[$selected]}"
-    [[ -z "$target" ]] && return 1
-    # never kill the session the dashboard is running inside
-    local myself
-    myself=$(tmux display-message -p '#S' 2>/dev/null)
-    [[ "$target" == "$myself" ]] && return 1
-    # exact name match (= prefix prevents tmux prefix-matching)
-    tmux kill-session -t "=${target}" 2>/dev/null
+# session_row_count <tmux-session-name>
+#   How many rows (claude panes) the current row list has for a session —
+#   decides whether killing a row means the pane or the whole session.
+session_row_count() {
+    local sess="$1" n=0 j
+    for j in "${!sessions[@]}"; do
+        [[ "${sessions[$j]}" == "$sess" ]] && (( n++ ))
+    done
+    echo "$n"
 }
 
-get_session_stats() {
+# kill_selected_row
+#   Kills the row at the current selection: the whole tmux session when
+#   this is its only claude row (the old per-session behavior), just this
+#   claude's pane when the session has other claude rows — so killing a
+#   secondary claude never takes down the session's primary one. No silent
+#   failure paths: any refusal/error is reported via kill_error for the
+#   caller to display. Killing the dashboard's own host session is ALLOWED
+#   (the x handler warns first) — with detach-on-destroy off the client
+#   just moves to the last session; this window dies with its host.
+kill_error=""
+kill_selected_row() {
+    kill_error=""
+    (( session_count == 0 )) && { kill_error="no sessions"; return 1; }
+    local sess="${sessions[$selected]}" pane="${panes[$selected]}"
+    [[ -z "$sess" || -z "$pane" ]] && { kill_error="empty target (row/session index mismatch?)"; return 1; }
+    local err
+    if (( $(session_row_count "$sess") > 1 )); then
+        if ! err=$(tmux kill-pane -t "$pane" 2>&1); then
+            kill_error="tmux: ${err:-kill-pane failed}"
+            return 1
+        fi
+    else
+        # exact name match (= prefix prevents tmux prefix-matching)
+        if ! err=$(tmux kill-session -t "=${sess}" 2>&1); then
+            kill_error="tmux: ${err:-kill-session failed}"
+            return 1
+        fi
+    fi
+}
+
+# get_row_stats <row-name> <jsonl-path>
+#   Token/turn/cost stats for one row's transcript. row-name only keys the
+#   totals cache (it's unique per pane, so two claudes in one session can't
+#   share a cache file).
+get_row_stats() {
     local session="$1"
-    local jsonl
-    jsonl=$(find_session_jsonl "$session")
+    local jsonl="$2"
 
     if [[ -z "$jsonl" ]]; then
-        printf '0\t0\t0\tunknown'
+        printf '0\t0\t0\t0\t-\tunknown\t0'
         return
     fi
 
@@ -84,10 +167,52 @@ get_session_stats() {
     local totals_cache="${CACHE_DIR}/${session}.${jsonl_hash}.totals"
     local totals
     totals=$(get_totals_incremental "$jsonl" "$totals_cache")
-    local tout tall
-    IFS=$'\t' read -r tout tall <<< "$totals"
+    local tout tall turns cost
+    IFS=$'\t' read -r tout tall turns cost <<< "$totals"
 
-    printf '%s\t%s\t%s\t%s' "$ctx" "$tout" "$tall" "$mdl"
+    # transcript mtime — render shows it as an age on idle/done/permission
+    local mt
+    mt=$(_agent_file_mtime "$jsonl")
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s' "$ctx" "$tout" "$tall" "${turns:-0}" "${cost:--}" "$mdl" "${mt:-0}"
+}
+
+# get_row_agent_tree <row-name> <jsonl-path>
+#   Prints one line per live subagent under this row's transcript,
+#   tab-separated: agent_id, depth, parent_id, agentType, description,
+#   mtime, started, context, output, turns, model, snippet. Per-agent
+#   stats/snippet use mtime-keyed cache files under CACHE_DIR (keyed by
+#   row-name, unique per pane) so an idle agent's transcript isn't
+#   re-parsed every refresh. Prints nothing if the row has no agents (or
+#   no resolvable transcript) — never errors.
+get_row_agent_tree() {
+    local session="$1"
+    local jsonl="$2"
+    [[ -z "$jsonl" ]] && return
+
+    local proj_dir sid subdir
+    proj_dir=$(dirname "$jsonl")
+    sid=$(basename "$jsonl" .jsonl)
+    subdir="${proj_dir}/${sid}/subagents"
+
+    local aid depth parent atype adesc amtime astarted
+    while IFS=$'\t' read -r aid depth parent atype adesc amtime astarted; do
+        [[ -z "$aid" ]] && continue
+        local agent_jsonl="${subdir}/agent-${aid}.jsonl"
+        local ctx out mdl
+        IFS=$'\t' read -r ctx out mdl < <(get_agent_stats "$agent_jsonl" "${CACHE_DIR}/agents/${session}.${aid}.stats")
+        # OUTPUT: cumulative output tokens (same meaning as session rows) —
+        # get_agent_stats' `out` is only the last turn's; the incremental
+        # totals parse is cheap (new bytes only, offset cached per agent).
+        # Turns come free from the same parse (usually 1; >1 = continued
+        # via SendMessage).
+        local aout_total _all aturns _acost
+        IFS=$'\t' read -r aout_total _all aturns _acost < <(get_totals_incremental "$agent_jsonl" "${CACHE_DIR}/agents/${session}.${aid}.totals" 1)
+        out="$aout_total"
+        local snippet
+        snippet=$(get_agent_snippet "$agent_jsonl" "$AGENT_SNIPPET_MAXLEN" "${CACHE_DIR}/agents/${session}.${aid}.snippet")
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$aid" "$depth" "$parent" "$atype" "$adesc" "$amtime" "$astarted" "$ctx" "$out" "${aturns:-0}" "$mdl" "$snippet"
+    done < <(list_session_agents "$jsonl")
 }
 
 # ── render ──────────────────────────────────────────────
@@ -103,58 +228,105 @@ render() {
     done
 
     local min_name=12
-    local ctx_w=9 out_w=9 all_w=9 mdl_w=12
+    # ctx_w fits the used/total fraction, e.g. "199.9k/200k"
+    local ctx_w=12 out_w=9 all_w=9 mdl_w=12 pct_w=4 turns_w=5 cost_w=7
 
     # row_width computes exact visible chars for a given configuration
-    # row = marker(2) + name_w + status(15) + ctx(9) [+ 1+out] [+ 1+all] [+ 2+mdl]
+    # row = marker(2) + name_w + status(15) + ctx(12) + 1+pct(4)
+    #       [+ 2+mdl] [+ 1+turns] [+ 1+out] [+ 1+all] [+ 1+cost]
     row_width() {
-        local nw=$1 o=$2 t=$3 m=$4
-        local w=$(( 2 + nw + 15 + ctx_w ))
+        local nw=$1 o=$2 t=$3 m=$4 u=$5 c=$6
+        local w=$(( 2 + nw + 15 + ctx_w + 1 + pct_w ))
         (( o )) && w=$(( w + 1 + out_w ))
         (( t )) && w=$(( w + 1 + all_w ))
         (( m )) && w=$(( w + 2 + mdl_w ))
+        (( u )) && w=$(( w + 1 + turns_w ))
+        (( c )) && w=$(( w + 1 + cost_w ))
         echo $w
     }
 
-    # try each layout: prefer full names, drop columns before truncating
-    local show_model=0 show_output=0 show_total=0 name_w=$max_name
-
-    if (( $(row_width $max_name 1 1 1) <= cols )); then
-        show_output=1; show_total=1; show_model=1; name_w=$max_name
-    elif (( $(row_width $max_name 1 1 0) <= cols )); then
-        show_output=1; show_total=1; name_w=$max_name
-    elif (( $(row_width $max_name 1 0 0) <= cols )); then
-        show_output=1; name_w=$max_name
-    elif (( $(row_width $max_name 0 0 0) <= cols )); then
-        name_w=$max_name
-    else
-        # must truncate — try adding columns back with truncated names
-        if (( $(row_width $min_name 1 1 1) <= cols )); then
-            show_output=1; show_total=1; show_model=1
-        elif (( $(row_width $min_name 1 1 0) <= cols )); then
-            show_output=1; show_total=1
-        elif (( $(row_width $min_name 1 0 0) <= cols )); then
-            show_output=1
-        fi
-        # name gets whatever is left
-        name_w=$(( cols - 2 - 15 - ctx_w ))
-        (( show_output )) && name_w=$(( name_w - 1 - out_w ))
-        (( show_total ))  && name_w=$(( name_w - 1 - all_w ))
-        (( show_model ))  && name_w=$(( name_w - 2 - mdl_w ))
+    # try each layout: prefer full names; drop optional columns — in order
+    # TURNS, COST, MODEL, TOTAL, OUTPUT — before truncating names
+    local show_output=1 show_total=1 show_model=1 show_turns=1 show_cost=1
+    local name_w=$max_name _drop
+    for _drop in none turns cost model total output; do
+        case "$_drop" in
+            turns)  show_turns=0 ;;
+            cost)   show_cost=0 ;;
+            model)  show_model=0 ;;
+            total)  show_total=0 ;;
+            output) show_output=0 ;;
+        esac
+        (( $(row_width $max_name $show_output $show_total $show_model $show_turns $show_cost) <= cols )) && break
+    done
+    if (( $(row_width $max_name $show_output $show_total $show_model $show_turns $show_cost) > cols )); then
+        # must truncate names — same drop cascade, judged at min_name; the
+        # name column then gets whatever the surviving columns leave over
+        show_output=1; show_total=1; show_model=1; show_turns=1; show_cost=1
+        for _drop in none turns cost model total output; do
+            case "$_drop" in
+                turns)  show_turns=0 ;;
+                cost)   show_cost=0 ;;
+                model)  show_model=0 ;;
+                total)  show_total=0 ;;
+                output) show_output=0 ;;
+            esac
+            (( $(row_width $min_name $show_output $show_total $show_model $show_turns $show_cost) <= cols )) && break
+        done
+        name_w=$(( cols - $(row_width 0 $show_output $show_total $show_model $show_turns $show_cost) ))
         (( name_w < min_name )) && name_w=$min_name
     fi
 
-    # if there's spare space, add a gap between name and status (up to 3)
-    local spare=$(( cols - $(row_width $name_w $show_output $show_total $show_model) ))
+    local spare=$(( cols - $(row_width $name_w $show_output $show_total $show_model $show_turns $show_cost) ))
+
+    # MODEL gets first claim on spare width (it's cheap and bounded): grow
+    # mdl_w up to the longest model/agent-type actually rendered, so
+    # "general-purpose" doesn't ellipsize on a wide terminal. Expanded trees
+    # only, same rule as the row loop below.
+    if (( show_model && spare > 0 )); then
+        local mdl_need=$mdl_w _i
+        for _i in "${!sessions[@]}"; do
+            (( ${#models[$_i]} > mdl_need )) && mdl_need=${#models[$_i]}
+            local _exp=$agents_forced
+            (( ${agent_working_counts[$_i]:-0} > 0 )) && _exp=1
+            (( _exp )) && [[ -n "${agent_lines[$_i]}" ]] || continue
+            local aid adepth aparent atype _rest
+            while IFS=$'\t' read -r aid adepth aparent atype _rest; do
+                [[ -z "$aid" ]] && continue
+                (( ${#atype} > mdl_need )) && mdl_need=${#atype}
+            done <<< "${agent_lines[$_i]}"
+        done
+        (( mdl_need > 24 )) && mdl_need=24
+        local growm=$(( mdl_need - mdl_w ))
+        (( growm > spare )) && growm=$spare
+        if (( growm > 0 )); then
+            mdl_w=$(( mdl_w + growm ))
+            spare=$(( spare - growm ))
+        fi
+    fi
+
+    # SESSION is the flexible column: all remaining spare (minus a 1-col
+    # right margin, so a full row can never trip terminal autowrap) goes to
+    # the name column — SESSION left-aligned with the whole middle of the
+    # screen to spend, STATUS through MODEL pinned to the right edge.
+    if (( spare > 1 )); then
+        name_w=$(( name_w + spare - 1 ))
+        spare=1
+    fi
     local name_gap=0
-    (( spare > 0 )) && name_gap=$spare
-    (( name_gap > 3 )) && name_gap=3
+
+    # full rendered row width — snippet lines truncate here, matching the
+    # table's right edge
+    local table_w=$(( $(row_width $name_w $show_output $show_total $show_model $show_turns $show_cost) + name_gap ))
+    (( table_w > cols - 1 )) && table_w=$(( cols - 1 ))
 
     local out=""
+    local now
+    now=$(date +%s)
 
     # header
-    local rhs="[⏎ · x · X · r · q]"
-    (( cols >= 80 )) && rhs="[⏎ switch · x kill · X prune · r refresh · q quit]"
+    local rhs="[⏎ · x · X · a · r · q]"
+    (( cols >= 80 )) && rhs="[⏎ switch · x kill · X prune · a agents · r refresh · q quit]"
     local title="  Claude Sessions"
     local pad=$(( cols - ${#title} - ${#rhs} ))
     (( pad < 1 )) && pad=1
@@ -164,17 +336,28 @@ render() {
     # column headers
     local hdr
     local hdr_name_w=$(( name_w + name_gap ))
-    hdr=$(printf "%-${hdr_name_w}s %-13s %${ctx_w}s" "SESSION" "STATUS" "CONTEXT")
+    hdr=$(printf "%-${hdr_name_w}s %-13s " "SESSION" "STATUS")
+    (( show_model ))  && hdr+=$(printf "%-${mdl_w}s  " "MODEL")
+    hdr+=$(printf "%${ctx_w}s %${pct_w}s" "CONTEXT" "CTX%")
+    (( show_turns ))  && hdr+=$(printf " %${turns_w}s" "TURNS")
     (( show_output )) && hdr+=$(printf " %${out_w}s" "OUTPUT")
     (( show_total ))  && hdr+=$(printf " %${all_w}s" "TOTAL")
-    (( show_model ))  && hdr+=$(printf "  %-${mdl_w}s" "MODEL")
+    (( show_cost ))   && hdr+=$(printf " %${cost_w}s" "COST")
     out+="  ${DIM}${hdr}${RST}"$'\n'
 
     # rows
     for i in "${!sessions[@]}"; do
+        local working_agents="${agent_working_counts[$i]:-0}"
+
+        # live-agent badge eats into the name's own width budget
+        local badge=""
+        (( working_agents > 0 )) && badge=" +${working_agents}"
+        local avail_name_w=$(( name_w - ${#badge} ))
+        (( avail_name_w < 1 )) && avail_name_w=1
+
         local name="${names[$i]}"
-        if (( ${#name} > name_w )); then
-            name="${name:0:$(( name_w - 1 ))}…"
+        if (( ${#name} > avail_name_w )); then
+            name="${name:0:$(( avail_name_w - 1 ))}…"
         fi
 
         local st="${statuses[$i]}"
@@ -183,48 +366,261 @@ render() {
         local all_tok="${total_alls[$i]}"
         local mdl="${models[$i]}"
 
-        # marker + name
+        # marker + name (+ badge, if this session has working agents)
         if (( i == selected )); then
             out+="${CYAN}▸ ${RST}${BOLD}"
         else
             out+="  "
         fi
-        out+="${name}$(printf '%*s' "$(( name_w - ${#name} + name_gap ))" '')"
+        out+="${name}"
+        (( working_agents > 0 )) && out+="${CYAN}${badge}${RST}"
+        out+="$(printf '%*s' "$(( name_w - ${#name} - ${#badge} + name_gap ))" '')"
         (( i == selected )) && out+="${RST}"
 
-        # status — padded to exactly 15 visible columns
-        # ⏳ is Wide (2 cols), ⚙ and ● are Narrow (1 col)
-        case "$st" in
-            working)    out+="${YELLOW}⚙ working${RST}      " ;;
-            idle)       out+="${DIM_GREEN}● idle${RST}         " ;;
-            permission) out+="${BOLD_RED}⏳ permission${RST}  " ;;
-            gone)       out+="${DIM_RED}✗ gone${RST}         " ;;
-            loading)    out+="${DIM}… loading${RST}     " ;;
-            *)          out+="${DIM}? unknown${RST}      " ;;
-        esac
+        # an idle row with an attention done-flag (finished but unseen —
+        # the statusbar's ✅ and C-y's jump target) shows as "done" here so
+        # the dashboard reveals WHICH claude the bar's ✅ belongs to. Flags
+        # are per pane ("<session>@<pane>.done"), matching rows exactly.
+        if [[ "$st" == "idle" && -e "$HOME/.cache/claude-attention/${sessions[$i]}@${panes[$i]#%}.done" ]]; then
+            st="done"
+        fi
 
-        # context column — color coded by size
+        # status — padded to exactly 15 visible columns. idle/done get an
+        # age suffix (time since the transcript's last write); permission
+        # too — claude stops writing when it prompts, so the mtime is a
+        # good proxy for how long it's been stuck (label shortened to
+        # "perm" so icon+label+age fit 15). working stays bare — its
+        # transcript writes constantly, so age would read ~0s.
+        # st_iconw: extra display column for Wide glyphs (✅ ⏳ are 2 cols
+        # wide but count as 1 char; ⚙ ● ✗ … are Narrow).
+        local sage=""
+        if [[ "$st" == "idle" || "$st" == "done" || "$st" == "permission" ]] \
+            && [[ "${mtimes[$i]:-0}" =~ ^[0-9]+$ ]] && (( ${mtimes[$i]:-0} > 0 )); then
+            sage=" $(format_age $(( now - mtimes[i] )))"
+        fi
+        local st_color st_text st_iconw=1
+        case "$st" in
+            working)    st_color="$YELLOW";     st_text="⚙ working" ;;
+            idle)       st_color="$DIM_GREEN";  st_text="● idle${sage}" ;;
+            done)       st_color="$GREEN";      st_text="✅ done${sage}"; st_iconw=2 ;;
+            permission) if [[ -n "$sage" ]]; then
+                            st_color="$BOLD_RED"; st_text="⏳ perm${sage}"; st_iconw=2
+                        else
+                            st_color="$BOLD_RED"; st_text="⏳ permission";  st_iconw=2
+                        fi ;;
+            gone)       st_color="$DIM_RED";    st_text="✗ gone" ;;
+            loading)    st_color="$DIM";        st_text="… loading" ;;
+            *)          st_color="$DIM";        st_text="? unknown" ;;
+        esac
+        local st_padn=$(( 15 - ${#st_text} - (st_iconw - 1) ))
+        (( st_padn < 1 )) && st_padn=1
+        out+="${st_color}${st_text}${RST}$(printf '%*s' "$st_padn" '')"
+
+        # model — left-aligned right after status
+        if (( show_model )); then
+            local mdl_field="$mdl"
+            if (( ${#mdl_field} > mdl_w )); then
+                (( mdl_w > 1 )) && mdl_field="${mdl_field:0:$(( mdl_w - 1 ))}…" || mdl_field="…"
+            fi
+            out+="${DIM}$(printf "%-${mdl_w}s" "$mdl_field")${RST}  "
+        fi
+
+        # context column — colored by percent of the model's window when the
+        # window is known, else the old absolute thresholds
         local ctx_raw="$ctx"
         local ctx_fmt
         ctx_fmt=$(format_tokens "$ctx_raw")
+        local win pct=-1 pct_fmt="-"
+        win=$(context_window_for "$mdl")
+        if (( win > 0 )); then
+            pct=$(( ctx_raw * 100 / win ))
+            pct_fmt="${pct}%"
+            ctx_fmt="${ctx_fmt}/$(format_window "$win")"
+        fi
         local ctx_color=""
-        if (( ctx_raw >= 600000 )); then
+        if (( pct >= 90 || (pct < 0 && ctx_raw >= 600000) )); then
             ctx_color="${BOLD_RED}"
-        elif (( ctx_raw >= 300000 )); then
+        elif (( pct >= 70 || (pct < 0 && ctx_raw >= 300000) )); then
             ctx_color="${RED}"
-        elif (( ctx_raw >= 100000 )); then
+        elif (( pct >= 50 || (pct < 0 && ctx_raw >= 100000) )); then
             ctx_color="${YELLOW}"
         fi
 
-        out+="${ctx_color}$(printf "%${ctx_w}s" "$ctx_fmt")${RST}"
+        out+="${ctx_color}$(printf "%${ctx_w}s %${pct_w}s" "$ctx_fmt" "$pct_fmt")${RST}"
+        (( show_turns ))  && out+="$(printf " %${turns_w}s" "${turns_counts[$i]:-0}")"
         (( show_output )) && out+="$(printf " %${out_w}s" "$out_tok")"
         (( show_total ))  && out+="$(printf " %${all_w}s" "$all_tok")"
-        (( show_model ))  && out+="  ${DIM}${mdl}${RST}"
+        # COST: "$1.23" = exact (claude's own cost-state snapshot),
+        # "~$1.23" = price-sheet estimate, "-" = neither available
+        if (( show_cost )); then
+            local cost_raw="${costs[$i]:--}" cost_fmt="-"
+            if [[ "$cost_raw" == "~"* ]]; then
+                cost_fmt="~$(printf '$%.2f' "${cost_raw#\~}")"
+            elif [[ "$cost_raw" != "-" ]]; then
+                cost_fmt=$(printf '$%.2f' "$cost_raw")
+            fi
+            out+="$(printf " %${cost_w}s" "$cost_fmt")"
+        fi
         out+=$'\n'
+
+        # agent tree — auto-expand sessions with a working agent; 'a' forces
+        # every session's tree open (including idle-only agents)
+        local expand=0
+        (( agents_forced )) && expand=1
+        (( working_agents > 0 )) && expand=1
+        if (( expand )) && [[ -n "${agent_lines[$i]}" ]]; then
+            local aid adepth aparent atype adesc amtime astarted actx aout aturns amdl asnip
+            while IFS=$'\t' read -r aid adepth aparent atype adesc amtime astarted actx aout aturns amdl asnip; do
+                [[ -z "$aid" ]] && continue
+                # Defense in depth for B3: ${#row_plain} below counts a tab
+                # as 1 char, but the terminal expands it to the next
+                # 8-column stop — neutralize any tab that reaches these
+                # fields (from any source) before it can break the width
+                # math that keeps rows from wrapping/misaligning.
+                adesc="${adesc//$'\t'/ }"
+                atype="${atype//$'\t'/ }"
+                asnip="${asnip//$'\t'/ }"
+                # recency (since last transcript write) decides live vs idle;
+                # the DISPLAYED age differs by state: a working agent shows
+                # time since spawn (meta mtime — recency would reset to ~0s
+                # on every write, so long-running agents all read "working
+                # 2s"), an idle one shows time since it last wrote.
+                local arecency=$(( now - amtime ))
+                [[ "$astarted" =~ ^[0-9]+$ ]] || astarted="$amtime"
+                local aworking=0
+                local amarker="◯" amarker_color="${DIM}"
+                local aage=$arecency
+                if (( arecency <= LIVE_AGENT_SECS )); then
+                    amarker="●"
+                    amarker_color="${YELLOW}"
+                    aworking=1
+                    aage=$(( now - astarted ))
+                    (( aage < 0 )) && aage=0
+                fi
+                local aage_str
+                aage_str=$(format_age "$aage")
+
+                local aindent
+                aindent=$(printf '%*s' $(( 2 * adepth )) '')
+
+                # ── SESSION column: tree marker + description, aligned to
+                # the same hdr_name_w field the session name column uses.
+                # Whole-string truncation (rather than truncating only the
+                # description) guarantees this field never exceeds
+                # hdr_name_w even in a pathological deep-nesting-vs-narrow-
+                # terminal case, which keeps every column after it aligned
+                # with the header no matter what.
+                local sess_prefix="${aindent}└ "
+                local sess_full="${sess_prefix}${amarker} ${adesc}"
+                local sess_plain sess_colored
+                if (( ${#sess_full} <= hdr_name_w )); then
+                    sess_plain="$sess_full"
+                    sess_colored="${sess_prefix}${amarker_color}${amarker}${RST} ${adesc}"
+                elif (( hdr_name_w > ${#sess_prefix} + 2 )); then
+                    local dbudget=$(( hdr_name_w - ${#sess_prefix} - 2 ))
+                    local dtrunc="$adesc"
+                    if (( ${#dtrunc} > dbudget )); then
+                        (( dbudget > 1 )) && dtrunc="${dtrunc:0:$(( dbudget - 1 ))}…" || dtrunc="…"
+                    fi
+                    sess_plain="${sess_prefix}${amarker} ${dtrunc}"
+                    sess_colored="${sess_prefix}${amarker_color}${amarker}${RST} ${dtrunc}"
+                else
+                    # extreme case: not even room for indent+marker+1 char —
+                    # hard-truncate the whole field, drop color rather than
+                    # risk cutting mid-escape-sequence.
+                    local hbudget=$(( hdr_name_w > 1 ? hdr_name_w - 1 : 1 ))
+                    sess_plain="${sess_full:0:$hbudget}…"
+                    sess_colored="$sess_plain"
+                fi
+                local sess_pad=$(( hdr_name_w - ${#sess_plain} ))
+                (( sess_pad < 0 )) && sess_pad=0
+
+                # ── STATUS column: working/idle styled like session status,
+                # age appended — fixed 15-visible-col field, same as session
+                # rows.
+                local st_label st_color
+                if (( aworking )); then
+                    st_label="working ${aage_str}"
+                    st_color="${YELLOW}"
+                else
+                    st_label="idle ${aage_str}"
+                    st_color="${DIM_GREEN}"
+                fi
+                (( ${#st_label} > 15 )) && st_label="${st_label:0:15}"
+                local st_pad=$(( 15 - ${#st_label} ))
+                (( st_pad < 0 )) && st_pad=0
+
+                # ── CONTEXT / OUTPUT / TOTAL / MODEL — same field widths
+                # and same show_output/show_total/show_model gating the
+                # session row already computed for this render, so agent
+                # rows drop columns at identical breakpoints.
+                local actx_fmt aout_fmt
+                actx_fmt=$(format_tokens "${actx:-0}")
+                aout_fmt=$(format_tokens "${aout:-0}")
+
+                local row=""
+                row+="  ${sess_colored}$(printf '%*s' "$sess_pad" '')"
+                row+="${st_color}${st_label}${RST}$(printf '%*s' "$st_pad" '')"
+                if (( show_model )); then
+                    local amdl_field="$atype"
+                    if (( ${#amdl_field} > mdl_w )); then
+                        (( mdl_w > 1 )) && amdl_field="${amdl_field:0:$(( mdl_w - 1 ))}…" || amdl_field="…"
+                    fi
+                    row+="${DIM}$(printf "%-${mdl_w}s" "$amdl_field")${RST}  "
+                fi
+                # percent of window from the agent's real model (amdl) — the
+                # MODEL column shows the agentType, but the transcript's
+                # model id is what sizes the window
+                local awin apct=-1 apct_fmt="-" apct_color=""
+                awin=$(context_window_for "$amdl")
+                if (( awin > 0 )) && [[ "${actx:-0}" =~ ^[0-9]+$ ]]; then
+                    apct=$(( ${actx:-0} * 100 / awin ))
+                    apct_fmt="${apct}%"
+                    actx_fmt="${actx_fmt}/$(format_window "$awin")"
+                fi
+                if (( apct >= 90 )); then apct_color="${BOLD_RED}"
+                elif (( apct >= 70 )); then apct_color="${RED}"
+                elif (( apct >= 50 )); then apct_color="${YELLOW}"
+                fi
+                row+="$(printf "%${ctx_w}s" "$actx_fmt")"
+                row+=" ${apct_color}$(printf "%${pct_w}s" "$apct_fmt")${RST}"
+                (( show_turns ))  && row+="$(printf " %${turns_w}s" "${aturns:-0}")"
+                (( show_output )) && row+="$(printf " %${out_w}s" "$aout_fmt")"
+                (( show_total ))  && row+="$(printf " %${all_w}s" "-")"
+                (( show_cost ))   && row+="$(printf " %${cost_w}s" "-")"
+                out+="${row}"$'\n'
+
+                # ── activity snippet — own dim full-width line beneath the
+                # row, indented past the tree marker to the description's
+                # start column; working agents only.
+                if (( aworking )) && [[ -n "$asnip" ]]; then
+                    local snip_indent
+                    snip_indent=$(printf '%*s' $(( 2 + ${#sess_prefix} + 2 )) '')
+                    local snip_plain="${snip_indent}\"${asnip}\""
+                    if (( ${#snip_plain} > table_w )); then
+                        local sbudget=$(( table_w - ${#snip_indent} - 2 ))
+                        (( sbudget < 1 )) && sbudget=1
+                        local strunc="$asnip"
+                        if (( ${#strunc} > sbudget )); then
+                            (( sbudget > 1 )) && strunc="${strunc:0:$(( sbudget - 1 ))}…" || strunc="…"
+                        fi
+                        snip_plain="${snip_indent}\"${strunc}\""
+                    fi
+                    out+="${DIM}${snip_plain}${RST}"$'\n'
+                fi
+            done <<< "${agent_lines[$i]}"
+        fi
     done
 
     out+=$'\n'
-    out+="${DIM}  j/k navigate · ⏎ switch · x kill · X prune · r refresh · R hard · q quit${RST}"
+    # Responsive like the header rhs above: the round-1 "a agents" addition
+    # made this 85 chars, wider than an 80-col terminal (was 74 before),
+    # wrapping onto the next line and garbling the display — a real
+    # regression caught during round-2 smoke testing, not in the original
+    # findings list. Drop the added text at narrow widths instead.
+    local footer="  j/k navigate · ⏎ switch · x kill · X prune · r refresh · R hard · q quit"
+    (( cols >= 85 )) && footer="  j/k navigate · ⏎ switch · x kill · X prune · a agents · r refresh · R hard · q quit"
+    out+="${DIM}${footer}${RST}"
 
     printf '\033[H\033[2J%s' "$out"
 }
@@ -232,21 +628,31 @@ render() {
 # ── data collection ─────────────────────────────────────
 
 load_data() {
-    names=()
     statuses=()
     contexts=()
     outputs=()
     total_alls=()
+    turns_counts=()
+    costs=()
     models=()
+    mtimes=()
+    agent_lines=()
+    agent_working_counts=()
+    agent_total_counts=()
 
-    # show names immediately with placeholders
+    # show names (computed by reload_sessions) immediately with placeholders
     for sess in "${sessions[@]}"; do
-        names+=("${sess#claude-}")
         statuses+=("loading")
         contexts+=("0")
         outputs+=("—")
         total_alls+=("—")
+        turns_counts+=("0")
+        costs+=("-")
         models+=("")
+        mtimes+=("0")
+        agent_lines+=("")
+        agent_working_counts+=("0")
+        agent_total_counts+=("0")
     done
     render
 
@@ -259,29 +665,49 @@ load_data() {
 
     for i in "${!sessions[@]}"; do
         (
-            sess="${sessions[$i]}"
-            cwd=$(get_pane_cwd "$sess")
+            pid="${panes[$i]}"
+            cwd=$(tmux display-message -p -t "$pid" '#{pane_current_path}' 2>/dev/null)
             cwd_ok=1
             [[ -n "$cwd" && ! -d "$cwd" ]] && cwd_ok=0
-            st=$(get_session_status "$sess")
-            stats=$(get_session_stats "$sess")
+            st=$(get_pane_status "$pid")
+            jsonl=$(find_pane_jsonl "$pid")
+            stats=$(get_row_stats "${names[$i]}" "$jsonl")
             printf '%s\t%s\t%s' "$cwd_ok" "$st" "$stats" > "${parallel_dir}/${i}"
+            get_row_agent_tree "${names[$i]}" "$jsonl" > "${parallel_dir}/${i}.agents"
         ) &
     done
     wait
 
     # read results and populate arrays
+    local now
+    now=$(date +%s)
     for i in "${!sessions[@]}"; do
         local result_file="${parallel_dir}/${i}"
         if [[ -f "$result_file" ]]; then
-            local cwd_ok st ctx tout tall mdl
-            IFS=$'\t' read -r cwd_ok st ctx tout tall mdl < "$result_file"
+            local cwd_ok st ctx tout tall turns cost mdl mt
+            IFS=$'\t' read -r cwd_ok st ctx tout tall turns cost mdl mt < "$result_file"
             [[ "$cwd_ok" == "0" ]] && st="gone"
             statuses[$i]="$st"
             contexts[$i]="$ctx"
             outputs[$i]=$(format_tokens "$tout")
             total_alls[$i]=$(format_tokens "$tall")
+            turns_counts[$i]="${turns:-0}"
+            costs[$i]="${cost:--}"
             models[$i]=$(short_model "$mdl")
+            mtimes[$i]="${mt:-0}"
+        fi
+
+        local agents_file="${parallel_dir}/${i}.agents"
+        if [[ -s "$agents_file" ]]; then
+            agent_lines[$i]=$(<"$agents_file")
+            local total=0 working=0 amtime
+            while IFS=$'\t' read -r _ _ _ _ _ amtime _ _ _ _; do
+                [[ -z "$amtime" ]] && continue
+                (( total++ ))
+                (( now - amtime <= LIVE_AGENT_SECS )) && (( working++ ))
+            done < "$agents_file"
+            agent_total_counts[$i]="$total"
+            agent_working_counts[$i]="$working"
         fi
     done
 
@@ -296,12 +722,17 @@ trap 'tput cnorm 2>/dev/null; rm -f "$_CWD_MAP_FILE" 2>/dev/null' EXIT
 
 selected=0
 sessions=()
+panes=()
 names=()
 statuses=()
 contexts=()
 outputs=()
 total_alls=()
 models=()
+agent_lines=()
+agent_working_counts=()
+agent_total_counts=()
+agents_forced=0
 
 # initial load
 reload_sessions
@@ -340,47 +771,79 @@ while true; do
             (( selected < 0 )) && selected=0
             render
             ;;
+        a)
+            # toggle forcing every session's agent tree open (sessions with
+            # a working agent auto-expand regardless of this toggle)
+            (( agents_forced = !agents_forced ))
+            render
+            ;;
         r)
             # soft refresh: re-collect sessions, use cached totals
             reload_sessions
             load_data
             ;;
         x)
-            # kill selected session (confirm if live)
+            # kill selected row (confirm if live): the whole session when
+            # it's the session's only claude row, just this pane otherwise
             if (( session_count > 0 )); then
                 _do_kill=0
-                if [[ "${statuses[$selected]}" == "gone" ]]; then
+                _kill_what="session"
+                (( $(session_row_count "${sessions[$selected]}") > 1 )) && _kill_what="pane"
+                _myself=$(tmux display-message -p '#S' 2>/dev/null)
+                _selfwarn=""
+                [[ "$_kill_what" == "session" && "${sessions[$selected]}" == "$_myself" ]] && _selfwarn=" ${RED}— hosts THIS dashboard, it will close too${RST}${YELLOW}"
+                if [[ "${statuses[$selected]}" == "gone" && -z "$_selfwarn" ]]; then
                     _do_kill=1
                 else
-                    # confirm before killing a live session
+                    # confirm before killing a live (or self-hosting) target
                     tput cnorm 2>/dev/null
                     printf '\033[%d;3H' $(( session_count + 6 ))
-                    printf "${YELLOW}Kill live session ${names[$selected]}? [y/N]${RST} "
+                    printf "${YELLOW}Kill ${_kill_what} ${names[$selected]}${_selfwarn}? [y/N]${RST} "
                     _confirm=""
                     read -rsn1 _confirm
                     tput civis 2>/dev/null
                     [[ "$_confirm" == "y" || "$_confirm" == "Y" ]] && _do_kill=1
                 fi
                 if (( _do_kill )); then
-                    kill_selected_session && reload_sessions
-                    if (( session_count == 0 )); then
-                        printf '\033[H\033[2J'
-                        printf "${DIM}  No claude sessions running.${RST}\n"
+                    if kill_selected_row; then
+                        reload_sessions
+                        if (( session_count == 0 )); then
+                            printf '\033[H\033[2J'
+                            printf "${DIM}  No claude sessions running.${RST}\n"
+                            read -rsn1
+                            exit 0
+                        fi
+                        load_data
+                    else
+                        # no silent failures: show why, wait for ack
+                        printf '\033[%d;3H' $(( session_count + 6 ))
+                        printf "${RED}kill failed: %s${RST} (any key) " "$kill_error"
                         read -rsn1
-                        exit 0
+                        render
                     fi
-                    load_data
                 else
                     render
                 fi
             fi
             ;;
         X)
-            # kill all gone sessions
+            # prune all gone rows: kill the session when EVERY claude row
+            # of that session is gone; kill just the gone pane when the
+            # session still has live claude rows (never take those down)
             _killed=0
             for i in "${!sessions[@]}"; do
-                if [[ "${statuses[$i]}" == "gone" ]]; then
+                [[ "${statuses[$i]}" == "gone" ]] || continue
+                _all_gone=1
+                for j in "${!sessions[@]}"; do
+                    if [[ "${sessions[$j]}" == "${sessions[$i]}" && "${statuses[$j]}" != "gone" ]]; then
+                        _all_gone=0
+                        break
+                    fi
+                done
+                if (( _all_gone )); then
                     tmux kill-session -t "=${sessions[$i]}" 2>/dev/null && (( _killed++ ))
+                else
+                    tmux kill-pane -t "${panes[$i]}" 2>/dev/null && (( _killed++ ))
                 fi
             done
             if (( _killed > 0 )); then
@@ -395,17 +858,23 @@ while true; do
             fi
             ;;
         R)
-            # hard refresh: re-collect sessions, clear totals cache
+            # hard refresh: re-collect sessions, clear totals + agent caches
             reload_sessions
             rm -f "${CACHE_DIR}"/*.totals 2>/dev/null
+            rm -f "${CACHE_DIR}/agents/"* 2>/dev/null
             load_data
             ;;
         ""|Enter)
-            # switch to selected session
+            # switch to the selected row's exact pane (a pane id resolves
+            # to its window for select-window, so this lands on the right
+            # window even if indices shifted since the list was built)
             if (( session_count > 0 )); then
                 _target="${sessions[$selected]}"
+                _pane="${panes[$selected]}"
                 if [[ -n "$_target" ]]; then
-                    tmux switch-client -t "=${_target}:1"
+                    tmux switch-client -t "=${_target}"
+                    [[ -n "$_pane" ]] && tmux select-window -t "$_pane" 2>/dev/null \
+                        && tmux select-pane -t "$_pane" 2>/dev/null
                     exit 0
                 fi
             fi

@@ -4,7 +4,7 @@
 #   1. `git clone https://github.com/sampaulmobile/dotfiles.git ~/dotfiles`
 #      (macOS prompts to install the Xcode Command Line Tools on first git use)
 #   2. `cd ~/dotfiles && ./setup.sh`
-#   3. work machines: `./setup_other.sh` afterwards
+#   3. machines needing the supplemental Brewfile: `./setup_other.sh` afterwards
 # The xcode-select call below no-ops if the CLT are already installed.
 
 # get dotfiles dir
@@ -48,13 +48,10 @@ echo "Installing claude code"
 npm install -g @anthropic-ai/claude-code
 
 # seed machine-local config from templates (real files are gitignored).
-# Must run before symlinking — symlink_files.sh links claude config out of
-# other/, which this creates on a fresh machine.
+# symlink_files.sh runs this too, but do it explicitly here so the output
+# shows up in the setup log.
 echo "Seeding other/ machine-local config"
-for example in $DOTFILES/other/*.example $DOTFILES/other/claude/*.example; do
-    target="${example%.example}"
-    [[ -f "$target" ]] || cp -v "$example" "$target"
-done
+$DOTFILES/bin/seed_other.sh
 
 echo "Symlinking dotfiles"
 $DOTFILES/bin/symlink_files.sh
@@ -86,6 +83,7 @@ echo "    Access (Privacy & Security), relaunch it, re-run bin/macos_defaults.sh
 echo "  - gh auth login"
 echo "  - bin/setup_github_ssh_key.sh (per-machine SSH key for github)"
 echo "  - claude (first run: log in)"
+echo "  - bin/hq-init (optional: scaffold ~/dev/hq for the /hq dispatcher)"
 echo "  - sign in to 1Password"
 echo "  - launch Docker.app once to finish its install"
-echo "  - work machines: ./setup_other.sh"
+echo "  - supplemental Brewfile (etc/Brewfile_other): ./setup_other.sh"

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Seed a .worktreeinclude at the current repo's root.
+# Claude Code copies gitignored files matching these patterns into every
+# worktree it creates (--worktree sessions and worktree-isolated subagents).
+# Keep the list to small config/secret files — never caches like .venv or
+# node_modules, since every worktree spawn pays the copy.
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+target="$root/.worktreeinclude"
+
+if [[ -e "$target" && "${1:-}" != "--force" ]]; then
+  echo "exists: $target (use --force to overwrite)" >&2
+  exit 1
+fi
+
+cat > "$target" <<'EOF'
+.env
+.env.*
+.envrc
+CLAUDE.local.md
+.claude/settings.local.json
+EOF
+
+echo "wrote $target:"
+sed 's/^/  /' "$target"
+echo "commit it, or keep it local-only via: echo .worktreeinclude >> $root/.git/info/exclude"

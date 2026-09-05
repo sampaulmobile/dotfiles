@@ -1,5 +1,6 @@
 {
   "permissions": {
+    "defaultMode": "auto",
     "allow": [
       "Bash(grep:*)",
       "Bash(rg:*)",
@@ -74,6 +75,13 @@
       "WebSearch"
     ]
   },
+  "crossSessionInbound": "accept",
+  "statusLine": {
+    "type": "command",
+    "command": "~/dotfiles/bin/claude-statusline",
+    "padding": 0,
+    "refreshInterval": 2
+  },
   "hooks": {
     "Notification": [
       {
@@ -86,10 +94,22 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/dotfiles/bin/tmux-claude-attention flag-done",
+            "async": true
+          }
+        ]
+      }
     ]
   },
   "alwaysThinkingEnabled": true,
-  "effortLevel": "xhigh",
+  "effortLevel": "high",
   "voice": {
     "enabled": true,
     "mode": "hold"
@@ -97,5 +117,8 @@
   "skipWorkflowUsageWarning": true,
   "remoteControlAtStartup": true,
   "agentPushNotifEnabled": true,
-  "voiceEnabled": true
+  "voiceEnabled": true,
+  "env": {
+    "DISABLE_AUTOUPDATER": "1"
+  }
 }

@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# Claude Code status line — wired via "statusLine" in ~/.claude/settings.json.
+# Receives session JSON on stdin; prints one ANSI-colored line.
+# Layout: {repo⌂worktree · branch · PR}  <-- left | right -->  {model·effort · ctx · quota}
+# PR and quota segments are self-hiding (fields absent on hub-on-master / API-billed setups).
+# Docs: https://code.claude.com/docs/en/statusline.md
+set -euo pipefail
+
+input=$(cat)
+
+# \x1f (unit separator) as IFS: unlike tab, it doesn't collapse across empty fields
+IFS=$'\x1f' read -r model_id model_name effort pct size cwd repo wt pr_num pr_state pr_url rl5 rl7 < <(
+  jq -r '[
+    (.model.id // ""),
+    (.model.display_name // "?"),
+    (.effort.level // ""),
+    (.context_window.used_percentage // 0 | floor),
+    (.context_window.context_window_size // 0),
+    (.cwd // ""),
+    (.workspace.repo.name // ""),
+    (.worktree.name // ""),
+    (.pr.number // ""),
+    (.pr.review_state // ""),
+    (.pr.url // ""),
+    (.rate_limits.five_hour.used_percentage // -1 | floor),
+    (.rate_limits.seven_day.used_percentage // -1 | floor)
+  ] | map(tostring) | join("\u001f")' <<<"$input"
+)
+
+RST=$'\033[0m'; DIM=$'\033[2m'
+case "$model_id" in
+  *fable*|*mythos*) MC=$'\033[91m' ;; # red
+  *opus*)           MC=$'\033[95m' ;; # magenta
+  *sonnet*)         MC=$'\033[94m' ;; # blue
+  *haiku*)          MC=$'\033[92m' ;; # green
+  *)                MC=$'\033[97m' ;;
+esac
+
+if   (( pct >= 90 )); then CTXC=$'\033[91m'
+elif (( pct >= 70 )); then CTXC=$'\033[93m'
+else                       CTXC=$'\033[92m'; fi
+
+# ---- left block: where am I ----
+left="${repo:-$(basename "${cwd:-/}")}"
+[[ -n $wt ]] && left+="${DIM}⌂${wt}${RST}"
+branch=$(git -C "$cwd" branch --show-current 2>/dev/null || true)
+[[ -n $branch ]] && left+=" ${DIM}·${RST} ⎇ ${branch}"
+
+if [[ -n $pr_num ]]; then
+  case "$pr_state" in
+    approved)          PRC=$'\033[92m' ;;
+    changes_requested) PRC=$'\033[91m' ;;
+    pending)           PRC=$'\033[93m' ;;
+    *)                 PRC=$DIM ;;
+  esac
+  pr_txt="${PRC}PR#${pr_num}${pr_state:+ ${pr_state}}${RST}"
+  # OSC 8 hyperlink: clickable in terminals that support it (tmux needs the
+  # "hyperlinks" terminal-feature); zero visible width, stripped by strip()
+  [[ -n $pr_url ]] && pr_txt=$'\033]8;;'"${pr_url}"$'\033\\'"${pr_txt}"$'\033]8;;\033\\'
+  left+=" ${DIM}·${RST} ${pr_txt}"
+fi
+
+# ---- right block: what's running ----
+# window size as a model suffix, matching settings syntax: Fable 5[1M]
+if   (( size >= 1000000 )); then win="[$((size / 1000000))M]"
+elif (( size >= 1000 ));    then win="[$((size / 1000))k]"
+else                             win=""; fi
+right="${MC}⬢ ${model_name}${RST}${DIM}${win}${RST}"
+[[ -n $effort ]] && right+="${DIM}·${effort}${RST}"
+right+=" ${DIM}·${RST} ${CTXC}ctx ${pct}%${RST}"
+
+# subscription window burn: 5h when reported; 7d only once it's material
+if (( rl5 >= 0 )); then
+  if   (( rl5 >= 90 )); then RLC=$'\033[91m'
+  elif (( rl5 >= 70 )); then RLC=$'\033[93m'
+  else                       RLC=$DIM; fi
+  right+=" ${DIM}·${RST} ${RLC}5h ${rl5}%${RST}"
+  (( rl7 >= 70 )) && right+=" "$'\033[91m'"7d ${rl7}%${RST}"
+fi
+
+# ---- pad left/right to terminal width (ANSI codes take no visual width) ----
+# margin: the harness's row overhead — it indents the line ~2 cols, truncates
+# before the true edge, and ⬢/⎇/⌂ may render 2 cols in some fonts while bash
+# counts 1. Empirically 6 on Ghostty/tmux (2 showed a truncation ellipsis).
+# The right block lands at a consistent inset; true flush-right isn't knowable.
+strip() { sed $'s/\033]8;;[^\033]*\033\\\\//g; s/\033\[[0-9;]*m//g' <<<"$1"; }
+# live width: COLUMNS can be stale after a resize (resize is not a statusline
+# refresh trigger), so ask tmux for the pane's current width when available
+if [[ -n ${TMUX_PANE:-} ]] && w=$(tmux display -pt "$TMUX_PANE" '#{pane_width}' 2>/dev/null) && [[ $w =~ ^[0-9]+$ ]]; then
+  cols=$w
+else
+  cols=${COLUMNS:-$(tput cols 2>/dev/null || echo 120)}
+fi
+margin=${CLAUDE_STATUSLINE_MARGIN:-5}
+lw=$(strip "$left"); rw=$(strip "$right")
+gap=$(( cols - ${#lw} - ${#rw} - margin ))
+if (( gap >= 2 )); then
+  # split layout: left flush, right (nearly) flush
+  printf '%s%*s%s\n' "$left" "$gap" '' "$right"
+elif (( ${#lw} + ${#rw} + 3 + margin <= cols )); then
+  # too tight to split: single joined line
+  printf '%s %s·%s %s\n' "$left" "$DIM" "$RST" "$right"
+else
+  # very narrow: drop the token counts, keep the essentials
+  right="${MC}⬢ ${model_name}${RST} ${DIM}·${RST} ${CTXC}${pct}%${RST}"
+  printf '%s %s·%s %s\n' "$left" "$DIM" "$RST" "$right"
+fi

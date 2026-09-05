@@ -3,14 +3,43 @@
 # Fuzzy find a project directory and create/switch to a tmux session for it.
 # Based on ThePrimeagen's tmux-sessionizer.
 #
+# Fast path: NOTHING is scanned at keypress time. Row colors come from
+# ~/.cache/claude-attention/status.tsv — published every ~5s by
+# tmux-claude-statusbar's already-batched pane scan — plus the attention
+# layer's .done flag files (see bin/tmux-claude-attention). Entries stream
+# into fzf as they're produced, so the picker draws immediately.
+#
+# Row colors (--ansi):
+#   red       session waiting on a permission/plan prompt
+#   green     session finished but unseen (.done flag)
+#   blue      session actively working
+#   dim blue  session with an idle claude in it
+#   dim       project dir with no session yet (cyan tint = linked worktree)
+#
+# ctrl-/ inside fzf toggles a lazy preview: a live snapshot of the
+# highlighted session's pane, or git branch/log/dirty-files for a dir.
+#
 # Worktree support: if a project directory contains a .bare/ subdir (the
 # legacy bare+worktree layout — see archive/gwclone), its worktree subdirs
 # are enumerated as separate entries. Session names become "<project>_<branch>"
-# so two projects with the same branch name don't collide.
+# so two projects with the same branch name don't collide. (worktrunk-style
+# sibling worktrees like ~/dev/proj.feat-x are plain depth-1 entries.)
 
 # ---- Options ----
-SHOW_PERMISSION_INDICATORS=true
+SHOW_STATUS_INDICATORS=true
 # -----------------
+
+ATTN_DIR="$HOME/.cache/claude-attention"
+
+# Row colors (plain ANSI so the terminal theme maps them; fzf --ansi strips
+# them from the output line, so selection parsing stays plain-text).
+C_RED=$'\033[31m'
+C_GRN=$'\033[32m'
+C_BLU=$'\033[34m'
+C_IBL=$'\033[2;34m'
+C_DIM=$'\033[2m'
+C_CYN=$'\033[2;36m'
+C_RST=$'\033[0m'
 
 # ---- Project directories ----
 # Add entries as "path:depth"
@@ -46,99 +75,157 @@ session_name_for() {
     session_name="${name//./_}"
 }
 
+# ---- Preview mode (invoked by fzf per highlighted row; lazy, read-only) ----
+if [[ "$1" == "--preview" ]]; then
+    line="$2"
+    [[ "$line" == "~/"* ]] && line="$HOME/${line#\~/}"
+    if [[ "$line" == /* ]]; then
+        # dir row: git overview, plain listing for non-repos
+        if git -C "$line" rev-parse --git-dir >/dev/null 2>&1; then
+            git -C "$line" -c color.status=always status -sb 2>/dev/null
+            echo
+            git -C "$line" -c color.ui=always log --oneline --decorate -10 2>/dev/null
+        else
+            ls -1 "$line" 2>/dev/null
+        fi
+    else
+        # session row: live snapshot of its active pane ("=name:" = exact
+        # session match, active window — bare "=name" is not a valid pane
+        # target and comes back empty)
+        tmux capture-pane -ep -t "=${line}:" 2>/dev/null
+    fi
+    exit 0
+fi
+# ----------------------------------------------------------------------------
+
 if [[ $# -eq 1 ]]; then
     selected=$1
 else
-    # Existing sessions sorted by most recently used (excluding current and claude-* popups)
-    current_session=$(tmux display-message -p '#S')
-    # If inside a claude popup, filter out the parent session instead
-    if [[ "$current_session" == claude-* ]]; then
-        filter_session="${current_session#claude-}"
-    else
-        filter_session="$current_session"
-    fi
-    # Single awk replaces sort+awk+grep+grep pipeline (fewer forks).
-    existing=$(tmux list-sessions -F '#{session_last_attached} #{session_name}' 2>/dev/null |
+    # One tmux round trip: current session name, then every session stamped
+    # with its MRU key (last_attached, falling back to created for sessions
+    # never attached — headless-spawned hubs would otherwise sort as blank).
+    tmux_out=$(tmux display-message -p '#S' \; \
+        list-sessions -F '#{?session_last_attached,#{session_last_attached},#{session_created}} #{session_name}' 2>/dev/null)
+    current_session="${tmux_out%%$'\n'*}"
+    existing=$(printf '%s' "${tmux_out#*$'\n'}" |
         sort -rn |
-        awk -v skip="$filter_session" '$2 !~ /^claude-/ && $2 != skip {print $2}')
+        awk -v skip="$current_session" '$2 != skip {print $2}')
 
-    # Project directories not yet opened as sessions.
-    # Use shell globs instead of find — no fork, much faster for shallow depth.
-    shopt -s nullglob
-    candidates=()
-    for entry in "${search_dirs[@]}"; do
-        dir="${entry%%:*}"
-        depth="${entry##*:}"
-        if [[ $depth -eq 0 ]]; then
-            raw=("$dir")
-        else
-            raw=("$dir"/*/)
-            raw=("${raw[@]%/}")
-        fi
-        # Expand worktree-layout projects (parent has .bare/) into individual worktrees.
-        for cand in "${raw[@]}"; do
-            if [[ -d "$cand/.bare" ]]; then
-                for wt in "$cand"/*/; do
-                    wt="${wt%/}"
-                    [[ "${wt##*/}" == ".bare" ]] && continue
-                    candidates+=("$wt")
-                done
-            else
-                candidates+=("$cand")
+    # Status lists for row colors — read from caches only, never scanned
+    # here. status.tsv is ignored when stale (statusbar not ticking); the
+    # .done flags are event-driven (Stop hook) so they're always current.
+    perm_list=$'\n'
+    work_list=$'\n'
+    done_list=$'\n'
+    idle_list=$'\n'
+    if [[ "$SHOW_STATUS_INDICATORS" == true ]]; then
+        status_cache="$ATTN_DIR/status.tsv"
+        if [[ -f "$status_cache" ]]; then
+            cache_mtime=$(stat -f '%m' "$status_cache" 2>/dev/null || stat -c '%Y' "$status_cache" 2>/dev/null)
+            if [[ -n "$cache_mtime" ]] && (( $(date +%s) - cache_mtime <= 15 )); then
+                # 3rd field (worst-status pane) is for C-y's jump, not rows
+                while IFS=$'\t' read -r _name _status _; do
+                    [[ -z "$_name" ]] && continue
+                    case "$_status" in
+                        permission)   perm_list+="${_name}"$'\n' ;;
+                        working)      work_list+="${_name}"$'\n' ;;
+                        # unknown = claude pane whose content didn't classify;
+                        # still "has a claude in it" for the tint's purposes
+                        idle|unknown) idle_list+="${_name}"$'\n' ;;
+                    esac
+                done < "$status_cache"
             fi
+        fi
+        shopt -s nullglob
+        for _f in "$ATTN_DIR"/*.done; do
+            _name="${_f##*/}"
+            _name="${_name%.done}"
+            # flags are per pane, "<session>@<pane>.done" — rows are per
+            # session, so strip the pane suffix (legacy pane-less flags
+            # pass through unchanged)
+            done_list+="${_name%@*}"$'\n'
         done
-    done
-    shopt -u nullglob
+        shopt -u nullglob
+    fi
 
-    # Annotate existing sessions with permission indicators
-    if [[ "$SHOW_PERMISSION_INDICATORS" == true ]]; then
-        _perm_dir=$(mktemp -d /tmp/sessionizer-perm.XXXXXX)
-        while IFS= read -r _cs; do
-            (
-                _content=$(tmux capture-pane -t "${_cs}:1" -p -S -30 2>/dev/null | grep -v '^$' | tail -10)
-                [[ -z "$_content" ]] && exit
-                echo "$_content" | grep -q "to interrupt" && exit
-                if echo "$_content" | grep -q "Yes" && echo "$_content" | grep -q "No"; then
-                    echo "${_cs#claude-}" > "${_perm_dir}/${_cs}"
-                fi
-            ) &
-        done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^claude-')
-        wait
-        _perm_sessions=$(cat "${_perm_dir}"/* 2>/dev/null)
-        rm -rf "$_perm_dir"
-
-        annotated=""
-        while IFS= read -r _sess; do
-            [[ -z "$_sess" ]] && continue
-            if echo "$_perm_sessions" | grep -qx "$_sess"; then
-                annotated+="${_sess} 🔴"$'\n'
+    # Everything below streams straight into fzf so it draws immediately.
+    emit_rows() {
+        # Existing sessions first (MRU order), colored by status.
+        local sess
+        while IFS= read -r sess; do
+            [[ -z "$sess" ]] && continue
+            if [[ "$perm_list" == *$'\n'"$sess"$'\n'* ]]; then
+                printf '%s%s%s\n' "$C_RED" "$sess" "$C_RST"
+            elif [[ "$done_list" == *$'\n'"$sess"$'\n'* ]]; then
+                printf '%s%s%s\n' "$C_GRN" "$sess" "$C_RST"
+            elif [[ "$work_list" == *$'\n'"$sess"$'\n'* ]]; then
+                printf '%s%s%s\n' "$C_BLU" "$sess" "$C_RST"
+            elif [[ "$idle_list" == *$'\n'"$sess"$'\n'* ]]; then
+                printf '%s%s%s\n' "$C_IBL" "$sess" "$C_RST"
             else
-                annotated+="${_sess}"$'\n'
+                printf '%s\n' "$sess"
             fi
         done <<< "$existing"
-    else
-        annotated="$existing"$'\n'
-    fi
 
-    # Filter out dirs that already have a session.
-    # Pad existing into a delimited string for O(1)-ish builtin pattern matching
-    # (no fork per check, vs the old `echo "$existing" | grep -qx "$name"`).
-    nl_existing=$'\n'"$existing"$'\n'
-    new_dirs=""
-    for dir in "${candidates[@]}"; do
-        session_name_for "$dir"
-        if [[ "$nl_existing" != *$'\n'"$session_name"$'\n'* ]]; then
-            new_dirs+="$dir"$'\n'
-        fi
-    done
+        # Then project dirs not yet opened as sessions.
+        # Shell globs instead of find — no fork, much faster for shallow depth.
+        shopt -s nullglob
+        local entry dir depth cand wt disp
+        local -a raw candidates
+        candidates=()
+        for entry in "${search_dirs[@]}"; do
+            dir="${entry%%:*}"
+            depth="${entry##*:}"
+            if [[ $depth -eq 0 ]]; then
+                raw=("$dir")
+            else
+                raw=("$dir"/*/)
+                raw=("${raw[@]%/}")
+            fi
+            # Expand worktree-layout projects (parent has .bare/) into individual worktrees.
+            for cand in "${raw[@]}"; do
+                if [[ -d "$cand/.bare" ]]; then
+                    for wt in "$cand"/*/; do
+                        wt="${wt%/}"
+                        [[ "${wt##*/}" == ".bare" ]] && continue
+                        candidates+=("$wt")
+                    done
+                else
+                    candidates+=("$cand")
+                fi
+            done
+        done
+        shopt -u nullglob
 
-    selected=$( (
-        printf '%s' "$annotated"
-        printf '%s' "$new_dirs"
-    ) | grep -v '^$' | fzf)
+        # Filter out dirs that already have a session (builtin pattern match
+        # against a delimited string — no fork per check), emit ~-shortened
+        # and dimmed; a linked worktree (.git is a file) gets a cyan tint.
+        # $existing excludes the current session, so add it back here or the
+        # dir you're calling from reappears as a "no session yet" row.
+        local nl_existing=$'\n'"$current_session"$'\n'"$existing"$'\n'
+        for dir in "${candidates[@]}"; do
+            session_name_for "$dir"
+            if [[ "$nl_existing" != *$'\n'"$session_name"$'\n'* ]]; then
+                disp="$dir"
+                [[ "$disp" == "$HOME/"* ]] && disp="~/${disp#"$HOME"/}"
+                if [[ -f "$dir/.git" ]]; then
+                    printf '%s%s%s\n' "$C_CYN" "$disp" "$C_RST"
+                else
+                    printf '%s%s%s\n' "$C_DIM" "$disp" "$C_RST"
+                fi
+            fi
+        done
+    }
 
-    # Strip permission indicator from selection
-    [[ "$SHOW_PERMISSION_INDICATORS" == true ]] && selected="${selected% 🔴}"
+    # --tiebreak=index keeps MRU order among equal matches; --ansi renders
+    # the row colors and strips them from the selected line's output.
+    selected=$(emit_rows | fzf --ansi --tiebreak=index \
+        --preview "$HOME/dotfiles/bin/tmux-sessionizer --preview {}" \
+        --preview-window 'right,55%,hidden' \
+        --bind 'ctrl-/:toggle-preview')
+
+    # Re-expand the ~-shortened display path
+    [[ "$selected" == "~/"* ]] && selected="$HOME/${selected#\~/}"
 fi
 
 if [[ -z $selected ]]; then
@@ -154,31 +241,22 @@ else
 fi
 
 if ! tmux has-session -t="$selected_name" 2>/dev/null; then
-    tmux new-session -ds "$selected_name" -c "$selected"
+    # standard hub layout ([claude,] nvim, zsh) — shared with wt-tmux-jump.
+    # Sourced lazily: only the session-creation path pays for it.
+    source "$HOME/dotfiles/bin/tmux-claude-lib"
+    new_hub_session "$selected_name" "$selected"
 fi
 
-# If inside a claude popup, close it and switch the parent client
-# Keep the @claude_popup flag set so it auto-restores when switching back
-current_session=$(tmux display-message -p '#S')
-if [[ "$current_session" == claude-* ]]; then
-    parent_session="${current_session#claude-}"
-    client=$(tmux list-clients -t "$parent_session" -F '#{client_name}' | head -1)
-    tmux detach-client
-    sleep 0.1
-    if [[ -n $client ]]; then
-        tmux switch-client -c "$client" -t "$selected_name"
+if [[ -n $TMUX ]]; then
+    # scope to the client viewing this session (run-shell/neww contexts have
+    # no implicit current client — unscoped switch-client picks arbitrarily)
+    current_session=$(tmux display-message -p '#S')
+    this_client=$(tmux list-clients -t "=$current_session" -F '#{client_tty}' 2>/dev/null | head -1)
+    if [[ -n $this_client ]]; then
+        tmux switch-client -c "$this_client" -t "$selected_name"
+    else
+        tmux switch-client -t "$selected_name"
     fi
-elif [[ -n $TMUX ]]; then
-    tmux switch-client -t "$selected_name"
 else
     tmux attach-session -t "$selected_name"
-fi
-
-# Auto-restore claude popup if the target session had one active
-popup_flag=$(tmux show -qv -t "$selected_name" @claude_popup 2>/dev/null)
-if [[ "$popup_flag" == "1" ]]; then
-    popup_session="claude-${selected_name}"
-    if tmux has-session -t="$popup_session" 2>/dev/null; then
-        tmux display-popup -E -w 80% -h 80% "tmux attach-session -t '$popup_session'"
-    fi
 fi

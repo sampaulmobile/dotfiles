@@ -6,13 +6,192 @@
 CLAUDE_SESSIONS_DIR="$HOME/.claude/sessions"
 CLAUDE_PROJECTS_DIR="$HOME/.claude/projects"
 
+# Agent liveness thresholds (tunable). An agent transcript with mtime within
+# LIVE_AGENT_SECS renders as working (●); older renders as done/idle (◯)
+# with its age; older than STALE_AGENT_SECS is hidden entirely. See
+# workplans/tmux-claude-dashboard-agent-trees-plan.md for the rationale.
+LIVE_AGENT_SECS=120
+STALE_AGENT_SECS=1800
+
+# new_hub_session <session-name> <dir>
+#   Creates a detached tmux session for a project/worktree with the standard
+#   hub layout: 1 claude (warm) · 2 nvim · 3 zsh — lands on claude, the
+#   project's front door. The nvim window is left on automatic-rename: it
+#   shows "nvim" while nvim runs and tracks whatever runs there after (only
+#   the claude window's name is pinned — tmux-claude-window finds it by name).
+#   Used by tmux-sessionizer and wt-tmux-jump so both entry points build
+#   identical sessions.
+new_hub_session() {
+    local name="$1" dir="$2"
+    local nvim_win
+
+    tmux new-session -ds "$name" -c "$dir" -n claude
+    tmux set-option -w -t "${name}:1" automatic-rename off
+    tmux send-keys -t "${name}:1" "claude" Enter
+
+    nvim_win=$(tmux new-window -t "${name}:" -c "$dir" -P -F '#{window_id}')
+    tmux send-keys -t "$nvim_win" "nvim" Enter
+
+    # trailing zsh window; new-window selects it, so go back to claude
+    tmux new-window -t "${name}:" -c "$dir"
+    tmux select-window -t "${name}:1"
+}
+
+# claude_ttys
+#   Prints the tty names (no /dev/ prefix) of every live claude/node
+#   process, one per line. A claude pane is identified by its TTY rather
+#   than #{pane_current_command}, because claude often runs under a shell
+#   wrapper (e.g. `tmux new-session '... || claude'`) that makes the pane
+#   command report zsh/sh while claude owns the same tty.
+claude_ttys() {
+    ps -A -o tty=,comm= 2>/dev/null \
+        | awk '$1 != "??" && ($2 ~ /claude/ || $2 ~ /(^|\/)node$/) {print $1}' \
+        | sort -u
+}
+
 # get_claude_sessions
-#   Prints all claude-* tmux session names, one per line.
+#   Prints every tmux session (any name) with a claude process on one of
+#   its pane ttys, most recently active first.
 get_claude_sessions() {
-    tmux list-sessions -F '#{session_activity} #{session_name}' 2>/dev/null \
-        | grep ' claude-' \
+    local ttys
+    ttys=$(claude_ttys)
+    [[ -z "$ttys" ]] && return 0
+    tmux list-panes -a -F '#{session_activity} #{session_name} #{pane_tty}' 2>/dev/null \
+        | while IFS=' ' read -r act name tty; do
+            case $'\n'"$ttys"$'\n' in
+                *$'\n'"${tty#/dev/}"$'\n'*) echo "$act $name" ;;
+            esac
+        done \
         | sort -rn \
-        | awk '{print $2}'
+        | awk '!seen[$2]++ {print $2}'
+}
+
+# get_claude_panes
+#   Prints one line per claude pane — ANY window/pane of ANY session, one
+#   row per claude process, tab-separated: session_name, pane_id,
+#   window_index. Most recently active session first; within a session,
+#   window order. This is the dashboard's row source: enumerating per PANE
+#   (not per session, like get_claude_sessions) is what gives a second
+#   claude outside window 1 its own row instead of being invisible.
+get_claude_panes() {
+    local ttys
+    ttys=$(claude_ttys)
+    [[ -z "$ttys" ]] && return 0
+    tmux list-panes -a -F $'#{session_activity}\t#{session_name}\t#{pane_id}\t#{window_index}\t#{pane_tty}' 2>/dev/null \
+        | while IFS=$'\t' read -r act name pid widx tty; do
+            case $'\n'"$ttys"$'\n' in
+                *$'\n'"${tty#/dev/}"$'\n'*) printf '%s\t%s\t%s\t%s\n' "$act" "$name" "$pid" "$widx" ;;
+            esac
+        done \
+        | sort -t$'\t' -k1,1rn -k4,4n \
+        | cut -f2-4
+}
+
+# is_claude_pane_command <pane-current-command>
+#   True (exit 0) if the given #{pane_current_command} value looks like a
+#   running claude process — the CLI's foreground process is typically
+#   `claude` itself, or `node` when invoked via a wrapper/shim. Gates the
+#   Yes/No-substring and "to interrupt" heuristics in classify_pane_status
+#   to panes that are actually running claude, so an unrelated pane whose
+#   visible text happens to contain those same substrings (vim or `git
+#   diff` displaying this very script's literals, for instance) is never
+#   misclassified as needing attention.
+is_claude_pane_command() {
+    # matches claude / claude.exe (the npm bin is literally claude.exe) / node
+    [[ "$1" == claude* || "$1" == "node" ]]
+}
+
+# classify_pane_status <raw-content>
+#   Prints: working | idle | permission | unknown
+#   Pure classifier over RAW, unfiltered captured pane content (e.g. a
+#   straight `tmux capture-pane -p` — blank-line stripping and the
+#   last-10-lines window get_session_status used to do with `grep -v '^$'
+#   | tail -10` happen internally here instead). Split out of
+#   get_session_status so a caller that batches many panes into a single
+#   tmux invocation (e.g. tmux-claude-statusbar, which must scan every
+#   session in one round trip to stay fast) can classify each pane's
+#   content without paying for a second per-session capture-pane call.
+#   Written as pure bash array/substring tests — zero forked processes.
+#   With a couple dozen sessions, forking even 2-3 processes per session
+#   for blank-filtering/tailing was itself enough to blow the statusbar's
+#   200ms budget (measured ~100ms+ for 17 sessions from that alone).
+#   bash 3.2 compatible (macOS ships 3.2 as both /bin/bash and the first
+#   `bash` on PATH) — no negative array indices, no mapfile/readarray
+#   (both 4.0+ only).
+classify_pane_status() {
+    local raw="$1"
+
+    if [[ -z "$raw" ]]; then
+        echo "unknown"
+        return
+    fi
+
+    # Split into lines and drop blanks — replaces `grep -v '^$'`.
+    local -a all filtered
+    IFS=$'\n' read -rd '' -a all <<< "$raw"
+    local line
+    for line in "${all[@]}"; do
+        [[ -n "$line" ]] && filtered+=("$line")
+    done
+
+    local total=${#filtered[@]}
+    if (( total == 0 )); then
+        echo "unknown"
+        return
+    fi
+
+    # Last 10 non-blank lines — replaces `tail -10`.
+    local start=0
+    (( total > 10 )) && start=$(( total - 10 ))
+    local -a window=("${filtered[@]:start}")
+
+    local content="" w
+    for w in "${window[@]}"; do
+        if [[ -n "$content" ]]; then
+            content+=$'\n'"$w"
+        else
+            content="$w"
+        fi
+    done
+
+    # Working: claude is actively streaming output or running a tool.
+    # Markers across UI generations: "esc to interrupt" (older),
+    # "⎿  Running…" (tool in flight), and the spinner status line
+    # "· <Verb>… (41s · ↓ 1.9k tokens)" — the "s · ↓ " + "tokens" pair is
+    # the stable fragment (verbs are randomized).
+    if [[ "$content" == *"to interrupt"* || "$content" == *"⎿  Running…"* ]] \
+       || [[ "$content" == *"s · ↓ "* && "$content" == *"tokens"* ]]; then
+        echo "working"
+        return
+    fi
+
+    # Permission: Yes/No selector waiting for input
+    # (must check before idle — ❯ appears in both)
+    if [[ "$content" == *"Yes"* && "$content" == *"No"* ]]; then
+        echo "permission"
+        return
+    fi
+
+    # Permission (plan mode question): "Enter to select" on either of the
+    # last 2 lines (replaces `tail -2 | grep -q "^Enter to select"`).
+    local wn=${#window[@]}
+    if (( wn > 0 )); then
+        local last="${window[$(( wn - 1 ))]}"
+        local prev=""
+        (( wn > 1 )) && prev="${window[$(( wn - 2 ))]}"
+        if [[ "$last" == "Enter to select"* || "$prev" == "Enter to select"* ]]; then
+            echo "permission"
+            return
+        fi
+    fi
+
+    # Idle: the ❯ input prompt is visible, claude is done
+    if [[ "$content" == *"❯"* ]]; then
+        echo "idle"
+        return
+    fi
+
+    echo "unknown"
 }
 
 # get_session_status <tmux-session-name>
@@ -20,38 +199,128 @@ get_claude_sessions() {
 #   Detects state by inspecting the last lines of the tmux pane.
 get_session_status() {
     local session="$1"
-    local content
-    content=$(tmux capture-pane -t "${session}:1" -p -S -30 2>/dev/null | grep -v '^$' | tail -10)
+    local raw
+    raw=$(tmux capture-pane -t "${session}:1" -p -S -30 2>/dev/null)
+    classify_pane_status "$raw"
+}
 
-    if [[ -z "$content" ]]; then
-        echo "unknown"
-        return
-    fi
+# get_pane_status <pane-id>
+#   Prints: working | idle | permission | unknown
+#   Same classifier as get_session_status, but for one exact pane — the
+#   dashboard's per-row status now that rows are panes, not sessions.
+get_pane_status() {
+    local raw
+    raw=$(tmux capture-pane -t "$1" -p -S -30 2>/dev/null)
+    classify_pane_status "$raw"
+}
 
-    # Working: claude is actively streaming output
-    if echo "$content" | grep -q "to interrupt"; then
-        echo "working"
-        return
-    fi
+# scan_claude_sessions
+#   Scans every pane owned by a live claude process — ANY window/pane of
+#   ANY session, not just the hub layout's window 1 — and prints one line
+#   per session that has at least one: "<session>\t<status>\t<pane>",
+#   where status is the worst across that session's claude panes
+#   (permission > working > idle > unknown) and pane is the id of the
+#   pane exhibiting it ("-" when unknown; first-seen wins when several
+#   panes tie) — so C-y's jump can land on the actual permission prompt,
+#   not just its session (which used to drop you on the session's current
+#   window while the prompt blocked in another).
+#
+#   Two tmux round trips total regardless of session count: one
+#   list-panes -a to enumerate panes, one batched capture of ONLY the
+#   panes whose tty belongs to a claude process (claude_ttys). Inverting
+#   the old shape (capture window 1 of every session, then gate on tty)
+#   this way both covers manually-launched claudes outside window 1 and
+#   makes the prompt-lookalike false positive impossible by construction —
+#   a non-claude pane's text is never captured, so it can't be misread
+#   (the gate used to be the only defense; see tmux-claude-statusbar's
+#   round-1 finding note at classify time, now moot).
+#
+#   Panes are addressed by #{pane_id} (stable, immune to renumbering); the
+#   separator line carries the pane's session name so blocks stay
+#   self-labeled even if a pane vanishes between the two round trips (its
+#   capture just comes back empty -> "unknown", self-heals next call).
+#   Used by tmux-claude-statusbar (counts + status.tsv cache) and
+#   tmux-claude-attention's jump (C-y permission targets).
+scan_claude_sessions() {
+    local ttys
+    ttys=$(claude_ttys)
+    [[ -z "$ttys" ]] && return 0
 
-    # Permission: Yes/No selector or plan mode question waiting for input
-    # (must check before idle — ❯ appears in both)
-    if echo "$content" | grep -q "Yes" && echo "$content" | grep -q "No"; then
-        echo "permission"
-        return
-    fi
-    if echo "$content" | tail -2 | grep -q "^Enter to select"; then
-        echo "permission"
-        return
-    fi
+    local pane_list
+    pane_list=$(tmux list-panes -a -F $'#{session_name}\t#{pane_id}\t#{pane_tty}' 2>/dev/null)
+    [[ -z "$pane_list" ]] && return 0
 
-    # Idle: the ❯ input prompt is visible, claude is done
-    if echo "$content" | grep -q "❯"; then
-        echo "idle"
-        return
-    fi
+    # claude panes only, as "session\tpane_id"
+    local -a targets=()
+    local sname pid ptty
+    while IFS=$'\t' read -r sname pid ptty; do
+        [[ -z "$pid" ]] && continue
+        case $'\n'"$ttys"$'\n' in
+            *$'\n'"${ptty#/dev/}"$'\n'*) targets+=("${sname}"$'\t'"${pid}") ;;
+        esac
+    done <<< "$pane_list"
+    (( ${#targets[@]} == 0 )) && return 0
 
-    echo "unknown"
+    # Randomized separator so pane content that happens to contain a fixed
+    # literal can't split a block early (same reasoning as the statusbar's
+    # original sep).
+    local sep="@@CLAUDE-SCAN-$$-${RANDOM}@@"
+    local -a args=()
+    local entry tpane
+    for entry in "${targets[@]}"; do
+        tpane="${entry#*$'\t'}"
+        # the pane id rides the separator line WITHOUT its % — display -p
+        # format-expands the message and strftime-eats "%2..." etc.; the
+        # parse below restores it
+        args+=(capture-pane -t "$tpane" -p -S -30 \; display-message -p "${sep}${entry%%$'\t'*}"$'\t'"${tpane#%}" \;)
+    done
+    local combined
+    combined=$(tmux "${args[@]}" 2>/dev/null)
+
+    # Classify each pane; aggregate per session (bash 3.2: delimited
+    # strings + a first-seen order array, no assoc arrays). Each status
+    # set holds "session\tpane" entries so the pane that produced the
+    # session's worst status survives aggregation.
+    local perm_s=$'\n' work_s=$'\n' idle_s=$'\n' seen=$'\n'
+    local -a order=()
+    local block="" line name pane st
+    while IFS= read -r line; do
+        if [[ "$line" == "$sep"* ]]; then
+            entry="${line#$sep}"
+            name="${entry%%$'\t'*}"
+            pane="%${entry#*$'\t'}"
+            st=$(classify_pane_status "$block")
+            case "$st" in
+                permission) perm_s+="${name}"$'\t'"${pane}"$'\n' ;;
+                working)    work_s+="${name}"$'\t'"${pane}"$'\n' ;;
+                idle)       idle_s+="${name}"$'\t'"${pane}"$'\n' ;;
+            esac
+            if [[ "$seen" != *$'\n'"${name}"$'\n'* ]]; then
+                seen+="${name}"$'\n'
+                order+=("$name")
+            fi
+            block=""
+        else
+            block+="$line"$'\n'
+        fi
+    done <<< "$combined"
+
+    # First "session\t" entry in each set wins (first-seen pane). Prefix
+    # stripping instead of command substitution keeps this fork-free —
+    # the statusbar runs this whole scan inside a ~200ms budget.
+    local rest
+    for name in "${order[@]}"; do
+        st="unknown"
+        pane="-"
+        if rest="${perm_s#*$'\n'"$name"$'\t'}"; [[ "$rest" != "$perm_s" ]]; then
+            st="permission"; pane="${rest%%$'\n'*}"
+        elif rest="${work_s#*$'\n'"$name"$'\t'}"; [[ "$rest" != "$work_s" ]]; then
+            st="working"; pane="${rest%%$'\n'*}"
+        elif rest="${idle_s#*$'\n'"$name"$'\t'}"; [[ "$rest" != "$idle_s" ]]; then
+            st="idle"; pane="${rest%%$'\n'*}"
+        fi
+        printf '%s\t%s\t%s\n' "$name" "$st" "$pane"
+    done
 }
 
 # get_pane_cwd <tmux-session-name>
@@ -70,22 +339,84 @@ encode_cwd() {
 }
 
 # build_cwd_session_map
-#   Builds a temp file mapping CWD -> sessionId (one per line, tab-separated).
+#   Builds a temp file mapping tmux pane id + CWD -> sessionId (one line per
+#   live claude: "paneId\tcwd\tsessionId", paneId is "-" when unknown).
 #   Call once, then use find_session_jsonl which looks up from the cache.
 _CWD_MAP_FILE=""
 build_cwd_session_map() {
     _CWD_MAP_FILE=$(mktemp /tmp/claude-cwd-map.XXXXXX)
-    jq -r '[.cwd, .sessionId] | @tsv' "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null > "$_CWD_MAP_FILE"
+    jq -r '[((.tmux // "") | [scan("%[0-9]+$")] | .[0] // "-"), .cwd, .sessionId] | @tsv' \
+        "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null > "$_CWD_MAP_FILE"
+}
+
+# _pane_exact_jsonl <pane-id>
+#   Pane-exact transcript lookup: sessions/*.json records each claude's
+#   tmux pane id ("tmux":"sess:@win.%pane") — match this pane's id against
+#   the map. This is what disambiguates two claude processes sharing one
+#   CWD (e.g. a second claude launched in another window of the same
+#   project session): cwd-based lookup + the newest-jsonl heuristic in
+#   _cwd_lookup_jsonl made the dashboard silently read the OTHER claude's
+#   transcript — no subagents dir, wrong tokens.
+#   Prints the jsonl path, or nothing on a miss. Requires
+#   build_cwd_session_map to have run.
+_pane_exact_jsonl() {
+    local pane_id="$1"
+    [[ -n "$_CWD_MAP_FILE" && -f "$_CWD_MAP_FILE" ]] || return 0
+    local hit pcwd psid pjsonl
+    hit=$(awk -F'\t' -v p="$pane_id" '$1 == p { print; exit }' "$_CWD_MAP_FILE")
+    [[ -z "$hit" ]] && return 0
+    IFS=$'\t' read -r _ pcwd psid <<< "$hit"
+    pjsonl="${CLAUDE_PROJECTS_DIR}/$(encode_cwd "$pcwd")/${psid}.jsonl"
+    [[ -n "$psid" && -f "$pjsonl" ]] && echo "$pjsonl"
+}
+
+# find_pane_jsonl <pane-id>
+#   Prints the path to the active JSONL transcript for the claude running
+#   in one exact pane, or empty string. Pane-exact lookup first, then the
+#   cwd fallback against THAT pane's cwd (not window 1's).
+find_pane_jsonl() {
+    local pane_id="$1"
+    local pjsonl
+    pjsonl=$(_pane_exact_jsonl "$pane_id")
+    if [[ -n "$pjsonl" ]]; then
+        echo "$pjsonl"
+        return
+    fi
+    local cwd
+    cwd=$(tmux display-message -p -t "$pane_id" '#{pane_current_path}' 2>/dev/null)
+    _cwd_lookup_jsonl "$cwd"
 }
 
 # find_session_jsonl <tmux-session-name>
 #   Prints the path to the active JSONL transcript file, or empty string.
-#   Falls back to the most recently modified JSONL in the project dir
-#   (handles /clear creating a new session ID without updating the session JSON).
+#   Resolution order:
+#     1. Pane-exact (window 1's panes) — see _pane_exact_jsonl.
+#     2. CWD lookup — see _cwd_lookup_jsonl.
+#   NOTE: window-1-pinned by construction; the dashboard uses
+#   find_pane_jsonl per claude pane instead (a claude outside window 1 was
+#   invisible here — no row, so no subagent tree either).
 find_session_jsonl() {
     local session="$1"
-    local cwd
-    cwd=$(get_pane_cwd "$session")
+
+    local pane_id pjsonl
+    for pane_id in $(tmux list-panes -t "${session}:1" -F '#{pane_id}' 2>/dev/null); do
+        pjsonl=$(_pane_exact_jsonl "$pane_id")
+        if [[ -n "$pjsonl" ]]; then
+            echo "$pjsonl"
+            return
+        fi
+    done
+
+    _cwd_lookup_jsonl "$(get_pane_cwd "$session")"
+}
+
+# _cwd_lookup_jsonl <cwd>
+#   CWD-based transcript lookup, overridden by the most recently modified
+#   JSONL in the project dir (handles /clear creating a new session ID
+#   without updating the session JSON). Shared fallback for
+#   find_session_jsonl / find_pane_jsonl.
+_cwd_lookup_jsonl() {
+    local cwd="$1"
     [[ -z "$cwd" ]] && return
 
     local encoded
@@ -96,7 +427,7 @@ find_session_jsonl() {
     # try session JSON lookup first
     local session_id=""
     if [[ -n "$_CWD_MAP_FILE" && -f "$_CWD_MAP_FILE" ]]; then
-        session_id=$(awk -F'\t' -v cwd="$cwd" '$1 == cwd { print $2; exit }' "$_CWD_MAP_FILE")
+        session_id=$(awk -F'\t' -v cwd="$cwd" '$2 == cwd { print $3; exit }' "$_CWD_MAP_FILE")
     else
         session_id=$(jq -r --arg cwd "$cwd" 'select(.cwd == $cwd) | .sessionId' "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null | head -1)
     fi
@@ -139,62 +470,367 @@ get_context_and_model() {
     ' 2>/dev/null || printf '0\tunknown'
 }
 
-# get_totals_incremental <jsonl-path> <cache-file>
+# get_totals_incremental <jsonl-path> <cache-file> [include-sidechain-turns]
 #   Incremental path: parses only new bytes since last call.
-#   Cache file stores: total_output\ttotal_all\tbyte_offset
-#   Prints tab-separated: total_output total_all
+#   Cache stores: output\tall\tturns\tstate_cost\test_cost\tbyte_offset
+#   (a cache from an older format leaves the 6th field empty → reset).
+#   Prints tab-separated: total_output total_all turns cost
+#   - assistant records are deduped per requestId within each parsed chunk
+#     (one API response is logged once PER CONTENT BLOCK with usage that
+#     grows across blocks — claude-tokens note 1; keeping the max-output
+#     record per request avoids counting a response several times over).
+#     A request whose records straddle a chunk boundary can still count
+#     twice — rare, and bounded to one request per refresh.
+#   - turns: user prompts handled (non-meta user records whose content
+#     isn't tool results) — the human notion of a turn, not API request
+#     count. Sidechain records are excluded unless the 3rd arg is 1: agent
+#     transcripts mark everything isSidechain, so agent callers pass 1.
+#   - cost: totalCostUSD from the newest cost-state record when one exists
+#     (exact, a cumulative snapshot claude writes — but live sessions
+#     often have none), else "~<usd>" estimated from the price sheet
+#     (same table as claude-tokens), else "-".
 get_totals_incremental() {
     local jsonl="$1"
     local cache="$2"
-    [[ ! -f "$jsonl" ]] && printf '0\t0' && return
+    local inc_sc="${3:-0}"
+    [[ "$inc_sc" == "1" ]] || inc_sc=0
+    [[ ! -f "$jsonl" ]] && printf '0\t0\t0\t-' && return
 
     local file_size
     file_size=$(wc -c < "$jsonl" 2>/dev/null)
 
-    local cached_out=0 cached_all=0 cached_offset=0
+    local cached_out=0 cached_all=0 cached_turns=0 cached_scost="-" cached_est=0 cached_offset=0
     if [[ -f "$cache" ]]; then
-        IFS=$'\t' read -r cached_out cached_all cached_offset < "$cache"
-        # if file shrunk (new session / cleared), reset
-        if (( file_size < cached_offset )); then
-            cached_out=0; cached_all=0; cached_offset=0
+        IFS=$'\t' read -r cached_out cached_all cached_turns cached_scost cached_est cached_offset < "$cache"
+        # older cache formats leave the 6th field empty — reset (one full
+        # re-parse, then incremental again). Same for a shrunk file (new
+        # session / cleared).
+        if [[ -z "$cached_offset" ]] || (( file_size < cached_offset )); then
+            cached_out=0; cached_all=0; cached_turns=0; cached_scost="-"; cached_est=0; cached_offset=0
         fi
     fi
 
+    _totals_result() {  # <out> <all> <turns> <state_cost> <est_cost>
+        local cost="-"
+        if [[ "$4" != "-" && -n "$4" ]]; then
+            cost="$4"
+        elif awk "BEGIN{exit !($5 > 0.0001)}" 2>/dev/null; then
+            cost="~$5"
+        fi
+        printf '%s\t%s\t%s\t%s' "$1" "$2" "$3" "$cost"
+    }
+
     if (( file_size == cached_offset )); then
         # no new data
-        printf '%s\t%s' "$cached_out" "$cached_all"
+        _totals_result "$cached_out" "$cached_all" "$cached_turns" "$cached_scost" "$cached_est"
         return
     fi
 
-    # parse only the new bytes
-    local delta_out=0 delta_all=0
+    # parse only the new bytes — line-tolerant (fromjson?) so a mid-write
+    # partial line drops that record instead of zeroing the whole delta.
+    # Price sheet duplicated from bin/claude-tokens (its JQ_PRELUDE is the
+    # source of truth — keep in sync).
+    local delta_out=0 delta_all=0 delta_turns=0 delta_scost="-" delta_est=0
     local delta
-    delta=$(tail -c +"$(( cached_offset + 1 ))" "$jsonl" | jq -rs '
-        [.[] | select(.type == "assistant" and .message.usage)] |
-        if length == 0 then
-            [0, 0]
-        else
-            (map(.message.usage.output_tokens // 0) | add) as $d_out |
-            (map(
-                (.message.usage.input_tokens // 0) +
-                (.message.usage.cache_read_input_tokens // 0) +
-                (.message.usage.cache_creation_input_tokens // 0) +
-                (.message.usage.output_tokens // 0)
-            ) | add) as $d_all |
-            [$d_out, $d_all]
-        end | @tsv
+    delta=$(tail -c +"$(( cached_offset + 1 ))" "$jsonl" | jq -Rn -r --argjson inc_sc "$inc_sc" '
+        def prices: {
+          "claude-fable-5-1":   [10, 50],
+          "claude-fable-5":     [10, 50],
+          "claude-mythos-5-1":  [10, 50],
+          "claude-mythos-5":    [10, 50],
+          "claude-opus-5":      [5, 25],
+          "claude-opus-4-8":    [5, 25],
+          "claude-opus-4-7":    [5, 25],
+          "claude-opus-4-6":    [5, 25],
+          "claude-opus-4-5":    [5, 25],
+          "claude-opus-4-1":    [15, 75],
+          "claude-opus-4":      [15, 75],
+          "claude-sonnet-5":    [2, 10],
+          "claude-sonnet-4-6":  [3, 15],
+          "claude-sonnet-4-5":  [3, 15],
+          "claude-sonnet-4":    [3, 15],
+          "claude-haiku-4-5":   [1, 5],
+          "claude-3-5-haiku":   [0.8, 4]
+        };
+        def base_model: sub("-20[0-9]{6}$"; "");
+        def usage_cost($model):
+          (prices[$model | base_model] // null) as $p
+          | if $p == null then null else
+              ( (.input_tokens // 0)            * $p[0]
+              + (.output_tokens // 0)           * $p[1]
+              + (.cache_read_input_tokens // 0) * $p[0] * 0.1
+              + (if .cache_creation then
+                   (.cache_creation.ephemeral_5m_input_tokens // 0) * $p[0] * 1.25
+                 + (.cache_creation.ephemeral_1h_input_tokens // 0) * $p[0] * 2
+                 else
+                   (.cache_creation_input_tokens // 0) * $p[0] * 1.25
+                 end)
+              ) / 1000000
+            end;
+        [inputs | fromjson?] as $recs |
+        ($recs | map(select(.type == "assistant" and .message.usage))
+               | group_by(.requestId // .uuid // "?")
+               | map(max_by(.message.usage.output_tokens // 0))) as $asst |
+        ($asst | map(.message.usage.output_tokens // 0) | add // 0) as $d_out |
+        ($asst | map(
+            (.message.usage.input_tokens // 0) +
+            (.message.usage.cache_read_input_tokens // 0) +
+            (.message.usage.cache_creation_input_tokens // 0) +
+            (.message.usage.output_tokens // 0)
+        ) | add // 0) as $d_all |
+        ($asst | map((.message.model // "") as $m | (.message.usage | usage_cost($m)) // 0)
+               | add // 0) as $d_est |
+        ($recs | map(select(
+            .type == "user"
+            and (.isMeta != true)
+            and (($inc_sc == 1) or ((.isSidechain // false) == false))
+            and (((.message.content | type) == "string")
+                 or ([.message.content[]? | select(.type == "tool_result")] | length) == 0)
+        )) | length) as $d_turns |
+        ($recs | map(select(.type == "cost-state") | .totalCostUSD) | last) as $cost |
+        [$d_out, $d_all, $d_turns, ($cost // "-"), $d_est] | @tsv
     ' 2>/dev/null)
 
     if [[ -n "$delta" ]]; then
-        IFS=$'\t' read -r delta_out delta_all <<< "$delta"
+        IFS=$'\t' read -r delta_out delta_all delta_turns delta_scost delta_est <<< "$delta"
     fi
 
     local new_out=$(( cached_out + delta_out ))
     local new_all=$(( cached_all + delta_all ))
+    local new_turns=$(( cached_turns + delta_turns ))
+    # cost-state is a cumulative snapshot, not a delta: newest wins; the
+    # estimate accumulates (float math via awk)
+    local new_scost="$cached_scost"
+    [[ "$delta_scost" != "-" && -n "$delta_scost" ]] && new_scost="$delta_scost"
+    local new_est
+    new_est=$(awk "BEGIN{printf \"%.6f\", ${cached_est:-0} + ${delta_est:-0}}" 2>/dev/null || echo 0)
 
     # save updated cache
-    printf '%s\t%s\t%s' "$new_out" "$new_all" "$file_size" > "$cache"
-    printf '%s\t%s' "$new_out" "$new_all"
+    printf '%s\t%s\t%s\t%s\t%s\t%s' "$new_out" "$new_all" "$new_turns" "$new_scost" "$new_est" "$file_size" > "$cache"
+    _totals_result "$new_out" "$new_all" "$new_turns" "$new_scost" "$new_est"
+}
+
+# ── agent trees ─────────────────────────────────────────
+
+# _agent_file_mtime <path>
+#   Prints a file's mtime as epoch seconds (GNU/BSD stat portable).
+_agent_file_mtime() {
+    stat -f '%m' "$1" 2>/dev/null || stat -c '%Y' "$1" 2>/dev/null
+}
+
+# _agent_cache_get <cache-file> <current-mtime>
+#   Prints the cached value and returns 0 if the cache was stored for this
+#   exact mtime; otherwise returns 1 (caller should recompute and store).
+_agent_cache_get() {
+    local cache="$1" mtime="$2"
+    [[ -f "$cache" ]] || return 1
+    local cached_mtime
+    cached_mtime=$(head -1 "$cache" 2>/dev/null)
+    [[ -n "$mtime" && "$cached_mtime" == "$mtime" ]] || return 1
+    tail -n +2 "$cache" 2>/dev/null
+}
+
+# _agent_cache_set <cache-file> <mtime> <value>
+_agent_cache_set() {
+    printf '%s\n%s' "$2" "$3" > "$1" 2>/dev/null
+}
+
+# list_session_agents <session-jsonl-path>
+#   Prints one line per live subagent under that session's transcript,
+#   sorted for tree rendering (parents before children, siblings in spawn
+#   order). Tab-separated: agent_id, spawn_depth, parent_id, agentType,
+#   description, mtime, started. mtime is the transcript's last write
+#   (liveness/recency); started is the meta.json mtime — written once at
+#   spawn, so it's the agent's spawn time (what "working Ns" should count
+#   from; jsonl mtime resets on every write, so a long-running agent showed
+#   a perpetual "working 2s"). Hides agents whose jsonl mtime is older than
+#   STALE_AGENT_SECS. Missing/unknown meta fields degrade to blank rather
+#   than erroring.
+list_session_agents() {
+    local sid_jsonl="$1"
+    [[ -z "$sid_jsonl" || ! -f "$sid_jsonl" ]] && return
+
+    local proj_dir sid subdir
+    proj_dir=$(dirname "$sid_jsonl")
+    sid=$(basename "$sid_jsonl" .jsonl)
+    subdir="${proj_dir}/${sid}/subagents"
+    [[ -d "$subdir" ]] || return
+
+    local now
+    now=$(date +%s)
+
+    local meta id jsonl mtime started
+    {
+        for meta in "$subdir"/agent-*.meta.json; do
+            [[ -f "$meta" ]] || continue
+            id="${meta##*/agent-}"
+            id="${id%.meta.json}"
+            jsonl="${subdir}/agent-${id}.jsonl"
+            [[ -f "$jsonl" ]] || continue
+            mtime=$(_agent_file_mtime "$jsonl")
+            [[ -z "$mtime" ]] && continue
+            # Skip stale agents before spawning a jq process for them (B2):
+            # otherwise this pays one stat + one jq per agent-*.meta.json
+            # ever written for the life of the session id, on every refresh
+            # tick, even though only recent agents are ever rendered.
+            (( now - mtime > STALE_AGENT_SECS )) && continue
+            started=$(_agent_file_mtime "$meta")
+            [[ -z "$started" ]] && started="$mtime"
+            jq --arg id "$id" --argjson mtime "$mtime" --argjson started "$started" \
+                '. + {id: $id, mtime: $mtime, started: $started}' "$meta" 2>/dev/null
+        done
+    } | jq -rs --argjson now "$now" --argjson stale "$STALE_AGENT_SECS" '
+        def dfs($parentKey; $items):
+            ($items | map(select(.parentKey == $parentKey)) | sort_by(.started, .mtime)) as $kids
+            | reduce $kids[] as $k ([]; . + [$k] + dfs($k.id; $items));
+
+        # Apply the stale filter FIRST, then compute $ids/parentKey from the
+        # SURVIVORS only (B1). Resolving parentKey against the full,
+        # pre-filter id list let a live child of a since-gone-stale parent
+        # keep parentKey == <stale-parent-id>; the parent was then dropped
+        # from $items by the stale filter and dfs never reached the child,
+        # so a live agent under a stale parent vanished from the tree.
+        (map(. + {age: ($now - .mtime)}) | map(select(.age <= $stale))) as $survivors
+        | ($survivors | map(.id)) as $ids
+        | (
+            $survivors
+            | map(
+                (.parentAgentId // "") as $p
+                | . + { parentKey: (if $p == "" then "" elif ($ids | index($p)) then $p else "" end) }
+              )
+          ) as $items
+        | dfs(""; $items)
+        | .[]
+        | [
+            .id,
+            # A promoted root (true orphan, or a parent dropped by the
+            # stale filter) has no visible parent row above it, so clamp
+            # its indent to 0 rather than its original nested spawnDepth
+            # (note 8). Also guard against a non-numeric spawnDepth in a
+            # malformed meta, which would otherwise reach a bash
+            # arithmetic expression downstream (note 10).
+            (if .parentKey == "" then 0
+             else (.spawnDepth // 1 | if type == "number" then . else 1 end)
+             end),
+            # "-" placeholder for a root/orphan: an empty TSV field here
+            # would sit mid-row, and a tab-delimited bash read collapses
+            # adjacent tabs (tab is IFS whitespace), silently shifting every
+            # field after it — never emit a blank non-trailing field.
+            ((.parentAgentId // "") as $pid | if $pid == "" then "-" else $pid end),
+            (.agentType // "agent"),
+            ((.description // "") as $d | if $d == "" then "(no description)" else $d end),
+            .mtime,
+            .started
+          ] | @tsv
+    ' 2>/dev/null
+}
+
+# get_agent_stats <agent-jsonl> [cache-file]
+#   Context tokens, last-turn output tokens, and model — reuses the same
+#   fast tail-of-file approach as get_context_and_model. With a cache-file,
+#   skips the jq re-parse when the jsonl's mtime hasn't changed since the
+#   last call (mirrors get_totals_incremental's caching intent).
+#   Prints tab-separated: context output model
+get_agent_stats() {
+    local jsonl="$1" cache="$2"
+    [[ ! -f "$jsonl" ]] && printf '0\t0\tunknown' && return
+
+    local mtime=""
+    if [[ -n "$cache" ]]; then
+        mtime=$(_agent_file_mtime "$jsonl")
+        local cached
+        # An empty cached payload means a corrupt/truncated cache write
+        # (crash mid-write, two dashboards racing on the same cache path),
+        # not a genuinely valid stats value — a real result is always
+        # non-empty ("0\t0\tunknown" at minimum). Treat it as a miss and
+        # recompute rather than returning empty and shifting the caller's
+        # TSV fields (note 3).
+        if cached=$(_agent_cache_get "$cache" "$mtime") && [[ -n "$cached" ]]; then
+            printf '%s' "$cached"
+            return
+        fi
+    fi
+
+    local result
+    # Line-tolerant parse (note 2): matches get_agent_snippet's treatment —
+    # a mid-write partial last line from tail no longer fails the whole
+    # slurp, it just drops that one line.
+    result=$(tail -50 "$jsonl" | jq -Rn -r '
+        [inputs | fromjson?] |
+        [.[] | select(.type == "assistant" and .message.usage)] |
+        if length == 0 then
+            [0, 0, "unknown"]
+        else
+            (last | .message.usage) as $last |
+            (last | .message.model // "unknown") as $model |
+            (($last.input_tokens // 0) + ($last.cache_read_input_tokens // 0) + ($last.cache_creation_input_tokens // 0)) as $context |
+            ($last.output_tokens // 0) as $output |
+            [$context, $output, $model]
+        end | @tsv
+    ' 2>/dev/null)
+    [[ -z "$result" ]] && result=$'0\t0\tunknown'
+
+    [[ -n "$cache" ]] && _agent_cache_set "$cache" "$mtime" "$result"
+    printf '%s' "$result"
+}
+
+# get_agent_snippet <agent-jsonl> <maxlen> [cache-file]
+#   Last assistant text across the tail of the transcript, flattened to a
+#   single line and truncated to maxlen. Reads only tail -c 65536 for
+#   speed; parses per-line via fromjson? so a partial first line (cut mid
+#   record by the byte-tail) is skipped instead of erroring. Empty output
+#   means "no recent text" — caller should fall back to meta description.
+get_agent_snippet() {
+    local jsonl="$1" maxlen="${2:-60}" cache="$3"
+    [[ ! -f "$jsonl" ]] && printf '' && return
+
+    local mtime=""
+    if [[ -n "$cache" ]]; then
+        mtime=$(_agent_file_mtime "$jsonl")
+        local cached
+        if cached=$(_agent_cache_get "$cache" "$mtime"); then
+            printf '%s' "$cached"
+            return
+        fi
+    fi
+
+    local text
+    text=$(tail -c 65536 "$jsonl" | jq -Rn -r '
+        [inputs | fromjson?] |
+        [.[] | select(.type == "assistant") | (.message.content // [])[]? | select(.type == "text") | .text] |
+        last // empty
+    ' 2>/dev/null)
+
+    # flatten to a single line — a tab surviving here counts as 1 char in
+    # ${#row_plain} at render time, but the terminal expands it to the next
+    # 8-column tab stop, so a row that "fits" per the width check can still
+    # wrap and misalign every row below it for that frame (B3). Strip other
+    # C0 control chars too, same reasoning, cheap insurance.
+    text="${text//$'\n'/ }"
+    text="${text//$'\r'/ }"
+    text="${text//$'\t'/ }"
+    text=$(printf '%s' "$text" | tr -d '\000-\010\013\014\016-\037')
+
+    if (( ${#text} > maxlen )); then
+        text="${text:0:$(( maxlen - 1 ))}…"
+    fi
+
+    [[ -n "$cache" ]] && _agent_cache_set "$cache" "$mtime" "$text"
+    printf '%s' "$text"
+}
+
+# format_age <seconds>
+#   Pretty-prints an age/duration: 45 -> 45s, 300 -> 5m, 7200 -> 2h
+format_age() {
+    local s="$1"
+    [[ -z "$s" ]] && printf '?' && return
+    if (( s < 60 )); then
+        printf '%ds' "$s"
+    elif (( s < 3600 )); then
+        printf '%dm' "$(( s / 60 ))"
+    else
+        printf '%dh' "$(( s / 3600 ))"
+    fi
 }
 
 # format_tokens <number>

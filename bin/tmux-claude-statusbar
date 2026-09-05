@@ -1,24 +1,64 @@
 #!/usr/bin/env bash
 
-# Print permission-needed count for tmux status bar.
-# Called by tmux every status-interval (~5s). Must be fast.
-# Output: "🔴 N " if N>0 sessions need permission, else empty string.
-count=0
-while IFS= read -r session; do
-    content=$(tmux capture-pane -t "${session}:1" -p -S -30 2>/dev/null | grep -v '^$' | tail -10)
-    [[ -z "$content" ]] && continue
+# Ambient attention layer for the tmux status bar.
+# Called by tmux every status-interval (~5s) — must stay fast (<200ms).
+# Output: "🔴N ✅N ●N " — zero-count segments are omitted entirely, and an
+# all-zero result prints nothing (preserves the pre-existing empty
+# status-right behavior when nothing needs attention).
+#   🔴 permission — sessions waiting on a permission/plan prompt
+#   ✅ done       — claude PANES finished but not yet seen (Stop hook
+#                   flags, per pane — see bin/tmux-claude-attention; two
+#                   unseen claudes in one session count as ✅2)
+#   ●  working    — sessions actively streaming output
+#
+# The scan itself lives in tmux-claude-lib's scan_claude_sessions: every
+# pane owned by a live claude process (any window of any session — found by
+# tty, because wrapper shells make pane_current_command lie) is captured in
+# one batched tmux round trip and classified, aggregating worst-status per
+# session (permission > working > idle). Non-claude panes are never
+# captured, so a vim buffer or `git diff` showing this script's "Yes"/"No"/
+# "to interrupt" literals can't false-positive by construction (the round-1
+# finding that used to require an after-the-fact tty gate here). 🔴/● count
+# per session (a session with two working claudes is one ●); ✅ counts per
+# pane, since each flag is an independent "go look at this".
+#
+# Side effect: publishes per-session status to
+# ~/.cache/claude-attention/status.tsv ("<session>\t<status>\t<pane>" per
+# claude session — pane is the one exhibiting the worst status, written
+# atomically every tick). tmux-sessionizer reads it for its row colors
+# instead of doing any pane scanning of its own at keypress time.
 
-    # Skip if working
-    echo "$content" | grep -q "to interrupt" && continue
+source ~/dotfiles/bin/tmux-claude-lib
 
-    # Count permission prompts (Yes + No visible) and plan mode questions
-    if echo "$content" | grep -q "Yes" && echo "$content" | grep -q "No"; then
-        (( count++ ))
-    elif echo "$content" | tail -2 | grep -q "^Enter to select"; then
-        (( count++ ))
-    fi
-done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^claude-')
+STATUS_DIR="$HOME/.cache/claude-attention"
 
-if (( count > 0 )); then
-    printf '🔴 %d ' "$count"
+status_lines=$(scan_claude_sessions)
+
+permission_count=0
+working_count=0
+if [[ -n "$status_lines" ]]; then
+    # 3rd scan field (worst-status pane, for C-y's jump) is unused here
+    while IFS=$'\t' read -r _name _status _; do
+        case "$_status" in
+            permission) (( permission_count++ )) ;;
+            working)    (( working_count++ )) ;;
+        esac
+    done <<< "$status_lines"
 fi
+
+# Publish the per-session status cache (atomic: tmp + mv). Written even when
+# empty so a consumer never acts on sessions that no longer run claude; the
+# sessionizer additionally ignores the file when its mtime is stale.
+mkdir -p "$STATUS_DIR"
+if { [[ -z "$status_lines" ]] || printf '%s\n' "$status_lines"; } > "${STATUS_DIR}/.status.$$.tmp" 2>/dev/null; then
+    mv -f "${STATUS_DIR}/.status.$$.tmp" "${STATUS_DIR}/status.tsv"
+fi
+
+done_count=$(~/dotfiles/bin/tmux-claude-attention list 2>/dev/null | grep -c .)
+
+out=""
+(( permission_count > 0 )) && out+="🔴${permission_count} "
+(( done_count > 0 )) && out+="✅${done_count} "
+(( working_count > 0 )) && out+="●${working_count} "
+
+printf '%s' "$out"
