@@ -130,21 +130,28 @@ CODEX_MAP_DIR="$HOME/.cache/claude-attention/codex"
 #   codex-session-start) is authoritative — it is pane-exact, and it is
 #   rewritten after /new. Fallback for a codex started before the hooks were
 #   trusted: the newest rollout whose session_meta cwd is this pane's cwd.
+#
+#   The map is keyed by bare pane id, and tmux reuses pane ids after a server
+#   restart — so an entry is only trusted while the cwd it recorded is still
+#   the pane's own (field 3). A mismatch means the id was recycled, or the
+#   codex was killed and relaunched elsewhere; treating it as a miss keeps a
+#   fresh codex from reading another project's thread until its first prompt
+#   rewrites the map. An unknown pane cwd (no server to ask) trusts the entry.
 codex_find_pane_jsonl() {
     local pane="${1#%}"
     local mapping="${CODEX_MAP_DIR}/${pane}.tsv"
-    local tpath
+    local tpath mcwd pcwd
+    pcwd=$(tmux display-message -p -t "%${pane}" '#{pane_current_path}' 2>/dev/null)
     if [[ -f "$mapping" ]]; then
-        # fields: session_id, rollout path, cwd — only the path is needed here
-        IFS=$'\t' read -r _ tpath _ < "$mapping"
-        if [[ -n "$tpath" && -f "$tpath" ]]; then
+        # fields: session_id, rollout path, cwd
+        IFS=$'\t' read -r _ tpath mcwd < "$mapping"
+        if [[ -n "$tpath" && -f "$tpath" ]] &&
+           [[ -z "$pcwd" || -z "$mcwd" || "$pcwd" == "$mcwd" ]]; then
             printf '%s' "$tpath"
             return
         fi
     fi
 
-    local pcwd
-    pcwd=$(tmux display-message -p -t "%${pane}" '#{pane_current_path}' 2>/dev/null)
     [[ -z "$pcwd" ]] && return
     _codex_newest_rollout_for_cwd "$pcwd"
 }

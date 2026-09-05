@@ -85,11 +85,26 @@ IFS=$'\t' read -r out all turns cost <<< "$(codex_get_totals "$tmp/rl.jsonl")"
 check "rate-limit window in COST" "5h:42%" "$cost"
 
 echo "── codex_find_pane_jsonl"
+# The lookup asks tmux for the pane's cwd; stub it so these tests never talk
+# to a server, real or otherwise. %42 sits in the mapped cwd, %44 elsewhere,
+# and any other pane is unknown to the stub (as it would be after a restart).
+tmux() {
+    case "$*" in
+        *"%42"*) printf '/home/u/dev/proj\n' ;;
+        *"%44"*) printf '/home/u/dev/elsewhere\n' ;;
+        *) return 1 ;;
+    esac
+}
+
 CODEX_MAP_DIR="$tmp/map"
 mkdir -p "$CODEX_MAP_DIR"
 printf '%s\t%s\t%s\n' "sess-id" "$rollout" "/home/u/dev/proj" > "$CODEX_MAP_DIR/42.tsv"
 check "map hit (bare pane id)" "$rollout" "$(codex_find_pane_jsonl 42)"
 check "map hit (%-prefixed)"   "$rollout" "$(codex_find_pane_jsonl %42)"
+
+# Pane ids are reused after a tmux server restart: an entry recorded for a
+# different cwd belongs to a dead thread and must not be read.
+printf '%s\t%s\t%s\n' "sess-id" "$rollout" "/home/u/dev/proj" > "$CODEX_MAP_DIR/44.tsv"
 
 printf '%s\t%s\t%s\n' "sess-id" "$tmp/gone.jsonl" "/home/u/dev/proj" > "$CODEX_MAP_DIR/43.tsv"
 # A stale entry (rollout deleted) must never be returned: the lookup falls
@@ -98,6 +113,7 @@ printf '%s\t%s\t%s\n' "sess-id" "$tmp/gone.jsonl" "/home/u/dev/proj" > "$CODEX_M
 CODEX_SESSIONS_DIR="$tmp/empty-sessions"
 mkdir -p "$CODEX_SESSIONS_DIR"
 check "stale map entry ignored" "" "$(codex_find_pane_jsonl 43 2>/dev/null)"
+check "map entry for another cwd ignored" "" "$(codex_find_pane_jsonl 44 2>/dev/null)"
 
 echo "── _codex_newest_rollout_for_cwd"
 CODEX_SESSIONS_DIR="$tmp/sessions/2026/09/05"

@@ -28,7 +28,12 @@ AGENT_DEFAULT_FILE="$HOME/dotfiles/other/tmux-agent-default"
 #   Prints the agent new sessions get when nothing overrides it.
 agent_default() {
     local a=""
-    [[ -f "$AGENT_DEFAULT_FILE" ]] && read -r a < "$AGENT_DEFAULT_FILE"
+    # `read` returns 1 on a last line with no newline, which bash >= 4 would
+    # let errexit kill a caller with (bash 3.2 does not) — hence the `|| :`.
+    # Trailing whitespace and a CR (a CRLF file) are trimmed off the value so
+    # a hand-edited file still means what it says.
+    [[ -f "$AGENT_DEFAULT_FILE" ]] && { read -r a < "$AGENT_DEFAULT_FILE" || :; }
+    a="${a%%[[:space:]]*}"
     case "$a" in
         claude|codex) printf '%s' "$a" ;;
         *)            printf 'claude' ;;
@@ -106,13 +111,24 @@ new_hub_session() {
 #   bare `node` for Claude Code (the npm bin is literally claude.exe, and a
 #   wrapper/shim shows as node). One ps for the whole machine — this runs on
 #   every statusbar tick, so the arm count must stay at one.
+#   TIES: a tty can own both a codex and a node process — a codex running an
+#   npm tool or a dev server, or an npm-installed codex whose node wrapper is
+#   still the parent. codex wins those (the reverse sort on the agent field
+#   puts it first, and every lookup takes the first match for a tty), because
+#   a bare `node` is the weakest of the three signals.
 agent_ttys() {
-    ps -A -o tty=,comm= 2>/dev/null \
-        | awk '$1 != "??" {
-                   if ($2 ~ /codex/) { print $1 "\tcodex" }
-                   else if ($2 ~ /claude/ || $2 ~ /(^|\/)node$/) { print $1 "\tclaude" }
-               }' \
-        | sort -u
+    ps -A -o tty=,comm= 2>/dev/null | _agent_ttys_filter
+}
+
+# _agent_ttys_filter
+#   The parsing half of agent_ttys, over `ps -o tty=,comm=` lines on stdin.
+#   Split out so it can be tested without a machine full of agents.
+_agent_ttys_filter() {
+    awk '$1 != "??" {
+             if ($2 ~ /codex/) { print $1 "\tcodex" }
+             else if ($2 ~ /claude/ || $2 ~ /(^|\/)node$/) { print $1 "\tclaude" }
+         }' \
+        | sort -u -t$'\t' -k1,1 -k2,2r
 }
 
 # claude_ttys
@@ -177,21 +193,6 @@ get_claude_panes() {
         done \
         | sort -t$'\t' -k1,1rn -k4,4n \
         | cut -f2-5
-}
-
-# is_claude_pane_command <pane-current-command>
-#   True (exit 0) if the given #{pane_current_command} value looks like a
-#   running agent — claude (whose foreground process is typically `claude`
-#   itself, or `node` when invoked via a wrapper/shim) or codex. Gates the
-#   Yes/No-substring and "to interrupt" heuristics in classify_pane_status
-#   to panes that are actually running an agent, so an unrelated pane whose
-#   visible text happens to contain those same substrings (vim or `git
-#   diff` displaying this very script's literals, for instance) is never
-#   misclassified as needing attention.
-is_claude_pane_command() {
-    # matches claude / claude.exe (the npm bin is literally claude.exe) /
-    # node / codex
-    [[ "$1" == claude* || "$1" == "node" || "$1" == codex* ]]
 }
 
 # classify_pane_status <raw-content> [agent]
