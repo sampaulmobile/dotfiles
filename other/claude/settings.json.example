@@ -109,7 +109,7 @@
     ]
   },
   "alwaysThinkingEnabled": true,
-  "effortLevel": "xhigh",
+  "effortLevel": "high",
   "voice": {
     "enabled": true,
     "mode": "hold"
