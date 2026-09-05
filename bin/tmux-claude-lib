@@ -296,24 +296,30 @@ classify_pane_status() {
     echo "unknown"
 }
 
-# get_session_status <tmux-session-name>
+# get_session_status <tmux-session-name> [agent]
 #   Prints: working | idle | permission | unknown
-#   Detects state by inspecting the last lines of the tmux pane.
+#   Detects state by inspecting the last lines of the tmux pane. The agent
+#   defaults to the session's own (@agent), so a codex session classifies by
+#   codex's rules without the caller having to know.
 get_session_status() {
     local session="$1"
+    local agent="${2:-}"
+    [[ -n "$agent" ]] || agent=$(session_agent "$session")
     local raw
     raw=$(tmux capture-pane -t "${session}:1" -p -S -30 2>/dev/null)
-    classify_pane_status "$raw"
+    classify_pane_status "$raw" "$agent"
 }
 
-# get_pane_status <pane-id>
+# get_pane_status <pane-id> [agent]
 #   Prints: working | idle | permission | unknown
 #   Same classifier as get_session_status, but for one exact pane — the
-#   dashboard's per-row status now that rows are panes, not sessions.
+#   dashboard's per-row status now that rows are panes, not sessions. The
+#   agent defaults to claude; the dashboard passes the pane's own (its rows
+#   carry it from get_claude_panes).
 get_pane_status() {
     local raw
     raw=$(tmux capture-pane -t "$1" -p -S -30 2>/dev/null)
-    classify_pane_status "$raw"
+    classify_pane_status "$raw" "${2:-claude}"
 }
 
 # scan_claude_sessions

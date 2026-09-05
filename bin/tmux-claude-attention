@@ -51,6 +51,12 @@
 #                    pane is still live, newest-first. Prunes flags for
 #                    dead panes (and legacy session-level flags) as it
 #                    goes.
+#   codex-session-start
+#                    Record the calling pane's codex session in the map dir
+#                    (see below), reading the hook's JSON payload on stdin.
+#                    Wired to codex's SessionStart hook in dots/codex/hooks.json.
+#   codex-session-end
+#                    Drop that pane's map entry (codex's SessionEnd hook).
 #   jump [client-tty]
 #                    Switch to the session most needing attention: first a
 #                    session waiting on a permission prompt, else the
@@ -65,6 +71,18 @@
 source ~/dotfiles/bin/tmux-claude-lib
 
 FLAG_DIR="$HOME/.cache/claude-attention"
+
+# Pane -> codex rollout map. Claude Code records its own tmux pane in
+# ~/.claude/sessions/*.json, so the dashboard can resolve a pane to a
+# transcript directly; codex records nothing of the sort, so its SessionStart
+# hook writes the mapping here instead:
+#   <FLAG_DIR>/codex/<pane-id-sans-%>.tsv = "<session_id>\t<rollout>\t<cwd>"
+# One file per pane, replaced (not appended) on every SessionStart — which
+# codex fires on a thread's first prompt and again after /new, so the entry
+# follows the pane through new threads. The dashboard falls back to the
+# newest rollout matching the pane's cwd when there is no entry (a codex
+# started before the hooks were trusted, say).
+CODEX_MAP_DIR="$FLAG_DIR/codex"
 
 # flag_path <session> <pane-id>
 #   Pane ids are server-unique (%N), but the session name stays in the
@@ -135,6 +153,17 @@ cmd_list() {
     local live=$'\n'
     live+=$(tmux list-panes -a -F '#{session_name}@#{pane_id}' 2>/dev/null)
     live+=$'\n'
+
+    # prune map entries for panes that are gone (codex's SessionEnd removes
+    # its own, but a killed pane never gets one) — same live-pane set, no
+    # extra tmux round trip
+    local m mpane
+    for m in "$CODEX_MAP_DIR"/*.tsv; do
+        [[ -e "$m" ]] || continue
+        mpane="${m##*/}"
+        mpane="${mpane%.tsv}"
+        [[ "$live" == *"@%${mpane}"$'\n'* ]] || rm -f "$m"
+    done
 
     local f key session pane
     for f in "$FLAG_DIR"/*.done; do
@@ -219,13 +248,52 @@ cmd_jump() {
     tmux display-message "${cflag[@]}" "nothing needs attention"
 }
 
+cmd_codex_session_start() {
+    # Not in tmux — nothing to map. (Hooks inherit the shell environment, so
+    # $TMUX_PANE is the pane codex runs in.)
+    [[ -z "${TMUX_PANE:-}" ]] && exit 0
+
+    local input sid tpath cwd
+    input=$(cat)
+    # one field per LINE, not @tsv: tab is IFS whitespace, so a tab-split
+    # read collapses an empty field and shifts the rest (see
+    # bin/tmux-claude-notify for the same trap)
+    {
+        read -r sid
+        read -r tpath
+        read -r cwd
+    } <<< "$(printf '%s' "$input" |
+        jq -r '.session_id // "", .transcript_path // "", .cwd // ""' 2>/dev/null)"
+
+    # A payload without a transcript path is useless to the dashboard; leave
+    # any existing entry alone rather than replacing it with nothing.
+    [[ -z "$tpath" ]] && exit 0
+
+    mkdir -p "$CODEX_MAP_DIR"
+    local out="$CODEX_MAP_DIR/${TMUX_PANE#%}.tsv"
+    local tmp="${out}.$$.tmp"
+    # atomic: the dashboard reads these while codex writes them
+    if printf '%s\t%s\t%s\n' "$sid" "$tpath" "$cwd" > "$tmp" 2>/dev/null; then
+        mv -f "$tmp" "$out"
+    else
+        rm -f "$tmp"
+    fi
+}
+
+cmd_codex_session_end() {
+    [[ -z "${TMUX_PANE:-}" ]] && exit 0
+    rm -f "$CODEX_MAP_DIR/${TMUX_PANE#%}.tsv"
+}
+
 case "${1:-}" in
-    flag-done) cmd_flag_done ;;
-    clear)     cmd_clear "${2:-}" ;;
-    list)      cmd_list ;;
-    jump)      cmd_jump "${2:-}" ;;
+    flag-done)           cmd_flag_done ;;
+    clear)               cmd_clear "${2:-}" ;;
+    list)                cmd_list ;;
+    jump)                cmd_jump "${2:-}" ;;
+    codex-session-start) cmd_codex_session_start ;;
+    codex-session-end)   cmd_codex_session_end ;;
     *)
-        echo "usage: $(basename "$0") {flag-done|clear <session>|list|jump [client-tty]}" >&2
+        echo "usage: $(basename "$0") {flag-done|clear <session>|list|jump [client-tty]|codex-session-start|codex-session-end}" >&2
         exit 1
         ;;
 esac

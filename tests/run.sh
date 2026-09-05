@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+#
+# Run every test in this directory. All of them are offline and side-effect
+# free: no tmux server is started or touched, no agent is launched, nothing
+# outside a mktemp dir is written.
+#
+#   tests/run.sh
+#
+# macOS ships bash 3.2 as /bin/bash and the library must keep working there,
+# so each suite runs under /bin/bash as well as the default bash on PATH.
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+suites=(test-classify.sh test-notify.sh test-codex-rollout.sh)
+shells=(/bin/bash bash)
+
+failed=0
+for shell in "${shells[@]}"; do
+    command -v "$shell" >/dev/null 2>&1 || continue
+    ver=$("$shell" -c 'echo $BASH_VERSION')
+    for suite in "${suites[@]}"; do
+        printf '\n═══ %s (%s %s)\n' "$suite" "$shell" "$ver"
+        "$shell" "$here/$suite" || failed=1
+    done
+done
+
+echo
+if (( failed )); then
+    echo "SOME TESTS FAILED"
+    exit 1
+fi
+echo "all tests passed"

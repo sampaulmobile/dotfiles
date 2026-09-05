@@ -1,22 +1,31 @@
 #!/usr/bin/env bash
 
-# Interactive dashboard for Claude Code tmux sessions.
-# Shows status, token usage, and model — one row per claude PANE (any
-# window of any session), so a second claude launched outside window 1
+# Interactive dashboard for agent tmux sessions — claude and codex alike.
+# Shows status, token usage, and model — one row per agent PANE (any
+# window of any session), so a second agent launched outside window 1
 # gets its own row (named "session:N") with its own transcript, tokens,
-# and subagent tree.
+# and (claude only) subagent tree.
 # Bound to Ctrl+G via tmux neww.
+#
+# Per-agent differences, all decided by the agent column get_claude_panes
+# reports: claude rows read ~/.claude transcripts and size CONTEXT from the
+# per-model table below; codex rows read ~/.codex rollouts, take their
+# window from the transcript itself, show the rate-limit usage in COST
+# instead of a dollar figure, and have no subagent tree (codex subagents are
+# out of scope for now).
 
 source ~/dotfiles/bin/tmux-claude-lib
 
 CACHE_DIR="/tmp/claude-dashboard"
 mkdir -p "$CACHE_DIR/agents"
 
-# context window per model — drives the CTX% column (percent of window
-# used) and the context coloring. Current lineup (per Anthropic docs,
+# context window per CLAUDE model — drives the CTX% column (percent of
+# window used) and the context coloring. Current lineup (per Anthropic docs,
 # 2026-06): 1M for Fable/Mythos, Opus 5/4.6+, Sonnet 5/4.6, and any [1m]
 # beta variant; 200K for Haiku and older Sonnet/Opus. Unknown → 0 (no
 # percent shown; coloring falls back to absolute thresholds).
+# Codex rows never come here: their rollout states its own
+# model_context_window, which the row carries instead (windows[] below).
 context_window_for() {
     local m="${1#claude-}"
     case "$m" in
@@ -77,11 +86,13 @@ reload_sessions() {
     sessions=()
     panes=()
     names=()
-    local sess pid widx name
-    while IFS=$'\t' read -r sess pid widx; do
+    agents=()
+    local sess pid widx agent name
+    while IFS=$'\t' read -r sess pid widx agent; do
         [[ -z "$pid" ]] && continue
         sessions+=("$sess")
         panes+=("$pid")
+        agents+=("${agent:-claude}")
         name="$sess"
         [[ "$widx" != "1" ]] && name="${name}:${widx}"
         # two claude panes in one window (split): disambiguate by pane id
@@ -142,38 +153,48 @@ kill_selected_row() {
     fi
 }
 
-# get_row_stats <row-name> <jsonl-path>
-#   Token/turn/cost stats for one row's transcript. row-name only keys the
-#   totals cache (it's unique per pane, so two claudes in one session can't
-#   share a cache file).
+# get_row_stats <row-name> <jsonl-path> [agent]
+#   Token/turn/cost stats for one row's transcript, tab-separated:
+#   context, output, total, turns, cost, model, mtime, context_window.
+#   The trailing window is 0 for claude rows (the per-model table sizes
+#   them) and the rollout's own model_context_window for codex rows.
+#   row-name only keys the totals cache (it's unique per pane, so two agents
+#   in one session can't share a cache file).
 get_row_stats() {
     local session="$1"
     local jsonl="$2"
+    local agent="${3:-claude}"
 
     if [[ -z "$jsonl" ]]; then
-        printf '0\t0\t0\t0\t-\tunknown\t0'
+        printf '0\t0\t0\t0\t-\tunknown\t0\t0'
         return
     fi
 
-    # fast: context + model from tail of file
-    local ctx_model
-    ctx_model=$(get_context_and_model "$jsonl")
-    local ctx mdl
-    IFS=$'\t' read -r ctx mdl <<< "$ctx_model"
-
-    # incremental: totals from cache + delta (keyed by jsonl path for /clear safety)
+    # cache path is per row + transcript (hashed so a path can't escape into
+    # a filename); shared by both agents' readers
     local jsonl_hash
     jsonl_hash=$(echo "$jsonl" | md5 -q 2>/dev/null || echo "$jsonl" | md5sum 2>/dev/null | cut -d' ' -f1)
     local totals_cache="${CACHE_DIR}/${session}.${jsonl_hash}.totals"
-    local totals
-    totals=$(get_totals_incremental "$jsonl" "$totals_cache")
-    local tout tall turns cost
-    IFS=$'\t' read -r tout tall turns cost <<< "$totals"
+
+    local ctx mdl win=0 tout tall turns cost mt
+
+    if [[ "$agent" == "codex" ]]; then
+        # rollout: cumulative counters, window from the transcript, COST is
+        # the rate-limit window's usage (plan billing has no per-token cost)
+        IFS=$'\t' read -r ctx mdl win <<< "$(codex_get_context_and_model "$jsonl")"
+        IFS=$'\t' read -r tout tall turns cost <<< "$(codex_get_totals "$jsonl" "$totals_cache")"
+    else
+        # fast: context + model from tail of file
+        IFS=$'\t' read -r ctx mdl <<< "$(get_context_and_model "$jsonl")"
+        # incremental: totals from cache + delta (keyed by jsonl path for
+        # /clear safety)
+        IFS=$'\t' read -r tout tall turns cost <<< "$(get_totals_incremental "$jsonl" "$totals_cache")"
+    fi
 
     # transcript mtime — render shows it as an age on idle/done/permission
-    local mt
     mt=$(_agent_file_mtime "$jsonl")
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s' "$ctx" "$tout" "$tall" "${turns:-0}" "${cost:--}" "$mdl" "${mt:-0}"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
+        "${ctx:-0}" "${tout:-0}" "${tall:-0}" "${turns:-0}" "${cost:--}" "$mdl" "${mt:-0}" "${win:-0}"
 }
 
 # get_row_agent_tree <row-name> <jsonl-path>
@@ -327,7 +348,7 @@ render() {
     # header
     local rhs="[⏎ · x · X · a · r · q]"
     (( cols >= 80 )) && rhs="[⏎ switch · x kill · X prune · a agents · r refresh · q quit]"
-    local title="  Claude Sessions"
+    local title="  Agent Sessions"
     local pad=$(( cols - ${#title} - ${#rhs} ))
     (( pad < 1 )) && pad=1
     out+="${BOLD}${title}${RST}$(printf '%*s' "$pad" '')${DIM}${rhs}${RST}"$'\n'
@@ -430,8 +451,12 @@ render() {
         local ctx_raw="$ctx"
         local ctx_fmt
         ctx_fmt=$(format_tokens "$ctx_raw")
+        # codex rows carry their window from the rollout; claude rows get
+        # it from the per-model table
         local win pct=-1 pct_fmt="-"
-        win=$(context_window_for "$mdl")
+        win="${windows[$i]:-0}"
+        [[ "$win" =~ ^[0-9]+$ ]] || win=0
+        (( win == 0 )) && win=$(context_window_for "$mdl")
         if (( win > 0 )); then
             pct=$(( ctx_raw * 100 / win ))
             pct_fmt="${pct}%"
@@ -451,10 +476,13 @@ render() {
         (( show_output )) && out+="$(printf " %${out_w}s" "$out_tok")"
         (( show_total ))  && out+="$(printf " %${all_w}s" "$all_tok")"
         # COST: "$1.23" = exact (claude's own cost-state snapshot),
-        # "~$1.23" = price-sheet estimate, "-" = neither available
+        # "~$1.23" = price-sheet estimate, "5h:42%" = codex's rate-limit
+        # window usage (plan billing has no per-token cost), "-" = none
         if (( show_cost )); then
             local cost_raw="${costs[$i]:--}" cost_fmt="-"
-            if [[ "$cost_raw" == "~"* ]]; then
+            if [[ "$cost_raw" == *"%" ]]; then
+                cost_fmt="$cost_raw"
+            elif [[ "$cost_raw" == "~"* ]]; then
                 cost_fmt="~$(printf '$%.2f' "${cost_raw#\~}")"
             elif [[ "$cost_raw" != "-" ]]; then
                 cost_fmt=$(printf '$%.2f' "$cost_raw")
@@ -636,6 +664,7 @@ load_data() {
     costs=()
     models=()
     mtimes=()
+    windows=()
     agent_lines=()
     agent_working_counts=()
     agent_total_counts=()
@@ -650,6 +679,7 @@ load_data() {
         costs+=("-")
         models+=("")
         mtimes+=("0")
+        windows+=("0")
         agent_lines+=("")
         agent_working_counts+=("0")
         agent_total_counts+=("0")
@@ -666,14 +696,25 @@ load_data() {
     for i in "${!sessions[@]}"; do
         (
             pid="${panes[$i]}"
+            agent="${agents[$i]:-claude}"
             cwd=$(tmux display-message -p -t "$pid" '#{pane_current_path}' 2>/dev/null)
             cwd_ok=1
             [[ -n "$cwd" && ! -d "$cwd" ]] && cwd_ok=0
-            st=$(get_pane_status "$pid")
-            jsonl=$(find_pane_jsonl "$pid")
-            stats=$(get_row_stats "${names[$i]}" "$jsonl")
+            st=$(get_pane_status "$pid" "$agent")
+            if [[ "$agent" == "codex" ]]; then
+                jsonl=$(codex_find_pane_jsonl "$pid")
+            else
+                jsonl=$(find_pane_jsonl "$pid")
+            fi
+            stats=$(get_row_stats "${names[$i]}" "$jsonl" "$agent")
             printf '%s\t%s\t%s' "$cwd_ok" "$st" "$stats" > "${parallel_dir}/${i}"
-            get_row_agent_tree "${names[$i]}" "$jsonl" > "${parallel_dir}/${i}.agents"
+            # subagent trees are a claude concept (agent-*.jsonl under the
+            # session dir); codex rows get an empty file
+            if [[ "$agent" == "codex" ]]; then
+                : > "${parallel_dir}/${i}.agents"
+            else
+                get_row_agent_tree "${names[$i]}" "$jsonl" > "${parallel_dir}/${i}.agents"
+            fi
         ) &
     done
     wait
@@ -684,8 +725,8 @@ load_data() {
     for i in "${!sessions[@]}"; do
         local result_file="${parallel_dir}/${i}"
         if [[ -f "$result_file" ]]; then
-            local cwd_ok st ctx tout tall turns cost mdl mt
-            IFS=$'\t' read -r cwd_ok st ctx tout tall turns cost mdl mt < "$result_file"
+            local cwd_ok st ctx tout tall turns cost mdl mt win
+            IFS=$'\t' read -r cwd_ok st ctx tout tall turns cost mdl mt win < "$result_file"
             [[ "$cwd_ok" == "0" ]] && st="gone"
             statuses[$i]="$st"
             contexts[$i]="$ctx"
@@ -695,6 +736,7 @@ load_data() {
             costs[$i]="${cost:--}"
             models[$i]=$(short_model "$mdl")
             mtimes[$i]="${mt:-0}"
+            windows[$i]="${win:-0}"
         fi
 
         local agents_file="${parallel_dir}/${i}.agents"
@@ -724,11 +766,13 @@ selected=0
 sessions=()
 panes=()
 names=()
+agents=()
 statuses=()
 contexts=()
 outputs=()
 total_alls=()
 models=()
+windows=()
 agent_lines=()
 agent_working_counts=()
 agent_total_counts=()
@@ -739,7 +783,7 @@ reload_sessions
 
 if (( session_count == 0 )); then
     printf '\033[H\033[2J'
-    printf "${DIM}  No claude sessions running.${RST}\n"
+    printf "${DIM}  No agent sessions running.${RST}\n"
     read -rsn1 key
     exit 0
 fi
@@ -809,7 +853,7 @@ while true; do
                         reload_sessions
                         if (( session_count == 0 )); then
                             printf '\033[H\033[2J'
-                            printf "${DIM}  No claude sessions running.${RST}\n"
+                            printf "${DIM}  No agent sessions running.${RST}\n"
                             read -rsn1
                             exit 0
                         fi
@@ -850,7 +894,7 @@ while true; do
                 reload_sessions
                 if (( session_count == 0 )); then
                     printf '\033[H\033[2J'
-                    printf "${DIM}  No claude sessions running.${RST}\n"
+                    printf "${DIM}  No agent sessions running.${RST}\n"
                     read -rsn1
                     exit 0
                 fi
