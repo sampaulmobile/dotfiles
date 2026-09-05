@@ -93,11 +93,12 @@ def usage_cost($model):
     end;
 # ISO timestamp (with ms) -> epoch seconds.
 def ts2e: sub("\\.[0-9]+Z$"; "Z") | strptime("%Y-%m-%dT%H:%M:%SZ") | mktime;
-# ISO UTC timestamp -> local-time display string. Summary rows carry these
-# instead of the raw UTC strings; every consumer that compares them (sort,
-# the --since cut, merge_chains earliest-start) compares like-with-like
-# because SINCE_ISO is computed in local time too.
-def localts: ts2e | strflocaltime("%Y-%m-%dT%H:%M:%S");
+# ISO UTC timestamp -> local-time display string ("2026-09-04 06:05:33
+# EDT"). Summary rows carry these instead of the raw UTC strings; every
+# consumer that compares them (sort, the --since cut, merge_chains
+# earliest-start) compares like-with-like because SINCE_ISO uses the same
+# local-time format (the zone suffix only ever ties equal prefixes).
+def localts: ts2e | strflocaltime("%Y-%m-%d %H:%M:%S %Z");
 # real assistant turns (synthetic error records carry model "<synthetic>")
 def is_turn: .type == "assistant" and .message.usage != null
              and ((.message.model // "") | startswith("claude"));
@@ -419,8 +420,8 @@ render_session_rows() {
         $6 == 0 && $7 == 0 && $15 == 0 { next }
         {
             proj = $2; sub(".*/", "", proj)
-            started = substr($4, 6, 11); sub("T", " ", started)
-            last = substr($5, 6, 11); sub("T", " ", last)
+            started = substr($4, 6, 11)
+            last = substr($5, 6, 11)
             total = $11 + $12 + $13 + $14
             gt_cost += $15; gt_total += total; gt_turns += $6; gt_agents += $7; gt_n++
             if ($16 !~ /^actual/) anyest = 1
@@ -723,8 +724,8 @@ while [[ $# -gt 0 ]]; do
             # in-file activity timestamp. Rows carry LOCAL-time strings
             # (localts in the jq prelude), so the cutoff is local too —
             # like-with-like ISO strings compare fine.
-            SINCE_ISO=$(date -v "-${MMIN}M" +%Y-%m-%dT%H:%M:%S 2>/dev/null \
-                        || date -d "${MMIN} minutes ago" +%Y-%m-%dT%H:%M:%S)
+            SINCE_ISO=$(date -v "-${MMIN}M" "+%Y-%m-%d %H:%M:%S %Z" 2>/dev/null \
+                        || date -d "${MMIN} minutes ago" "+%Y-%m-%d %H:%M:%S %Z")
             RANGE_DESC="last $1 (sessions active since ${SINCE_ISO}; straddlers report lifetime totals)" ;;
         -h|--help|help) usage ;;
         *) ARGS+=("$1") ;;
