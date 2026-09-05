@@ -11,4 +11,7 @@ other/*
 !other/claude
 other/claude/*
 !other/claude/*.example
+!other/codex
+other/codex/*
+!other/codex/*.example
 

@@ -1,0 +1,25 @@
+# Global instructions (codex)
+
+Machine-local: copied to `other/codex/AGENTS.md` by `bin/seed_other.sh` and
+linked to `~/.codex/AGENTS.md` by `bin/symlink_files.sh`. Codex has no rules
+directory, so anything that would be a `dots/claude/rules/*.md` file for
+Claude Code goes here by hand — keep it short, and keep private details out of
+the repo by editing the real file, never this template.
+
+## Python
+
+- Run Python tooling through `uv run` (`uv run python`, `uv run pytest`,
+  `uv run ruff`) so it resolves to the project's virtualenv.
+
+## tmux
+
+- The default tmux server hosts every live agent session on this machine.
+  Never run `kill-server`, `kill-session`, `source-file`, or `set-hook`
+  against it. Tests that need a server must pass a throwaway socket
+  (`tmux -L <name> ...`) spelled out in the command itself.
+
+## Worktrees
+
+- Anchor every command at the worktree you are working in (`git -C <path>`,
+  absolute paths, or `cd <path> && ...` in one command). A shell's cwd does
+  not survive between steps.

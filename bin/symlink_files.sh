@@ -37,6 +37,49 @@ link() {
     ln -sv "$1" "$2"
 }
 
+# Helper: layer the tracked generic items of <src-dir> into the private
+# <dst-dir> as RELATIVE symlinks, so a tracked and a private set coexist in
+# one directory (~/.claude/skills, ~/.agents/skills). Relative targets keep
+# the links valid after an `other.tgz` migration to another machine.
+#   layer_tracked_items <tracked-src-dir> <private-dst-dir> [allowlist-file]
+# With an allowlist file, only the names listed in it (one per line, '#'
+# comments ignored by construction — a comment never equals a filename) are
+# layered; without one, everything in <src-dir> is.
+# Dangling links (tracked item removed or renamed) are pruned first; a real
+# file/dir in <dst-dir> with the same name as a tracked item is a private
+# entry that WINS and is left alone (warned).
+layer_tracked_items() {
+    local src_dir="$1" dst_dir="$2" allow="$3"
+    local root=$HOME/dotfiles
+    local rel_src="${src_dir#"$root"/}"
+    local rel_dst="${dst_dir#"$root"/}"
+
+    # ../ per path component of the destination, i.e. climb back to $root
+    local up="" rest="$rel_dst"
+    while [[ -n "$rest" ]]; do
+        up="../$up"
+        [[ "$rest" == */* ]] || break
+        rest="${rest#*/}"
+    done
+
+    mkdir -p "$dst_dir"
+    local entry src name dst
+    for entry in "$dst_dir"/*; do
+        [[ -L "$entry" && ! -e "$entry" ]] && rm -v "$entry"
+    done
+    for src in "$src_dir"/*; do
+        [[ -e "$src" ]] || continue
+        name=$(basename "$src")
+        [[ -n "$allow" ]] && ! grep -qxF "$name" "$allow" 2>/dev/null && continue
+        dst=$dst_dir/$name
+        if [[ -e "$dst" && ! -L "$dst" ]]; then
+            echo "WARN: $dst is a private entry shadowing the tracked one — left as is" >&2
+            continue
+        fi
+        ln -sfnv "${up}${rel_src}/${name}" "$dst"
+    done
+}
+
 # ===== Common dotfiles (both platforms) =====
 common_files="gitconfig gitignore tmux.conf tmux.remote.conf"
 
@@ -69,21 +112,24 @@ mkdir -p ~/.claude $other/claude/skills $other/claude/rules $other/claude/agents
 [[ -f $other/claude/settings.json ]] && link $other/claude/settings.json ~/.claude/settings.json
 for kind in skills rules agents; do
     link $other/claude/$kind ~/.claude/$kind
-    # prune dangling links (tracked item removed or renamed)
-    for entry in $other/claude/$kind/*; do
-        [[ -L "$entry" && ! -e "$entry" ]] && rm -v "$entry"
-    done
-    for src in $dir/claude/$kind/*; do
-        [[ -e "$src" ]] || continue
-        name=$(basename "$src")
-        dst=$other/claude/$kind/$name
-        if [[ -e "$dst" && ! -L "$dst" ]]; then
-            echo "WARN: $dst is a private $kind entry shadowing the tracked one — left as is" >&2
-            continue
-        fi
-        ln -sfnv "../../../dots/claude/$kind/$name" "$dst"
-    done
+    layer_tracked_items "$dir/claude/$kind" "$other/claude/$kind" ""
 done
+
+# ===== codex =====
+# Same two layers as claude, mapped onto codex's paths: ~/.codex holds machine
+# state, so config.toml and AGENTS.md are FILE links into other/codex/
+# (private, gitignored — codex writes its own [projects] trust entries into
+# config.toml) while the generic hooks.json is a file link into dots/codex/.
+# Skills: ~/.agents/skills is codex's user-level skill dir, linked to
+# other/codex/skills so anything dropped there is private by default; the
+# harness-neutral tracked skills named in dots/codex/shared-skills are layered
+# in as per-item relative links to the SAME files claude uses.
+mkdir -p ~/.codex ~/.agents "$other/codex/skills"
+[[ -f $other/codex/config.toml ]] && link "$other/codex/config.toml" ~/.codex/config.toml
+[[ -f $other/codex/AGENTS.md ]] && link "$other/codex/AGENTS.md" ~/.codex/AGENTS.md
+link "$dir/codex/hooks.json" ~/.codex/hooks.json
+link "$other/codex/skills" ~/.agents/skills
+layer_tracked_items "$dir/claude/skills" "$other/codex/skills" "$dir/codex/shared-skills"
 
 # ===== starship =====
 mkdir -p ~/.config
