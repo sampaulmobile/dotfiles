@@ -62,8 +62,13 @@ check "cost falls back to -" "-" "$cost"
 echo "── codex_get_totals: mtime cache"
 cache="$tmp/totals.cache"
 first=$(codex_get_totals "$rollout" "$cache")
-[[ -f "$cache" ]] && { printf '  ok   %-34s\n' "cache file written"; pass=$(( pass + 1 )); } \
-                  || { printf '  FAIL %-34s\n' "cache file written"; fail=$(( fail + 1 )); }
+if [[ -f "$cache" ]]; then
+    printf '  ok   %-34s\n' "cache file written"
+    pass=$(( pass + 1 ))
+else
+    printf '  FAIL %-34s\n' "cache file written"
+    fail=$(( fail + 1 ))
+fi
 second=$(codex_get_totals "$rollout" "$cache")
 check "cached result matches" "$first" "$second"
 

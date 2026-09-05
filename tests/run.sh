@@ -17,6 +17,8 @@ shells=(/bin/bash bash)
 failed=0
 for shell in "${shells[@]}"; do
     command -v "$shell" >/dev/null 2>&1 || continue
+    # single quotes on purpose: $BASH_VERSION must expand in the TARGET shell
+    # shellcheck disable=SC2016
     ver=$("$shell" -c 'echo $BASH_VERSION')
     for suite in "${suites[@]}"; do
         printf '\n═══ %s (%s %s)\n' "$suite" "$shell" "$ver"
