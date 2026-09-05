@@ -39,6 +39,14 @@ Verified against codex-cli 0.153.4.
                                                          skills inside)
    ```
 
+   It creates `~/.codex` and `~/.agents` on every machine, codex installed
+   or not (empty dirs cost nothing, and the links are then already in place),
+   and a pre-existing REAL `~/.agents/skills` directory is moved into the
+   `~/DELETE_dotfiles-<timestamp>` backup dir before the link replaces it —
+   the same policy as the `~/.claude` dirs, so hand-written skills there are
+   recoverable but no longer live until you move them into
+   `other/codex/skills/`.
+
    Then paste the saved `[projects]` block back into
    `other/codex/config.toml` — future trust entries codex writes land there
    too (gitignored, so nothing private is ever committed).
