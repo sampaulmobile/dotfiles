@@ -13,26 +13,83 @@ CLAUDE_PROJECTS_DIR="$HOME/.claude/projects"
 LIVE_AGENT_SECS=120
 STALE_AGENT_SECS=1800
 
-# new_hub_session <session-name> <dir>
+# ── agents ──────────────────────────────────────────────
+#   Two agent backends share this whole layer: `claude` (Claude Code) and
+#   `codex` (OpenAI's Codex CLI). The scripts keep their tmux-claude-* names;
+#   "agent" is the concept inside them. A session's agent is pinned as the
+#   tmux session option @agent when the session is built, so every later
+#   lookup (C-Space, prefix+C, the dashboard) asks the session, not a guess.
+
+# other/tmux-agent-default: one line, `claude` or `codex` (private,
+# untracked). Missing/garbage → claude.
+AGENT_DEFAULT_FILE="$HOME/dotfiles/other/tmux-agent-default"
+
+# agent_default
+#   Prints the agent new sessions get when nothing overrides it.
+agent_default() {
+    local a=""
+    [[ -f "$AGENT_DEFAULT_FILE" ]] && read -r a < "$AGENT_DEFAULT_FILE"
+    case "$a" in
+        claude|codex) printf '%s' "$a" ;;
+        *)            printf 'claude' ;;
+    esac
+}
+
+# agent_other <agent>
+#   The other backend — what the sessionizer's ctrl-x / Option+Enter starts.
+agent_other() {
+    if [[ "$1" == "codex" ]]; then printf 'claude'; else printf 'codex'; fi
+}
+
+# session_agent <session-name>
+#   Which agent a session runs: its @agent option, falling back to the
+#   default (sessions created before this option existed, or by hand).
+session_agent() {
+    local a
+    # plain name: the "=" exact-match prefix that most target-session
+    # arguments accept makes show-options/set-option come back empty
+    a=$(tmux show-options -qv -t "$1" @agent 2>/dev/null)
+    case "$a" in
+        claude|codex) printf '%s' "$a" ;;
+        *)            agent_default ;;
+    esac
+}
+
+# agent_window_name <agent>
+#   The window name the agent's front-door window carries (and that
+#   tmux-claude-window looks up). Identical to the agent name today; kept as
+#   a function so the naming rule lives in one place.
+agent_window_name() {
+    printf '%s' "$1"
+}
+
+# new_hub_session <session-name> <dir> [agent]
 #   Creates a detached tmux session for a project/worktree with the standard
-#   hub layout: 1 claude (warm) · 2 nvim · 3 zsh — lands on claude, the
+#   hub layout: 1 <agent> (warm) · 2 nvim · 3 zsh — lands on the agent, the
 #   project's front door. The nvim window is left on automatic-rename: it
 #   shows "nvim" while nvim runs and tracks whatever runs there after (only
-#   the claude window's name is pinned — tmux-claude-window finds it by name).
+#   the agent window's name is pinned — tmux-claude-window finds it by name).
+#   [agent] defaults to agent_default; whatever is used is recorded as the
+#   session's @agent option.
 #   Used by tmux-sessionizer and wt-tmux-jump so both entry points build
 #   identical sessions.
 new_hub_session() {
-    local name="$1" dir="$2"
+    local name="$1" dir="$2" agent="${3:-}"
     local nvim_win
 
-    tmux new-session -ds "$name" -c "$dir" -n claude
+    [[ "$agent" == "claude" || "$agent" == "codex" ]] || agent=$(agent_default)
+
+    tmux new-session -ds "$name" -c "$dir" -n "$(agent_window_name "$agent")"
+    # plain name, no "=" prefix: set-option's target parser rejects the
+    # exact-match form outright ("no such session: =name")
+    tmux set-option -t "$name" @agent "$agent"
     tmux set-option -w -t "${name}:1" automatic-rename off
-    tmux send-keys -t "${name}:1" "claude" Enter
+    tmux send-keys -t "${name}:1" "$agent" Enter
 
     nvim_win=$(tmux new-window -t "${name}:" -c "$dir" -P -F '#{window_id}')
     tmux send-keys -t "$nvim_win" "nvim" Enter
 
-    # trailing zsh window; new-window selects it, so go back to claude
+    # trailing zsh window; new-window selects it, so go back to the agent
     tmux new-window -t "${name}:" -c "$dir"
     tmux select-window -t "${name}:1"
 }
