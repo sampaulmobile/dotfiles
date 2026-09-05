@@ -4,7 +4,7 @@
 # ===== CLAUDE CODE =====
 # Per-machine model — ~/.claude/settings.json is shared across machines, so
 # set the model here instead of there.
-# export ANTHROPIC_MODEL='claude-fable-5[1m]'
+# export ANTHROPIC_MODEL='claude-fable-5-1[1m]'
 # export CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1
 # export MAX_THINKING_TOKENS=128000
 
