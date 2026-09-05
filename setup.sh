@@ -4,7 +4,7 @@
 #   1. `git clone https://github.com/sampaulmobile/dotfiles.git ~/dotfiles`
 #      (macOS prompts to install the Xcode Command Line Tools on first git use)
 #   2. `cd ~/dotfiles && ./setup.sh`
-#   3. work machines: `./setup_other.sh` afterwards
+#   3. machines needing the supplemental Brewfile: `./setup_other.sh` afterwards
 # The xcode-select call below no-ops if the CLT are already installed.
 
 # get dotfiles dir
@@ -86,4 +86,4 @@ echo "  - claude (first run: log in)"
 echo "  - bin/hq-init (optional: scaffold ~/dev/hq for the /hq dispatcher)"
 echo "  - sign in to 1Password"
 echo "  - launch Docker.app once to finish its install"
-echo "  - work machines: ./setup_other.sh"
+echo "  - supplemental Brewfile (etc/Brewfile_other): ./setup_other.sh"
