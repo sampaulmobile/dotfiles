@@ -1,0 +1,36 @@
+#!/bin/bash
+# hq-init [dir] — scaffold an hq command-center repo (default ~/dev/hq).
+#
+# hq is the dispatcher home for the /hq skill: a routing table mapping
+# services to repo paths, a CLAUDE.md that makes the hq tmux session behave as
+# a coordinator, and a backlog. The template lives in dotfiles/templates/hq;
+# everything machine-specific (routing rows, cross-cutting systems) is filled
+# in by hand afterwards. Refuses to touch an existing directory.
+set -euo pipefail
+
+target=${1:-$HOME/dev/hq}
+template=$(cd "$(dirname "$0")/../templates/hq" && pwd)
+
+if [[ -e $target ]]; then
+    echo "hq-init: $target already exists — refusing to touch it" >&2
+    exit 1
+fi
+
+mkdir -p "$target/state/recon"
+cp "$template/CLAUDE.md" "$template/routing.md" "$target/"
+cp "$template/state/backlog.md" "$target/state/"
+cp "$template/gitignore" "$target/.gitignore"
+
+git -C "$target" init -q
+git -C "$target" add -A
+git -C "$target" commit -q -m "hq: scaffold from dotfiles template"
+
+cat <<MSG
+hq scaffolded at $target (local git repo, one commit).
+
+Next:
+  - add a routing row per service in $target/routing.md (template in the file)
+  - fill in the Cross-cutting section of $target/CLAUDE.md, or delete it
+  - optional wiki vault: cd ~/dev && npx wikillm init wiki
+  - Ctrl+F → hq to open its session; /hq <request> works from any shell
+MSG

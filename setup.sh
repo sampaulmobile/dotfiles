@@ -86,6 +86,7 @@ echo "    Access (Privacy & Security), relaunch it, re-run bin/macos_defaults.sh
 echo "  - gh auth login"
 echo "  - bin/setup_github_ssh_key.sh (per-machine SSH key for github)"
 echo "  - claude (first run: log in)"
+echo "  - bin/hq-init (optional: scaffold ~/dev/hq for the /hq dispatcher)"
 echo "  - sign in to 1Password"
 echo "  - launch Docker.app once to finish its install"
 echo "  - work machines: ./setup_other.sh"

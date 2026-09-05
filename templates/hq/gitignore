@@ -1,0 +1,3 @@
+state/*
+!state/backlog.md
+.DS_Store
