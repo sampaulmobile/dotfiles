@@ -43,7 +43,8 @@
 # cost-state is marked '>' (accurate up to the resume point). `session` on
 # a superseded id still works and says who superseded it.
 #
-# Timestamps are displayed as they are stored: UTC.
+# Timestamps are displayed in the machine's local timezone (the transcripts
+# store UTC; jq's strflocaltime converts at render).
 #
 # Unlike the tmux-claude-* scripts this is a pure reporting tool — it never
 # touches tmux and full-parses every transcript it reports on, so expect a
@@ -92,6 +93,11 @@ def usage_cost($model):
     end;
 # ISO timestamp (with ms) -> epoch seconds.
 def ts2e: sub("\\.[0-9]+Z$"; "Z") | strptime("%Y-%m-%dT%H:%M:%SZ") | mktime;
+# ISO UTC timestamp -> local-time display string. Summary rows carry these
+# instead of the raw UTC strings; every consumer that compares them (sort,
+# the --since cut, merge_chains earliest-start) compares like-with-like
+# because SINCE_ISO is computed in local time too.
+def localts: ts2e | strflocaltime("%Y-%m-%dT%H:%M:%S");
 # real assistant turns (synthetic error records carry model "<synthetic>")
 def is_turn: .type == "assistant" and .message.usage != null
              and ((.message.model // "") | startswith("claude"));
@@ -150,7 +156,9 @@ function trunc(s, n) {
 die() { echo "claude-tokens: $*" >&2; exit 1; }
 
 usage() {
-    sed -n '3,50p' "$0" | sed 's/^# \{0,1\}//'
+    # the whole header comment block (line 3 to its first non-# line),
+    # un-commented — no hard-coded end line to drift as the header grows
+    awk 'NR >= 3 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$0"
     exit 0
 }
 
@@ -251,7 +259,8 @@ summarize_session() {
         # collapse the chain into one row and drop the superseded files.
         | ($asst | map(.session_id // empty) | unique | map(select(. != $sid))) as $inh
         | [ $sid, $cwd, $slug,
-            ($ts | first // "-"), ($ts | last // "-"),
+            ($ts | first // null | if . then localts else "-" end),
+            ($ts | last // null | if . then localts else "-" end),
             $turns, $agents,
             (if $models == "" then "-" else $models end),
             (if ($branches | length) == 0 then "-" else ($branches | join(",")) end),
@@ -393,7 +402,7 @@ cmd_overview() {
                    fmtcost(gt_cost, allest ? "est" : "actual")
         }'
     echo
-    echo "(range: ${RANGE_DESC} · times UTC · ~ = estimated cost)"
+    echo "(range: ${RANGE_DESC})"
 }
 
 # render_session_rows
@@ -436,7 +445,7 @@ cmd_sessions() {
     [[ -z "$files" ]] && die "no sessions matched"
     echo "$files" | summarize_many | merge_chains | render_session_rows
     echo
-    echo "(range: ${RANGE_DESC} · times UTC · ~ = estimated cost · drill in with: claude-tokens session <id>)"
+    echo "(range: ${RANGE_DESC} · drill in with: claude-tokens session <id>)"
 }
 
 cmd_session() {
@@ -484,7 +493,7 @@ cmd_session() {
           (if ($prs|length) > 0 then
              "PRs:      \([$prs[].prUrl] | unique | join(", "))"
            else empty end),
-          "window:   \($ts | first // "?")  →  \($ts | last // "?")  (UTC)",
+          "window:   \($ts | first // null | if . then localts else "?" end)  →  \($ts | last // null | if . then localts else "?" end)",
           (if $cs != null and $has_anc == "" then
              "cost:     $\($cs.totalCostUSD * 100 | round / 100)  (actual, incl. agents)" +
              "   lines: +\($cs.totalLinesAdded)/-\($cs.totalLinesRemoved)" +
@@ -689,7 +698,7 @@ cmd_branch() {
     [[ -z "$files" ]] && die "no sessions touched branch '$branch'"
     echo "$files" | summarize_many | merge_chains | render_session_rows
     echo
-    echo "(range: ${RANGE_DESC} · times UTC · ~ = estimated cost · drill in with: claude-tokens session <id>)"
+    echo "(range: ${RANGE_DESC} · drill in with: claude-tokens session <id>)"
 }
 
 # ── arg parsing ─────────────────────────────────────────────────────────
@@ -711,10 +720,12 @@ while [[ $# -gt 0 ]]; do
             esac
             # find -mmin is only a prefilter — a live session keeps an old
             # transcript's mtime fresh, so rows are also cut on their last
-            # in-file activity timestamp (ISO strings compare fine).
-            SINCE_ISO=$(date -u -v "-${MMIN}M" +%Y-%m-%dT%H:%M:%S 2>/dev/null \
-                        || date -u -d "${MMIN} minutes ago" +%Y-%m-%dT%H:%M:%S)
-            RANGE_DESC="last $1 (sessions active since ${SINCE_ISO} UTC; straddlers report lifetime totals)" ;;
+            # in-file activity timestamp. Rows carry LOCAL-time strings
+            # (localts in the jq prelude), so the cutoff is local too —
+            # like-with-like ISO strings compare fine.
+            SINCE_ISO=$(date -v "-${MMIN}M" +%Y-%m-%dT%H:%M:%S 2>/dev/null \
+                        || date -d "${MMIN} minutes ago" +%Y-%m-%dT%H:%M:%S)
+            RANGE_DESC="last $1 (sessions active since ${SINCE_ISO}; straddlers report lifetime totals)" ;;
         -h|--help|help) usage ;;
         *) ARGS+=("$1") ;;
     esac
