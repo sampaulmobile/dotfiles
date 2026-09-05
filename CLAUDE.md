@@ -8,17 +8,22 @@ Personal dotfiles for macOS (Apple Silicon). Managed with symlinks, no fancy fra
 - `bin/` — scripts (install helpers, tmux scripts, worktree helpers, etc.)
 - `sources/` — zsh source files (aliases, history config, exports)
 - `etc/` — Brewfiles: `Brewfile_mac` (base, all machines), `Brewfile_other` (supplemental, installed by `setup_other.sh`)
-- `other/` — machine-local config, gitignored except `*.example` templates and README. Consumed via: zshrc sources `other/zshrc.local` last; gitconfig includes `other/gitconfig.local`; tmux-sessionizer sources `other/tmux-sessionizer.local` (can redefine `search_dirs`); `other/claude/` symlinked into `~/.claude/` by `bin/symlink_files.sh` (settings.json file link; skills/, rules/ dir links)
+- `dots/claude/` — the generic, tracked Claude Code layer: `skills/`, `rules/`, `agents/`. Layered into `~/.claude/` by `bin/symlink_files.sh` as per-item links inside the `other/claude/` dirs (see below), so tracked and private entries coexist. Promote a private item by moving it here and re-running the script.
+- `templates/` — scaffolds copied to new locations by `bin/` scripts: `templates/hq/` → `bin/hq-init` (the `/hq` dispatcher repo, default `~/dev/hq`)
+- `other/` — machine-local config, gitignored except `*.example` templates and README. Consumed via: zshrc sources `other/zshrc.local` last; gitconfig includes `other/gitconfig.local`; tmux-sessionizer sources `other/tmux-sessionizer.local` (can redefine `search_dirs`); `other/claude/` symlinked into `~/.claude/` by `bin/symlink_files.sh` (settings.json file link; skills/, rules/, agents/ dir links — anything dropped into `~/.claude/{skills,rules,agents}` therefore lands here, private by default)
 - `archive/` — old/unused configs kept for reference
 - `notes/` — machine setup guides
 
 ## IMPORTANT: This repo is PUBLIC
 
 Nothing sensitive or machine/employer-identifying may ever be committed — no
-private filepaths, directory/service/project names, claude skills content, or
-absolute paths beyond generic `$HOME` placeholders, in tracked files OR commit
-messages. All of that belongs in the gitignored `other/` directory. Generic
-public package names in Brewfiles are fine. Sweep diffs before pushing.
+private filepaths, directory/service/project names, or absolute paths beyond
+generic `$HOME` placeholders, in tracked files OR commit messages. All of that
+belongs in the gitignored `other/` directory. Claude Code config splits the
+same way: generic skills/rules/agents are tracked in `dots/claude/` and get
+the same sweep as any other tracked text; anything private (settings.json,
+private skills) stays in `other/claude/`. Generic public package names in
+Brewfiles are fine. Sweep diffs before pushing.
 
 ## Key Configs
 
@@ -100,5 +105,6 @@ transition).
 - Platform-specific zshrc: `zshrc` for macOS, `zshrc_linux` for Linux.
 - GHA runners run locally — never add `[safe] directory` to the global gitconfig. Set it in the runner's local `.git/config` instead.
 - Fresh machine: `git clone` (triggers CLT install) → `./setup.sh` → optionally `./setup_other.sh`. Both end with manual-step checklists.
-- Claude Code config is fully machine-local (public repo): settings.json/skills/rules live in `other/claude/`, seeded from `other/claude/settings.json.example`; machine differences (model, TLS) are env vars in `other/zshrc.local` (e.g. `ANTHROPIC_MODEL`). Never commit claude config.
+- Claude Code config is two-layered (public repo): the generic skills/rules/agents are tracked in `dots/claude/`; settings.json (seeded from `other/claude/settings.json.example`) and private skills live in `other/claude/`; machine differences (model, TLS) are env vars in `other/zshrc.local` (e.g. `ANTHROPIC_MODEL`). Never commit settings.json or anything from `other/`.
+- `/hq` needs an hq repo at `~/dev/hq` (routing table + coordinator CLAUDE.md); `bin/hq-init` scaffolds one from `templates/hq/`. The skill stops and says so when the routing table is missing.
 - claude-code is installed via npm global — per-node-version under fnm, so reinstall after changing the default node.
