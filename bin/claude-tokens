@@ -20,10 +20,13 @@
 #                                        view for sessions predating or
 #                                        lacking pr-link records)
 #
-#   --since <N>[d|h|m]                   overview/sessions only: restrict to
+#   --since <N>[d|h|m]                   overview/sessions/branch: restrict to
 #                                        sessions active in the window (a
 #                                        session straddling the cutoff still
-#                                        reports its whole-lifetime totals)
+#                                        reports its whole-lifetime totals).
+#                                        Default: no window — all time, i.e.
+#                                        every transcript still on disk. The
+#                                        footer states the range either way.
 #
 # Cost columns: sessions that carry cost-state records (written by claude
 # incrementally) report the ACTUAL cost claude computed, which includes all
@@ -147,7 +150,7 @@ function trunc(s, n) {
 die() { echo "claude-tokens: $*" >&2; exit 1; }
 
 usage() {
-    sed -n '3,40p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '3,50p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
 }
 
@@ -389,6 +392,8 @@ cmd_overview() {
                    fmt(gt_in + gt_out + gt_crd + gt_cwr),
                    fmtcost(gt_cost, allest ? "est" : "actual")
         }'
+    echo
+    echo "(range: ${RANGE_DESC} · times UTC · ~ = estimated cost)"
 }
 
 # render_session_rows
@@ -431,7 +436,7 @@ cmd_sessions() {
     [[ -z "$files" ]] && die "no sessions matched"
     echo "$files" | summarize_many | merge_chains | render_session_rows
     echo
-    echo "(times UTC · ~ = estimated cost · drill in with: claude-tokens session <id>)"
+    echo "(range: ${RANGE_DESC} · times UTC · ~ = estimated cost · drill in with: claude-tokens session <id>)"
 }
 
 cmd_session() {
@@ -684,13 +689,14 @@ cmd_branch() {
     [[ -z "$files" ]] && die "no sessions touched branch '$branch'"
     echo "$files" | summarize_many | merge_chains | render_session_rows
     echo
-    echo "(times UTC · ~ = estimated cost · drill in with: claude-tokens session <id>)"
+    echo "(range: ${RANGE_DESC} · times UTC · ~ = estimated cost · drill in with: claude-tokens session <id>)"
 }
 
 # ── arg parsing ─────────────────────────────────────────────────────────
 
 MMIN=""
 SINCE_ISO=""
+RANGE_DESC="all time (every transcript on disk)"
 ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -707,7 +713,8 @@ while [[ $# -gt 0 ]]; do
             # transcript's mtime fresh, so rows are also cut on their last
             # in-file activity timestamp (ISO strings compare fine).
             SINCE_ISO=$(date -u -v "-${MMIN}M" +%Y-%m-%dT%H:%M:%S 2>/dev/null \
-                        || date -u -d "${MMIN} minutes ago" +%Y-%m-%dT%H:%M:%S) ;;
+                        || date -u -d "${MMIN} minutes ago" +%Y-%m-%dT%H:%M:%S)
+            RANGE_DESC="last $1 (sessions active since ${SINCE_ISO} UTC; straddlers report lifetime totals)" ;;
         -h|--help|help) usage ;;
         *) ARGS+=("$1") ;;
     esac
