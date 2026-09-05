@@ -82,7 +82,7 @@ reload_sessions() {
         [[ -z "$pid" ]] && continue
         sessions+=("$sess")
         panes+=("$pid")
-        name="${sess#claude-}"
+        name="$sess"
         [[ "$widx" != "1" ]] && name="${name}:${widx}"
         # two claude panes in one window (split): disambiguate by pane id
         for i in "${!names[@]}"; do

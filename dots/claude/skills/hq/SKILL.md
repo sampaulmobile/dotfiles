@@ -49,8 +49,7 @@ other case.
   that bypasses zsh rc files, so env from other/zshrc.local (ANTHROPIC_MODEL,
   TLS, ...) is missing and claude comes up on the wrong model.
   new_hub_session instead types `claude` into an initialized shell, same as
-  Ctrl+F. In window mode claude starts warm in window 1; if the mode file says
-  popup, follow up with `tmux send-keys -t <name>:1 claude Enter`.
+  Ctrl+F, so claude starts warm in window 1.
   Creation only — never kill or mutate existing sessions (tmux-safety rules).
 
 ## 4. Delegate

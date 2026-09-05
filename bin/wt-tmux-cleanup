@@ -3,10 +3,9 @@
 # wt-tmux-cleanup <worktree-path> <repo>
 #
 # worktrunk post-merge / post-remove hook: kill the removed worktree's
-# tmux session and its claude popup sibling. If we're currently inside
-# either, switch to the repo's hub session first (creating it if needed)
-# so the client isn't stranded. No-op outside tmux for the switching;
-# still kills stray sessions.
+# tmux session. If we're currently inside it, switch to the repo's hub
+# session first (creating it if needed) so the client isn't stranded.
+# No-op outside tmux for the switching; still kills the stray session.
 
 set -euo pipefail
 
@@ -19,7 +18,7 @@ hub_path="$HOME/dev/$repo"
 
 if [[ -n "${TMUX:-}" ]]; then
     current=$(tmux display-message -p '#S' 2>/dev/null || true)
-    if [[ "$current" == "$name" || "$current" == "claude-$name" ]]; then
+    if [[ "$current" == "$name" ]]; then
         if ! tmux has-session -t="$hub" 2>/dev/null; then
             tmux new-session -ds "$hub" -c "$hub_path"
         fi
@@ -27,6 +26,5 @@ if [[ -n "${TMUX:-}" ]]; then
     fi
 fi
 
-tmux kill-session -t "claude-$name" 2>/dev/null || true
 tmux kill-session -t "$name" 2>/dev/null || true
 exit 0

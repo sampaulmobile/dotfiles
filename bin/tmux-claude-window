@@ -1,24 +1,18 @@
 #!/usr/bin/env bash
 
-# Window-mode C-Space: toggle the claude WINDOW within the current project
-# session (popup-less counterpart of tmux-claude-popup). Selected by the
-# C-Space dispatcher in dots/tmux.conf via the mode file
-# other/tmux-claude-mode ("window" | "popup"); switch modes with
-# bin/tmux-claude-migrate.
+# C-Space: toggle the claude WINDOW within the current project session.
+# Bound directly in dots/tmux.conf.
 #
 # Behavior:
 #   - on the claude window        -> back to your last-used window
 #   - elsewhere in the session    -> to the claude window
-#   - no claude window yet        -> create it (shell + `claude`, like the
-#                                    popup did) at the current pane's path
-#   - inside a leftover claude-* popup session (mixed state) -> defer to the
-#     popup script's close behavior
+#   - no claude window yet        -> create it (shell + `claude`) at the
+#                                    current pane's path
+#
+# The window is found by NAME ("claude"); prefix+C's extra windows are named
+# "claude+" precisely so this lookup never grabs them.
 
 session=$(tmux display-message -p '#S')
-
-if [[ "$session" == claude-* ]]; then
-    exec ~/dotfiles/bin/tmux-claude-popup
-fi
 
 claude_win=$(tmux list-windows -t "${session}:" -F '#{window_name} #{window_id}' 2>/dev/null \
     | awk '$1 == "claude" {print $2; exit}')

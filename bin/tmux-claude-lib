@@ -15,39 +15,26 @@ STALE_AGENT_SECS=1800
 
 # new_hub_session <session-name> <dir>
 #   Creates a detached tmux session for a project/worktree with the standard
-#   hub layout, per the claude mode file (other/tmux-claude-mode):
-#     window mode:  1 claude (warm) · 2 nvim · 3 zsh — lands on claude,
-#                   which is the project's front door in this mode
-#     popup mode:   1 nvim · 2 zsh — lands on zsh; claude lives in the
-#                   C-Space popup, not a window
-#   The nvim window is left on automatic-rename: it shows "nvim" while nvim
-#   runs and tracks whatever runs there after (only the claude window's name
-#   is pinned — tmux-claude-window/migrate find it by name).
+#   hub layout: 1 claude (warm) · 2 nvim · 3 zsh — lands on claude, the
+#   project's front door. The nvim window is left on automatic-rename: it
+#   shows "nvim" while nvim runs and tracks whatever runs there after (only
+#   the claude window's name is pinned — tmux-claude-window finds it by name).
 #   Used by tmux-sessionizer and wt-tmux-jump so both entry points build
 #   identical sessions.
 new_hub_session() {
     local name="$1" dir="$2"
-    local mode nvim_win
-    mode=$(cat "$HOME/dotfiles/other/tmux-claude-mode" 2>/dev/null || echo popup)
+    local nvim_win
 
-    if [[ "$mode" == "window" ]]; then
-        tmux new-session -ds "$name" -c "$dir" -n claude
-        tmux set-option -w -t "${name}:1" automatic-rename off
-        tmux send-keys -t "${name}:1" "claude" Enter
-        nvim_win=$(tmux new-window -t "${name}:" -c "$dir" -P -F '#{window_id}')
-    else
-        tmux new-session -ds "$name" -c "$dir"
-        nvim_win=$(tmux list-windows -t "${name}:" -F '#{window_id}' | head -1)
-    fi
+    tmux new-session -ds "$name" -c "$dir" -n claude
+    tmux set-option -w -t "${name}:1" automatic-rename off
+    tmux send-keys -t "${name}:1" "claude" Enter
 
+    nvim_win=$(tmux new-window -t "${name}:" -c "$dir" -P -F '#{window_id}')
     tmux send-keys -t "$nvim_win" "nvim" Enter
 
-    # trailing zsh window; new-window selects it, which is where popup mode
-    # should land — window mode goes back to claude
+    # trailing zsh window; new-window selects it, so go back to claude
     tmux new-window -t "${name}:" -c "$dir"
-    if [[ "$mode" == "window" ]]; then
-        tmux select-window -t "${name}:1"
-    fi
+    tmux select-window -t "${name}:1"
 }
 
 # claude_ttys
