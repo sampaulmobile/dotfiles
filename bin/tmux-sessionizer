@@ -32,6 +32,33 @@
 # so two projects with the same branch name don't collide. (worktrunk-style
 # sibling worktrees like ~/dev/proj.feat-x are plain depth-1 entries.)
 
+# Split fzf's --expect output into the globals `fzf_key` (the accepting key,
+# empty for a plain Enter) and `selected` (the chosen row). fzf prints the key
+# on line 1 and the selection on line 2, so real output ALWAYS contains a
+# newline; `$(...)` then strips the trailing one.
+#
+# No newline at all means nothing was accepted, in two shapes: esc/ctrl-c
+# (empty output, fzf exit 130) and — the trap — an accept on a query that
+# matched NO row, where fzf prints just the key line ("ctrl-x\n") and exits 1.
+# Returning 1 for both keeps a bare key name from being taken for a project
+# named `ctrl-x`, and makes plain Enter on an empty match list a no-op, as it
+# was before --expect.
+parse_fzf_expect() {
+    local out="$1"
+    fzf_key=""
+    selected=""
+    [[ "$out" == *$'\n'* ]] || return 1
+    fzf_key="${out%%$'\n'*}"
+    selected="${out#*$'\n'}"
+}
+
+# Sourced (tests/test-fzf-expect.sh) rather than executed: hand back the
+# helpers above and run none of the picker below. Executed normally,
+# BASH_SOURCE[0] is $0 and this is a no-op.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
+
 # ---- Options ----
 SHOW_STATUS_INDICATORS=true
 # -----------------
@@ -247,10 +274,9 @@ else
         --preview-window 'right,55%,hidden' \
         --bind 'ctrl-/:toggle-preview')
 
-    # Aborted (esc/ctrl-c): no key line, no selection.
-    [[ -z "$fzf_out" ]] && exit 0
-    fzf_key="${fzf_out%%$'\n'*}"
-    selected="${fzf_out#*$'\n'}"
+    # Nothing accepted (see parse_fzf_expect): esc/ctrl-c, or an accept on a
+    # query that matched no row.
+    parse_fzf_expect "$fzf_out" || exit 0
     case "$fzf_key" in
         ctrl-x|alt-enter) new_agent="$other_agent" ;;
     esac
