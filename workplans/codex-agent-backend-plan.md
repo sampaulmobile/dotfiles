@@ -197,14 +197,55 @@ New: `bin/tmux-claude-lib-codex`, `dots/codex/hooks.json`, `dots/codex/shared-sk
 - VERIFIED (source): approval overlay strings as listed under Background.
 - VERIFIED: fzf 0.74 has `alt-enter` and no `shift-enter`/`ctrl-enter`; ctrl-x
   is unbound in fzf and unclaimed in tmux.conf; tmux runs `extended-keys off`.
-- ASSUMED (calibrate, step 5): Codex working indicator contains "to interrupt";
-  idle composer prompt char; `token_count` payload field paths.
-- ASSUMED: brew-installed `codex` shows as `codex` in `ps -o comm=` (Rust
-  binary). An npm install shows the platform binary name, still matching /codex/.
-- ASSUMED: the managed workspace does not set `allow_managed_hooks_only` or
-  forbid `workspace-write`. Check `/status` and `/hooks` after login. If hooks
-  are blocked, attention/telemetry degrade to scraping + the cwd/newest-rollout
-  fallback (both designed in).
+- VERIFIED (round 1 implementer, 2026-09-05, codex-cli 0.153.4, captures in
+  `tests/fixtures/codex-*.txt`): working indicator is
+  `• Working (4s • esc to interrupt)` — "to interrupt" holds. Idle is the
+  composer `› Ask Codex to do anything` (prompt char `›`, which also prefixes
+  an overlay's selected option, so permission must be — and is — checked
+  first). Approval overlay exactly as the source said:
+  "Would you like to run the following command?" + "› 1. Yes, proceed (y)".
+- VERIFIED (round 1): two further BLOCKING prompts the plan did not list, both
+  now classified as permission: the first-run "Do you trust the contents of
+  this directory?" prompt, and "Hooks need review" (shown at startup after any
+  hooks.json change).
+- VERIFIED (round 1): `token_count` field paths are
+  `.payload.info.{last,total}_token_usage.*` and
+  `.payload.info.model_context_window`; `.payload.rate_limits.primary` is
+  null on a credit-billed plan, so COST falls back to "-". Correction to the
+  plan's context formula: codex's `cached_input_tokens` are a SUBSET of
+  `input_tokens` (total_tokens = input + output), unlike Anthropic's disjoint
+  counters — context is `last_token_usage.input_tokens` alone; summing input +
+  cached would double-count. Turns come from `task_started` event count (one
+  per submitted prompt), not from user message records: the first user record
+  is an `<environment_context>` block, not a turn.
+- ASSUMED (round 1, unverifiable here): the rate-limit fields
+  `primary.used_percent` / `primary.window_minutes`. The account used for
+  calibration bills credits and reports `primary: null`, so the COST column's
+  "5h:42%" rendering is exercised only by a synthetic record in
+  `tests/test-codex-rollout.sh`. It degrades to "-" if the field names differ.
+- VERIFIED (round 1): a brew-installed `codex` is matched by agent_ttys — a
+  real codex in a throwaway tmux server produced a dashboard row, which only
+  happens if its tty was found through `ps -A -o tty=,comm=`.
+- VERIFIED (round 1): hooks run. All four (SessionStart, SessionEnd, Stop,
+  PermissionRequest) fired with `$TMUX_PANE` inherited, and each payload
+  carries session_id + transcript_path + cwd. Two constraints the plan did not
+  know about: (a) codex requires explicit hook TRUST — a startup prompt or
+  `/hooks` + `t` — re-asked after every hooks.json edit, so the hooks are
+  Installed-but-inactive until then; (b) hooks.json accepts only the
+  top-level keys `description` and `hooks` — any other key is a parse error
+  that drops ALL hooks. Hook commands are shell-expanded, so `$HOME/...`
+  resolves. `features.hooks` is stable and default-true in 0.153.4 (config
+  sets it explicitly anyway). `/status` reports approval policy OnRequest
+  from the tracked example config; the sandbox line reads
+  "restricted fs + restricted network", i.e. a managed permission profile is
+  in play — worth a look at `/status` on the real machine after login.
+- VERIFIED (round 1): SessionStart fires on a thread's FIRST PROMPT, not at
+  TUI launch, and again after `/new` (source is "startup" both times). The
+  plan's matcher `"startup|resume|clear"` never matched anything in testing,
+  so the shipped hooks.json omits the matcher entirely (matches every
+  source, a superset of the intent). SessionEnd fires on `/quit`, including
+  for a thread that never started — `codex-session-end` tolerates a missing
+  map entry.
 - ASSUMED: Option+Enter reaches fzf as `alt-enter` under Ghostty's default
   option handling inside tmux. If not, ctrl-x is the override; no Ghostty change.
 - VERIFIED (orchestrator, 2026-09-05): the popup-retirement prerequisite is on
@@ -227,12 +268,16 @@ New: `bin/tmux-claude-lib-codex`, `dots/codex/hooks.json`, `dots/codex/shared-sk
   so it cannot be exercised from a worktree against the real home. Test it with
   a sandbox `HOME` (scratch dir containing a `dotfiles` symlink to the
   worktree) — never against the real `~/.codex`/`~/.claude` from the worktree.
-- ASSUMED: step 5 calibration may be impossible from the pipeline (no codex
-  session has ever run here; approval prompts need an interactive turn). If a
-  throwaway-socket (`tmux -L codex-test-$$`) capture cannot be obtained, ship
-  the classifier with the docs/source-verified permission strings and the
-  ASSUMED working/idle strings, record the gap in NOTES and here, and leave the
-  fixture files as the place to paste real captures.
+- RESOLVED (round 1): calibration WAS possible. A real codex ran on a
+  throwaway tmux socket against a scratch `CODEX_HOME` (a copy of auth.json,
+  never the user's `~/.codex`), was driven into all three states plus both
+  trust prompts, and its rollout was read with jq. The captures are the
+  fixtures in `tests/fixtures/`; the rollout fixture is a scrubbed copy of a
+  real one.
+- ASSUMED (round 1, not exercised): Option+Enter reaching fzf as `alt-enter`
+  under Ghostty — the sessionizer's picker cannot be driven headlessly, so
+  only the code path (fzf `--expect=ctrl-x,alt-enter`, first output line is
+  the key) is verified, by construction. ctrl-x remains the guaranteed key.
 
 ## Test plan
 
