@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+
+# Codex-specific half of the shared agent library. Sourced at the end of
+# bin/tmux-claude-lib — never on its own — so everything here can assume the
+# generic helpers exist. Keeping it in its own file is what lets the claude
+# path in tmux-claude-lib stay byte-for-byte what it was: the dispatch in
+# classify_pane_status is one `if`, and the codex rules live here.
+#
+# Every string matched below was captured from codex-cli 0.153.4 running in
+# a throwaway tmux session (see tests/fixtures/codex-*.txt for the actual
+# screens). Same contract as the claude classifier: pure bash 3.2, no forks,
+# last 10 non-blank lines only.
+
+# classify_codex_pane_status <raw-content>
+#   Prints: working | idle | permission | unknown
+#   Called by classify_pane_status when the pane's agent is codex.
+classify_codex_pane_status() {
+    local raw="$1"
+
+    if [[ -z "$raw" ]]; then
+        echo "unknown"
+        return
+    fi
+
+    # Split into lines and drop blanks, then keep the last 10 — same
+    # windowing as the claude classifier (deliberately duplicated rather
+    # than factored out: the claude path is hot, well-tested, and not worth
+    # disturbing for a dozen lines).
+    local -a all filtered
+    IFS=$'\n' read -rd '' -a all <<< "$raw"
+    local line
+    for line in "${all[@]}"; do
+        [[ -n "$line" ]] && filtered+=("$line")
+    done
+
+    local total=${#filtered[@]}
+    if (( total == 0 )); then
+        echo "unknown"
+        return
+    fi
+
+    local start=0
+    (( total > 10 )) && start=$(( total - 10 ))
+    local -a window=("${filtered[@]:start}")
+
+    local content="" w
+    for w in "${window[@]}"; do
+        if [[ -n "$content" ]]; then
+            content+=$'\n'"$w"
+        else
+            content="$w"
+        fi
+    done
+
+    # Permission — checked first: the composer line ("› Ask Codex to do
+    # anything") that idle matches on can still be on screen above an
+    # overlay, and an overlay's own option list starts with "› 1. Yes, ...".
+    #
+    # Approval overlay headers (approval_overlay.rs): "Would you like to run
+    # the following command?" / "... make the following edits?" / "... grant
+    # these permissions?", and "<server> needs your approval." for MCP. The
+    # option list always offers a "Yes, " — requiring both halves keeps a
+    # transcript that merely QUOTES one of these headers from tripping it.
+    if [[ "$content" == *"Yes, "* ]] \
+       && [[ "$content" == *"Would you like to"* || "$content" == *"needs your approval"* ]]; then
+        echo "permission"
+        return
+    fi
+
+    # The two startup prompts that block a session just as hard as an
+    # approval: directory trust (on a cwd codex has not seen before) and
+    # hook trust (after any hooks.json change — see notes/codex.md). Both
+    # stop the agent dead waiting for a keystroke, which is exactly what the
+    # attention layer exists to surface.
+    if [[ "$content" == *"Do you trust the contents of this directory?"* \
+       || "$content" == *"Hooks need review"* ]]; then
+        echo "permission"
+        return
+    fi
+
+    # Working: the status line reads "• Working (4s • esc to interrupt)";
+    # tool runs show the same "esc to interrupt" tail. Matching the shorter
+    # "to interrupt" mirrors the claude classifier and survives a reworded
+    # key hint.
+    if [[ "$content" == *"to interrupt"* ]]; then
+        echo "working"
+        return
+    fi
+
+    # Idle: the composer placeholder, or its prompt char on its own (the
+    # placeholder disappears once you start typing).
+    if [[ "$content" == *"Ask Codex to do anything"* || "$content" == *"›"* ]]; then
+        echo "idle"
+        return
+    fi
+
+    echo "unknown"
+}

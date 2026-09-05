@@ -194,7 +194,7 @@ is_claude_pane_command() {
     [[ "$1" == claude* || "$1" == "node" || "$1" == codex* ]]
 }
 
-# classify_pane_status <raw-content>
+# classify_pane_status <raw-content> [agent]
 #   Prints: working | idle | permission | unknown
 #   Pure classifier over RAW, unfiltered captured pane content (e.g. a
 #   straight `tmux capture-pane -p` — blank-line stripping and the
@@ -213,6 +213,15 @@ is_claude_pane_command() {
 #   (both 4.0+ only).
 classify_pane_status() {
     local raw="$1"
+
+    # codex screens look nothing like claude's — dispatch to the codex
+    # classifier in tmux-claude-lib-codex and leave everything below it
+    # exactly as it was. Agent defaults to claude, so every pre-existing
+    # one-argument caller behaves identically.
+    if [[ "${2:-claude}" == "codex" ]]; then
+        classify_codex_pane_status "$raw"
+        return
+    fi
 
     if [[ -z "$raw" ]]; then
         echo "unknown"
@@ -945,7 +954,17 @@ format_tokens() {
 }
 
 # short_model <model-string>
-#   Shortens model names: claude-opus-4-6 -> opus-4-6, claude-sonnet-4-6 -> sonnet-4-6
+#   Shortens model names: claude-opus-4-6 -> opus-4-6, claude-sonnet-4-6 -> sonnet-4-6.
+#   Codex model ids carry no such prefix and pass through untouched.
 short_model() {
     echo "$1" | sed 's/^claude-//'
 }
+
+# ── codex ───────────────────────────────────────────────
+# The codex half of the library (classifier, rollout reader) lives in its
+# own file so the claude paths above stay undisturbed. Resolved relative to
+# THIS file so a worktree copy sources its own sibling, not ~/dotfiles.
+_agent_lib_dir="${BASH_SOURCE[0]%/*}"
+[[ "$_agent_lib_dir" == "${BASH_SOURCE[0]}" ]] && _agent_lib_dir="$HOME/dotfiles/bin"
+# shellcheck source=/dev/null
+source "${_agent_lib_dir}/tmux-claude-lib-codex"

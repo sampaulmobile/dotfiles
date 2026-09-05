@@ -1,0 +1,14 @@
+
+
+• ok
+
+
+› Write a 200 word essay about terminal multiplexers.
+
+
+• Working (4s • esc to interrupt)
+
+
+› Ask Codex to do anything
+
+  gpt-5 default fast · ~/dev/proj
