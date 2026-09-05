@@ -17,10 +17,13 @@ are written down.
 | `codex-dir-trust.txt` | codex | permission | real capture of the first-run directory-trust prompt |
 | `codex-hook-trust.txt` | codex | permission | real capture of the hook-trust prompt (shown after any `hooks.json` change) |
 
-The codex captures were taken on a throwaway tmux socket in a scratch
-directory and scrubbed: every real path was replaced with `~/dev/proj`.
-Nothing here may carry a private path, host, or org name — this repo is
-public.
+The codex captures (the pane text above and `codex-rollout.jsonl`, the real
+rollout `tests/test-codex-rollout.sh` reads) were taken on a throwaway tmux
+socket in a scratch directory and scrubbed: every real path was replaced with `~/dev/proj`, the
+model id with the neutral placeholder `gpt-5`, and the account's `plan_type`
+with `plan` (nothing reads either field — the model string is only echoed
+into the dashboard's MODEL column). Nothing here may carry a private path,
+host, org name or non-public model/deployment name — this repo is public.
 
 To refresh one: run the agent in a throwaway tmux session
 (`tmux -L fixture-grab new-session -d -x 180 -y 45 codex`), drive it into the
