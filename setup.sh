@@ -48,13 +48,10 @@ echo "Installing claude code"
 npm install -g @anthropic-ai/claude-code
 
 # seed machine-local config from templates (real files are gitignored).
-# Must run before symlinking — symlink_files.sh links claude config out of
-# other/, which this creates on a fresh machine.
+# symlink_files.sh runs this too, but do it explicitly here so the output
+# shows up in the setup log.
 echo "Seeding other/ machine-local config"
-for example in $DOTFILES/other/*.example $DOTFILES/other/claude/*.example; do
-    target="${example%.example}"
-    [[ -f "$target" ]] || cp -v "$example" "$target"
-done
+$DOTFILES/bin/seed_other.sh
 
 echo "Symlinking dotfiles"
 $DOTFILES/bin/symlink_files.sh

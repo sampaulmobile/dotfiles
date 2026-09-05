@@ -32,5 +32,6 @@ tells them apart: links are tracked, real dirs/files are private.
 - The links inside `other/` are relative, so the `other.tgz` migration stays
   valid; `setup.sh` recreates them anyway.
 
-To start: `cp <name>.example <name>` and edit (setup.sh does the copy for you
-if the real file doesn't exist yet).
+To start: `bin/seed_other.sh` copies every missing `<name>.example` to
+`<name>` (never overwrites, logs created vs existing), then edit. `setup.sh`
+and `bin/symlink_files.sh` both run it, so a rerun of either fills gaps.

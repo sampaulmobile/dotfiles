@@ -51,6 +51,12 @@ else
     link $dir/zshrc ~/.zshrc
 fi
 
+# ===== other/ seeding =====
+# create any missing other/**/<name> from its <name>.example first, so the
+# claude block below has a settings.json to link on a fresh (or gappy) machine
+echo "Seeding other/ machine-local config"
+$HOME/dotfiles/bin/seed_other.sh
+
 # ===== claude code =====
 # settings.json is a file link (~/.claude itself holds machine state).
 # ~/.claude/{skills,rules,agents} are whole-directory links into other/claude/
