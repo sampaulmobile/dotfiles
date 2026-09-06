@@ -35,7 +35,7 @@ gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository
 
 ## 2. Spawn the fix agent
 
-Spawn ONE background agent (`subagent_type: "sonnet-high"`; `"opus-high"` if the feedback is architectural — plain `model: sonnet` if the presets are missing). All context it needs lives on GitHub and the branch — pass it the PR number, the branch name, and the collected feedback verbatim. Its prompt must tell it to:
+Spawn ONE background agent (`subagent_type: "high"`, `model: "sonnet"`; use `model: "opus"` if the feedback is architectural — the `high` preset pins effort, the model rides as an Agent `model:` override; if the preset is missing, a plain `model: sonnet` agent works). All context it needs lives on GitHub and the branch — pass it the PR number, the branch name, and the collected feedback verbatim. Its prompt must tell it to:
 
 - Find a checkout of the branch: `git worktree list`, use the worktree that has it checked out; otherwise create one as a sibling of the repo (`git worktree add <repo-dir>.<branch-slug> <branch>`, slashes in the branch sanitized to dashes) and work there.
 - Read the workplan doc (`workplans/`) and the PR body for context; read `.feature/NOTES.md` if present and append to it as it works.
