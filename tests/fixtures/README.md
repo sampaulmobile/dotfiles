@@ -1,4 +1,4 @@
-# Classifier fixtures
+# Test fixtures
 
 Pane captures fed to `classify_pane_status` by `tests/test-classify.sh`. One
 file per (agent, state) the attention layer has to tell apart. Keep them
@@ -16,6 +16,14 @@ are written down.
 | `codex-permission.txt` | codex | permission | real capture of the command-approval overlay |
 | `codex-dir-trust.txt` | codex | permission | real capture of the first-run directory-trust prompt |
 | `codex-hook-trust.txt` | codex | permission | real capture of the hook-trust prompt (shown after any `hooks.json` change) |
+
+`settings-example.json`, `settings-live-clean.json` and
+`settings-live-gappy.json` are the trio `tests/test-settings-check.sh` feeds
+to `bin/claude-settings-check`: a cut-down settings.json template, a live file
+that differs from it only in non-drift ways (key order, scalar values, local
+extras), and one missing a hook, an allowlist entry, a nested key and a whole
+object. Hand-written; the command strings are the repo's own `~/dotfiles/bin`
+paths.
 
 The codex captures (the pane text above and `codex-rollout.jsonl`, the real
 rollout `tests/test-codex-rollout.sh` reads) were taken on a throwaway tmux

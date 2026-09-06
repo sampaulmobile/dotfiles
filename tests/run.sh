@@ -12,7 +12,7 @@
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 suites=(test-classify.sh test-notify.sh test-codex-rollout.sh test-agent-ttys.sh
-        test-fzf-expect.sh)
+        test-fzf-expect.sh test-guard-pipe-truncate.sh test-settings-check.sh)
 shells=(/bin/bash bash)
 
 failed=0
