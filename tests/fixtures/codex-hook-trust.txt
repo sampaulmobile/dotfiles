@@ -1,0 +1,20 @@
+│ >_ OpenAI Codex (v0.153.4)                           │
+│                                                      │
+│ model:     loading   /model to change                │
+│ directory: ~/dev/proj                                │
+╰──────────────────────────────────────────────────────╯
+
+
+› Ask Codex to do anything
+
+  ? for shortcuts
+
+  Hooks need review
+  4 hooks are new or changed.
+  Hooks can run outside the sandbox after you trust them.
+
+› 1. Review hooks
+  2. Trust all and continue
+  3. Continue without trusting (hooks won't run)
+
+  Press enter to confirm or esc to go back

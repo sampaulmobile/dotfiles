@@ -19,11 +19,45 @@
 # ctrl-/ inside fzf toggles a lazy preview: a live snapshot of the
 # highlighted session's pane, or git branch/log/dirty-files for a dir.
 #
+# Agent choice (see the agent helpers in bin/tmux-claude-lib): Enter builds a
+# new session with the default agent; ctrl-x or Option+Enter (fzf's
+# alt-enter) builds it with the OTHER one — claude vs codex. Both are
+# fzf-scoped keys like ctrl-/ above, not tmux bindings. On a row that already
+# HAS a session all three just switch to it (the session keeps the agent it
+# was built with).
+#
 # Worktree support: if a project directory contains a .bare/ subdir (the
 # legacy bare+worktree layout — see archive/gwclone), its worktree subdirs
 # are enumerated as separate entries. Session names become "<project>_<branch>"
 # so two projects with the same branch name don't collide. (worktrunk-style
 # sibling worktrees like ~/dev/proj.feat-x are plain depth-1 entries.)
+
+# Split fzf's --expect output into the globals `fzf_key` (the accepting key,
+# empty for a plain Enter) and `selected` (the chosen row). fzf prints the key
+# on line 1 and the selection on line 2, so real output ALWAYS contains a
+# newline; `$(...)` then strips the trailing one.
+#
+# No newline at all means nothing was accepted, in two shapes: esc/ctrl-c
+# (empty output, fzf exit 130) and — the trap — an accept on a query that
+# matched NO row, where fzf prints just the key line ("ctrl-x\n") and exits 1.
+# Returning 1 for both keeps a bare key name from being taken for a project
+# named `ctrl-x`, and makes plain Enter on an empty match list a no-op, as it
+# was before --expect.
+parse_fzf_expect() {
+    local out="$1"
+    fzf_key=""
+    selected=""
+    [[ "$out" == *$'\n'* ]] || return 1
+    fzf_key="${out%%$'\n'*}"
+    selected="${out#*$'\n'}"
+}
+
+# Sourced (tests/test-fzf-expect.sh) rather than executed: hand back the
+# helpers above and run none of the picker below. Executed normally,
+# BASH_SOURCE[0] is $0 and this is a no-op.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
 
 # ---- Options ----
 SHOW_STATUS_INDICATORS=true
@@ -97,6 +131,14 @@ if [[ "$1" == "--preview" ]]; then
     exit 0
 fi
 # ----------------------------------------------------------------------------
+
+# Agent helpers + new_hub_session. Sourced past the --preview early exit
+# above, so the per-row preview invocations never pay for it; defining
+# functions costs no forks, and the picker needs agent_default for its
+# header line.
+source "$HOME/dotfiles/bin/tmux-claude-lib"
+
+new_agent=""   # non-empty = the override key picked the other agent
 
 if [[ $# -eq 1 ]]; then
     selected=$1
@@ -219,10 +261,25 @@ else
 
     # --tiebreak=index keeps MRU order among equal matches; --ansi renders
     # the row colors and strips them from the selected line's output.
-    selected=$(emit_rows | fzf --ansi --tiebreak=index \
+    # --expect makes fzf print the accepting key on its FIRST output line
+    # (empty for a plain Enter), then the selection — that's how the agent
+    # override arrives. fzf 0.74 knows alt-enter but neither shift-enter nor
+    # ctrl-enter, hence ctrl-x as the always-available twin.
+    default_agent=$(agent_default)
+    other_agent=$(agent_other "$default_agent")
+    fzf_out=$(emit_rows | fzf --ansi --tiebreak=index \
+        --expect=ctrl-x,alt-enter \
+        --header "⏎ new: ${default_agent} · ⌥⏎/^x new: ${other_agent}" \
         --preview "$HOME/dotfiles/bin/tmux-sessionizer --preview {}" \
         --preview-window 'right,55%,hidden' \
         --bind 'ctrl-/:toggle-preview')
+
+    # Nothing accepted (see parse_fzf_expect): esc/ctrl-c, or an accept on a
+    # query that matched no row.
+    parse_fzf_expect "$fzf_out" || exit 0
+    case "$fzf_key" in
+        ctrl-x|alt-enter) new_agent="$other_agent" ;;
+    esac
 
     # Re-expand the ~-shortened display path
     [[ "$selected" == "~/"* ]] && selected="$HOME/${selected#\~/}"
@@ -241,10 +298,10 @@ else
 fi
 
 if ! tmux has-session -t="$selected_name" 2>/dev/null; then
-    # standard hub layout ([claude,] nvim, zsh) — shared with wt-tmux-jump.
-    # Sourced lazily: only the session-creation path pays for it.
-    source "$HOME/dotfiles/bin/tmux-claude-lib"
-    new_hub_session "$selected_name" "$selected"
+    # standard hub layout (agent, nvim, zsh) — shared with wt-tmux-jump.
+    # Empty new_agent = the default agent (plain Enter, or the one-argument
+    # CLI form).
+    new_hub_session "$selected_name" "$selected" "$new_agent"
 fi
 
 if [[ -n $TMUX ]]; then

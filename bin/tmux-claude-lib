@@ -13,40 +13,147 @@ CLAUDE_PROJECTS_DIR="$HOME/.claude/projects"
 LIVE_AGENT_SECS=120
 STALE_AGENT_SECS=1800
 
-# new_hub_session <session-name> <dir>
+# ── agents ──────────────────────────────────────────────
+#   Two agent backends share this whole layer: `claude` (Claude Code) and
+#   `codex` (OpenAI's Codex CLI). The scripts keep their tmux-claude-* names;
+#   "agent" is the concept inside them. A session's agent is pinned as the
+#   tmux session option @agent when the session is built, so every later
+#   lookup (C-Space, prefix+C, the dashboard) asks the session, not a guess.
+
+# other/tmux-agent-default: one line, `claude` or `codex` (private,
+# untracked). Missing/garbage → claude.
+AGENT_DEFAULT_FILE="$HOME/dotfiles/other/tmux-agent-default"
+
+# agent_default
+#   Prints the agent new sessions get when nothing overrides it.
+agent_default() {
+    local a=""
+    # `read` returns 1 on a last line with no newline, which bash >= 4 would
+    # let errexit kill a caller with (bash 3.2 does not) — hence the `|| :`.
+    # Trailing whitespace and a CR (a CRLF file) are trimmed off the value so
+    # a hand-edited file still means what it says.
+    [[ -f "$AGENT_DEFAULT_FILE" ]] && { read -r a < "$AGENT_DEFAULT_FILE" || :; }
+    a="${a%%[[:space:]]*}"
+    case "$a" in
+        claude|codex) printf '%s' "$a" ;;
+        *)            printf 'claude' ;;
+    esac
+}
+
+# agent_other <agent>
+#   The other backend — what the sessionizer's ctrl-x / Option+Enter starts.
+agent_other() {
+    if [[ "$1" == "codex" ]]; then printf 'claude'; else printf 'codex'; fi
+}
+
+# session_agent <session-name>
+#   Which agent a session runs: its @agent option, falling back to the
+#   default (sessions created before this option existed, or by hand).
+session_agent() {
+    local a
+    # plain name: the "=" exact-match prefix that most target-session
+    # arguments accept makes show-options/set-option come back empty
+    a=$(tmux show-options -qv -t "$1" @agent 2>/dev/null)
+    case "$a" in
+        claude|codex) printf '%s' "$a" ;;
+        *)            agent_default ;;
+    esac
+}
+
+# agent_window_name <agent>
+#   The window name the agent's front-door window carries (and that
+#   tmux-claude-window looks up). Identical to the agent name today; kept as
+#   a function so the naming rule lives in one place.
+agent_window_name() {
+    printf '%s' "$1"
+}
+
+# new_hub_session <session-name> <dir> [agent]
 #   Creates a detached tmux session for a project/worktree with the standard
-#   hub layout: 1 claude (warm) · 2 nvim · 3 zsh — lands on claude, the
+#   hub layout: 1 <agent> (warm) · 2 nvim · 3 zsh — lands on the agent, the
 #   project's front door. The nvim window is left on automatic-rename: it
 #   shows "nvim" while nvim runs and tracks whatever runs there after (only
-#   the claude window's name is pinned — tmux-claude-window finds it by name).
+#   the agent window's name is pinned — tmux-claude-window finds it by name).
+#   [agent] defaults to agent_default; whatever is used is recorded as the
+#   session's @agent option.
 #   Used by tmux-sessionizer and wt-tmux-jump so both entry points build
 #   identical sessions.
 new_hub_session() {
-    local name="$1" dir="$2"
+    local name="$1" dir="$2" agent="${3:-}"
     local nvim_win
 
-    tmux new-session -ds "$name" -c "$dir" -n claude
+    [[ "$agent" == "claude" || "$agent" == "codex" ]] || agent=$(agent_default)
+
+    tmux new-session -ds "$name" -c "$dir" -n "$(agent_window_name "$agent")"
+    # plain name, no "=" prefix: set-option's target parser rejects the
+    # exact-match form outright ("no such session: =name")
+    tmux set-option -t "$name" @agent "$agent"
     tmux set-option -w -t "${name}:1" automatic-rename off
-    tmux send-keys -t "${name}:1" "claude" Enter
+    tmux send-keys -t "${name}:1" "$agent" Enter
 
     nvim_win=$(tmux new-window -t "${name}:" -c "$dir" -P -F '#{window_id}')
     tmux send-keys -t "$nvim_win" "nvim" Enter
 
-    # trailing zsh window; new-window selects it, so go back to claude
+    # trailing zsh window; new-window selects it, so go back to the agent
     tmux new-window -t "${name}:" -c "$dir"
     tmux select-window -t "${name}:1"
 }
 
+# agent_ttys
+#   Prints "<tty>\t<agent>" for every live agent process — claude or codex
+#   — one line per tty (no /dev/ prefix). An agent pane is identified by its
+#   TTY rather than #{pane_current_command}, because the agent often runs
+#   under a shell wrapper (send-keys into an initialized shell, which is how
+#   every launcher here starts one) that makes the pane command report
+#   zsh/sh while the agent owns the same tty.
+#   comm matching: /codex/ for the Rust binary (brew installs it as `codex`;
+#   an npm install shows the platform binary, still matching), /claude/ or a
+#   bare `node` for Claude Code (the npm bin is literally claude.exe, and a
+#   wrapper/shim shows as node). One ps for the whole machine — this runs on
+#   every statusbar tick, so the arm count must stay at one.
+#   TIES: a tty can own both a codex and a node process — a codex running an
+#   npm tool or a dev server, or an npm-installed codex whose node wrapper is
+#   still the parent. codex wins those (the reverse sort on the agent field
+#   puts it first, and every lookup takes the first match for a tty), because
+#   a bare `node` is the weakest of the three signals.
+agent_ttys() {
+    ps -A -o tty=,comm= 2>/dev/null | _agent_ttys_filter
+}
+
+# _agent_ttys_filter
+#   The parsing half of agent_ttys, over `ps -o tty=,comm=` lines on stdin.
+#   Split out so it can be tested without a machine full of agents.
+_agent_ttys_filter() {
+    awk '$1 != "??" {
+             if ($2 ~ /codex/) { print $1 "\tcodex" }
+             else if ($2 ~ /claude/ || $2 ~ /(^|\/)node$/) { print $1 "\tclaude" }
+         }' \
+        | sort -u -t$'\t' -k1,1 -k2,2r
+}
+
 # claude_ttys
-#   Prints the tty names (no /dev/ prefix) of every live claude/node
-#   process, one per line. A claude pane is identified by its TTY rather
-#   than #{pane_current_command}, because claude often runs under a shell
-#   wrapper (e.g. `tmux new-session '... || claude'`) that makes the pane
-#   command report zsh/sh while claude owns the same tty.
+#   Every agent tty, agent-agnostic — the historical name, kept because
+#   "which panes hold an agent" is exactly what its callers ask.
 claude_ttys() {
-    ps -A -o tty=,comm= 2>/dev/null \
-        | awk '$1 != "??" && ($2 ~ /claude/ || $2 ~ /(^|\/)node$/) {print $1}' \
-        | sort -u
+    agent_ttys | cut -f1 | sort -u
+}
+
+# _agent_tty_map
+#   agent_ttys as one newline-delimited string with a LEADING newline,
+#   ready for the fork-free lookup its callers use:
+#     rest="${map#*$'\n'"$tty"$'\t'}"
+#     [[ "$rest" != "$map" ]] && agent="${rest%%$'\n'*}"
+#   (a miss leaves the string untouched; on a hit the agent is everything up
+#   to the next newline — the last entry has none, so ${..%%} returns it
+#   whole. No trailing newline: command substitution would eat it anyway.)
+#   Prefix stripping instead of a subshell per pane — the statusbar scan has
+#   a ~200ms budget covering every pane on the machine.
+#   Returns 1 (and prints nothing) when no agent is running.
+_agent_tty_map() {
+    local m
+    m=$(agent_ttys)
+    [[ -z "$m" ]] && return 1
+    printf '%s' $'\n'"$m"
 }
 
 # get_claude_sessions
@@ -67,41 +174,28 @@ get_claude_sessions() {
 }
 
 # get_claude_panes
-#   Prints one line per claude pane — ANY window/pane of ANY session, one
-#   row per claude process, tab-separated: session_name, pane_id,
-#   window_index. Most recently active session first; within a session,
-#   window order. This is the dashboard's row source: enumerating per PANE
-#   (not per session, like get_claude_sessions) is what gives a second
-#   claude outside window 1 its own row instead of being invisible.
+#   Prints one line per agent pane — ANY window/pane of ANY session, one
+#   row per agent process, tab-separated: session_name, pane_id,
+#   window_index, agent. Most recently active session first; within a
+#   session, window order. This is the dashboard's row source: enumerating
+#   per PANE (not per session, like get_claude_sessions) is what gives a
+#   second agent outside window 1 its own row instead of being invisible.
+#   The agent column is what lets the dashboard read the right telemetry
+#   (claude transcripts vs codex rollouts) per row.
 get_claude_panes() {
-    local ttys
-    ttys=$(claude_ttys)
-    [[ -z "$ttys" ]] && return 0
+    local map rest
+    map=$(_agent_tty_map) || return 0
     tmux list-panes -a -F $'#{session_activity}\t#{session_name}\t#{pane_id}\t#{window_index}\t#{pane_tty}' 2>/dev/null \
         | while IFS=$'\t' read -r act name pid widx tty; do
-            case $'\n'"$ttys"$'\n' in
-                *$'\n'"${tty#/dev/}"$'\n'*) printf '%s\t%s\t%s\t%s\n' "$act" "$name" "$pid" "$widx" ;;
-            esac
+            rest="${map#*$'\n'"${tty#/dev/}"$'\t'}"
+            [[ "$rest" == "$map" ]] && continue
+            printf '%s\t%s\t%s\t%s\t%s\n' "$act" "$name" "$pid" "$widx" "${rest%%$'\n'*}"
         done \
         | sort -t$'\t' -k1,1rn -k4,4n \
-        | cut -f2-4
+        | cut -f2-5
 }
 
-# is_claude_pane_command <pane-current-command>
-#   True (exit 0) if the given #{pane_current_command} value looks like a
-#   running claude process — the CLI's foreground process is typically
-#   `claude` itself, or `node` when invoked via a wrapper/shim. Gates the
-#   Yes/No-substring and "to interrupt" heuristics in classify_pane_status
-#   to panes that are actually running claude, so an unrelated pane whose
-#   visible text happens to contain those same substrings (vim or `git
-#   diff` displaying this very script's literals, for instance) is never
-#   misclassified as needing attention.
-is_claude_pane_command() {
-    # matches claude / claude.exe (the npm bin is literally claude.exe) / node
-    [[ "$1" == claude* || "$1" == "node" ]]
-}
-
-# classify_pane_status <raw-content>
+# classify_pane_status <raw-content> [agent]
 #   Prints: working | idle | permission | unknown
 #   Pure classifier over RAW, unfiltered captured pane content (e.g. a
 #   straight `tmux capture-pane -p` — blank-line stripping and the
@@ -120,6 +214,15 @@ is_claude_pane_command() {
 #   (both 4.0+ only).
 classify_pane_status() {
     local raw="$1"
+
+    # codex screens look nothing like claude's — dispatch to the codex
+    # classifier in tmux-claude-lib-codex and leave everything below it
+    # exactly as it was. Agent defaults to claude, so every pre-existing
+    # one-argument caller behaves identically.
+    if [[ "${2:-claude}" == "codex" ]]; then
+        classify_codex_pane_status "$raw"
+        return
+    fi
 
     if [[ -z "$raw" ]]; then
         echo "unknown"
@@ -194,70 +297,76 @@ classify_pane_status() {
     echo "unknown"
 }
 
-# get_session_status <tmux-session-name>
+# get_session_status <tmux-session-name> [agent]
 #   Prints: working | idle | permission | unknown
-#   Detects state by inspecting the last lines of the tmux pane.
+#   Detects state by inspecting the last lines of the tmux pane. The agent
+#   defaults to the session's own (@agent), so a codex session classifies by
+#   codex's rules without the caller having to know.
 get_session_status() {
     local session="$1"
+    local agent="${2:-}"
+    [[ -n "$agent" ]] || agent=$(session_agent "$session")
     local raw
     raw=$(tmux capture-pane -t "${session}:1" -p -S -30 2>/dev/null)
-    classify_pane_status "$raw"
+    classify_pane_status "$raw" "$agent"
 }
 
-# get_pane_status <pane-id>
+# get_pane_status <pane-id> [agent]
 #   Prints: working | idle | permission | unknown
 #   Same classifier as get_session_status, but for one exact pane — the
-#   dashboard's per-row status now that rows are panes, not sessions.
+#   dashboard's per-row status now that rows are panes, not sessions. The
+#   agent defaults to claude; the dashboard passes the pane's own (its rows
+#   carry it from get_claude_panes).
 get_pane_status() {
     local raw
     raw=$(tmux capture-pane -t "$1" -p -S -30 2>/dev/null)
-    classify_pane_status "$raw"
+    classify_pane_status "$raw" "${2:-claude}"
 }
 
 # scan_claude_sessions
-#   Scans every pane owned by a live claude process — ANY window/pane of
-#   ANY session, not just the hub layout's window 1 — and prints one line
-#   per session that has at least one: "<session>\t<status>\t<pane>",
-#   where status is the worst across that session's claude panes
-#   (permission > working > idle > unknown) and pane is the id of the
-#   pane exhibiting it ("-" when unknown; first-seen wins when several
-#   panes tie) — so C-y's jump can land on the actual permission prompt,
-#   not just its session (which used to drop you on the session's current
-#   window while the prompt blocked in another).
+#   Scans every pane owned by a live agent process — claude or codex, ANY
+#   window/pane of ANY session, not just the hub layout's window 1 — and
+#   prints one line per session that has at least one:
+#   "<session>\t<status>\t<pane>", where status is the worst across that
+#   session's agent panes (permission > working > idle > unknown) and pane
+#   is the id of the pane exhibiting it ("-" when unknown; first-seen wins
+#   when several panes tie) — so C-y's jump can land on the actual
+#   permission prompt, not just its session (which used to drop you on the
+#   session's current window while the prompt blocked in another).
 #
 #   Two tmux round trips total regardless of session count: one
 #   list-panes -a to enumerate panes, one batched capture of ONLY the
-#   panes whose tty belongs to a claude process (claude_ttys). Inverting
+#   panes whose tty belongs to an agent process (agent_ttys). Inverting
 #   the old shape (capture window 1 of every session, then gate on tty)
-#   this way both covers manually-launched claudes outside window 1 and
+#   this way both covers manually-launched agents outside window 1 and
 #   makes the prompt-lookalike false positive impossible by construction —
-#   a non-claude pane's text is never captured, so it can't be misread
+#   a non-agent pane's text is never captured, so it can't be misread
 #   (the gate used to be the only defense; see tmux-claude-statusbar's
 #   round-1 finding note at classify time, now moot).
 #
 #   Panes are addressed by #{pane_id} (stable, immune to renumbering); the
-#   separator line carries the pane's session name so blocks stay
-#   self-labeled even if a pane vanishes between the two round trips (its
-#   capture just comes back empty -> "unknown", self-heals next call).
+#   separator line carries the pane's session name AND its agent, so blocks
+#   stay self-labeled even if a pane vanishes between the two round trips
+#   (its capture just comes back empty -> "unknown", self-heals next call)
+#   and each block is classified by the right agent's rules.
 #   Used by tmux-claude-statusbar (counts + status.tsv cache) and
 #   tmux-claude-attention's jump (C-y permission targets).
 scan_claude_sessions() {
-    local ttys
-    ttys=$(claude_ttys)
-    [[ -z "$ttys" ]] && return 0
+    local map rest
+    map=$(_agent_tty_map) || return 0
 
     local pane_list
     pane_list=$(tmux list-panes -a -F $'#{session_name}\t#{pane_id}\t#{pane_tty}' 2>/dev/null)
     [[ -z "$pane_list" ]] && return 0
 
-    # claude panes only, as "session\tpane_id"
+    # agent panes only, as "session\tpane_id\tagent"
     local -a targets=()
     local sname pid ptty
     while IFS=$'\t' read -r sname pid ptty; do
         [[ -z "$pid" ]] && continue
-        case $'\n'"$ttys"$'\n' in
-            *$'\n'"${ptty#/dev/}"$'\n'*) targets+=("${sname}"$'\t'"${pid}") ;;
-        esac
+        rest="${map#*$'\n'"${ptty#/dev/}"$'\t'}"
+        [[ "$rest" == "$map" ]] && continue
+        targets+=("${sname}"$'\t'"${pid}"$'\t'"${rest%%$'\n'*}")
     done <<< "$pane_list"
     (( ${#targets[@]} == 0 )) && return 0
 
@@ -266,13 +375,16 @@ scan_claude_sessions() {
     # original sep).
     local sep="@@CLAUDE-SCAN-$$-${RANDOM}@@"
     local -a args=()
-    local entry tpane
+    local entry tsess tpane tagent
     for entry in "${targets[@]}"; do
-        tpane="${entry#*$'\t'}"
+        tsess="${entry%%$'\t'*}"
+        rest="${entry#*$'\t'}"
+        tpane="${rest%%$'\t'*}"
+        tagent="${rest#*$'\t'}"
         # the pane id rides the separator line WITHOUT its % — display -p
         # format-expands the message and strftime-eats "%2..." etc.; the
         # parse below restores it
-        args+=(capture-pane -t "$tpane" -p -S -30 \; display-message -p "${sep}${entry%%$'\t'*}"$'\t'"${tpane#%}" \;)
+        args+=(capture-pane -t "$tpane" -p -S -30 \; display-message -p "${sep}${tsess}"$'\t'"${tpane#%}"$'\t'"${tagent}" \;)
     done
     local combined
     combined=$(tmux "${args[@]}" 2>/dev/null)
@@ -283,13 +395,15 @@ scan_claude_sessions() {
     # session's worst status survives aggregation.
     local perm_s=$'\n' work_s=$'\n' idle_s=$'\n' seen=$'\n'
     local -a order=()
-    local block="" line name pane st
+    local block="" line name pane agent st
     while IFS= read -r line; do
         if [[ "$line" == "$sep"* ]]; then
-            entry="${line#$sep}"
+            entry="${line#"$sep"}"
             name="${entry%%$'\t'*}"
-            pane="%${entry#*$'\t'}"
-            st=$(classify_pane_status "$block")
+            rest="${entry#*$'\t'}"
+            pane="%${rest%%$'\t'*}"
+            agent="${rest#*$'\t'}"
+            st=$(classify_pane_status "$block" "$agent")
             case "$st" in
                 permission) perm_s+="${name}"$'\t'"${pane}"$'\n' ;;
                 working)    work_s+="${name}"$'\t'"${pane}"$'\n' ;;
@@ -886,7 +1000,17 @@ format_tokens() {
 }
 
 # short_model <model-string>
-#   Shortens model names: claude-opus-4-6 -> opus-4-6, claude-sonnet-4-6 -> sonnet-4-6
+#   Shortens model names: claude-opus-4-6 -> opus-4-6, claude-sonnet-4-6 -> sonnet-4-6.
+#   Codex model ids carry no such prefix and pass through untouched.
 short_model() {
     echo "$1" | sed 's/^claude-//'
 }
+
+# ── codex ───────────────────────────────────────────────
+# The codex half of the library (classifier, rollout reader) lives in its
+# own file so the claude paths above stay undisturbed. Resolved relative to
+# THIS file so a worktree copy sources its own sibling, not ~/dotfiles.
+_agent_lib_dir="${BASH_SOURCE[0]%/*}"
+[[ "$_agent_lib_dir" == "${BASH_SOURCE[0]}" ]] && _agent_lib_dir="$HOME/dotfiles/bin"
+# shellcheck source=/dev/null
+source "${_agent_lib_dir}/tmux-claude-lib-codex"

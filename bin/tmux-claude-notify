@@ -1,26 +1,54 @@
 #!/usr/bin/env bash
 
-# Claude Code notification hook.
-# Triggered when Claude needs permission or finishes a task.
-# Receives JSON on stdin with session_id, cwd, notification_type, etc.
-# Sends terminal bell (Ghostty dock bounce) and macOS notification.
+# Agent notification hook — bell + macOS notification when an agent wants
+# something. Reads the hook payload on stdin and speaks BOTH schemas:
+#
+#   Claude Code   Notification hook, ~/.claude/settings.json (machine-local)
+#                 payload: notification_type ("permission_prompt",
+#                 "idle_prompt", ...), cwd, hook_event_name "Notification"
+#   Codex         PermissionRequest hook, dots/codex/hooks.json
+#                 payload: hook_event_name ("PermissionRequest"), cwd,
+#                 tool_name, tool_input — no notification_type
+#
+# So notification_type present -> claude; otherwise the event name decides.
+# The title says which agent is asking, since both can be waiting at once.
 
-# Read hook input from stdin
 input=$(cat)
-notification_type=$(echo "$input" | jq -r '.notification_type // "unknown"' 2>/dev/null)
-cwd=$(echo "$input" | jq -r '.cwd // ""' 2>/dev/null)
-project=$(basename "$cwd")
 
-case "$notification_type" in
-    permission_prompt) message="$project needs permission" ;;
-    idle_prompt)       message="$project is waiting for input" ;;
-    *)                 message="$project needs attention" ;;
+# One jq pass, one field per LINE — not @tsv: tab is IFS whitespace, so a
+# `read` with IFS=$'\t' silently swallows the leading empty field that
+# codex's payload (no notification_type) produces, shifting every value one
+# slot left. Empty lines survive; a missing trailing line just reads empty.
+{
+    read -r notification_type
+    read -r hook_event
+    read -r cwd
+} <<< "$(
+    printf '%s' "$input" |
+        jq -r '.notification_type // "", .hook_event_name // "", .cwd // ""' 2>/dev/null
+)"
+
+project=$(basename "${cwd:-}")
+
+agent="codex"
+case "$hook_event" in
+    Notification|"") agent="claude" ;;
 esac
+[[ -n "$notification_type" ]] && agent="claude"
+
+case "${notification_type:-$hook_event}" in
+    permission_prompt|PermissionRequest) message="$project needs permission" ;;
+    idle_prompt)                         message="$project is waiting for input" ;;
+    *)                                   message="$project needs attention" ;;
+esac
+
+title="Claude Code"
+[[ "$agent" == "codex" ]] && title="Codex"
 
 # Terminal bell — Ghostty will bounce dock icon and show 🔔 badge
 printf '\a' > /dev/tty 2>/dev/null || true
 
 # macOS notification center
 if command -v osascript >/dev/null 2>&1; then
-    osascript -e "display notification \"${message}\" with title \"Claude Code\"" 2>/dev/null &
+    osascript -e "display notification \"${message}\" with title \"${title}\"" 2>/dev/null &
 fi

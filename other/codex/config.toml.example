@@ -1,0 +1,30 @@
+# Codex CLI config — machine-local. Copied to other/codex/config.toml by
+# bin/seed_other.sh, which bin/symlink_files.sh then links to
+# ~/.codex/config.toml. Codex writes its own per-project trust entries
+# ([projects."<path>"] trust_level) into this file, which is why it lives in
+# the gitignored other/ layer. See notes/codex.md for first-run setup.
+
+# Two-axis permissions: what codex may do without asking (sandbox_mode) and
+# when it stops to ask (approval_policy).
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+# Repo instructions: codex reads AGENTS.md; every repo here documents itself in
+# CLAUDE.md instead, so fall back to that when a repo has no AGENTS.md. Keep
+# CLAUDE.md the single source — codex reads it, claude never reads AGENTS.md.
+project_doc_fallback_filenames = ["CLAUDE.md"]
+
+# Lifecycle hooks (~/.codex/hooks.json) drive the tmux attention layer.
+# Stable and enabled by default in 0.153.x — set explicitly so a changed
+# default can't silently switch the attention layer off.
+[features]
+hooks = true
+
+[tui]
+# Desktop notification when codex wants approval. The PermissionRequest hook
+# covers the tmux side (🔴 in the status bar, Ctrl+Y jump) independently.
+notifications = ["approval-requested"]
+# status_line = { ... }
+
+# model = "<model-id>"            # `codex` picks the account default otherwise
+# model_reasoning_effort = "medium"

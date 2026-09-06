@@ -1,0 +1,47 @@
+{
+  "description": "tmux attention layer: flag finished turns, notify on approval prompts, and keep the pane -> rollout map current (see notes/codex.md)",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/dotfiles/bin/tmux-claude-attention codex-session-start"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/dotfiles/bin/tmux-claude-attention codex-session-end"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/dotfiles/bin/tmux-claude-attention flag-done",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/dotfiles/bin/tmux-claude-notify",
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}

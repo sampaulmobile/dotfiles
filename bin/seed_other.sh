@@ -8,7 +8,9 @@ set -euo pipefail
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 
 created=0 existing=0
-for example in "$DOTFILES"/other/*.example "$DOTFILES"/other/claude/*.example; do
+for example in "$DOTFILES"/other/*.example \
+               "$DOTFILES"/other/claude/*.example \
+               "$DOTFILES"/other/codex/*.example; do
     [[ -f "$example" ]] || continue
     target="${example%.example}"
     rel="${target#$DOTFILES/}"

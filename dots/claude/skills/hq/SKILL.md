@@ -44,12 +44,15 @@ other case.
   Find them via ListAgents.
 - Not running? Spawn one headlessly with the standard hub layout, then
   re-check ListAgents (allow ~15s):
-  `source ~/dotfiles/bin/tmux-claude-lib && new_hub_session <repo-dir-basename> ~/dev/<repo-dir>`
+  `source ~/dotfiles/bin/tmux-claude-lib && new_hub_session <repo-dir-basename> ~/dev/<repo-dir> claude`
   NEVER launch claude as the tmux session command (`new-session ... claude`) —
   that bypasses zsh rc files, so env from other/zshrc.local (ANTHROPIC_MODEL,
   TLS, ...) is missing and claude comes up on the wrong model.
   new_hub_session instead types `claude` into an initialized shell, same as
   Ctrl+F, so claude starts warm in window 1.
+  The third argument is the agent (`claude` or `codex`) — always pass `claude`
+  explicitly: omitting it means the machine's default agent, and a codex
+  session has no SendMessage/ListAgents equivalent to be dispatched to.
   Creation only — never kill or mutate existing sessions (tmux-safety rules).
 
 ## 4. Delegate
