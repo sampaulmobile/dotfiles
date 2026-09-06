@@ -16,7 +16,6 @@ brew 'mosh'
 brew 'watch'
 brew 'shellcheck'
 brew 'lazygit'
-brew 'codex'
 
 # utilities
 brew 'fnm'
@@ -33,6 +32,7 @@ brew 'poetry'
 
 # apps
 cask 'ghostty'
+cask 'codex'
 cask 'rectangle'
 cask 'google-chrome'
 cask '1password'

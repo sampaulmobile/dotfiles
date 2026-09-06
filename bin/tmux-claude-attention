@@ -136,10 +136,14 @@ cmd_clear() {
     # window nobody watched must keep its flags.
     tmux list-clients -F '#{client_session}' 2>/dev/null | grep -qxF "$session" || exit 0
 
-    # Panes of the session's current window = what's on screen now
-    # (list-panes with a bare session target uses its current window).
+    # Panes of the session's current window = what's on screen now. The
+    # trailing colon matters: list-panes takes a target-WINDOW, and a bare
+    # "=name" is first tried as a window called "name" in the caller's own
+    # session (nvim titles its window after the repo dir, so a hub session
+    # "dotfiles" has a window "dotfiles" — and the wrong window's flags got
+    # cleared). "=name:" is unambiguously that session's current window.
     local pane
-    for pane in $(tmux list-panes -t "=${session}" -F '#{pane_id}' 2>/dev/null); do
+    for pane in $(tmux list-panes -t "=${session}:" -F '#{pane_id}' 2>/dev/null); do
         rm -f "$(flag_path "$session" "$pane")"
     done
 }

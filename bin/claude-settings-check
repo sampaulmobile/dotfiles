@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# claude-settings-check — report what the live Claude Code settings.json is
+# missing relative to its tracked template, other/claude/settings.json.example.
+#
+# seed_other.sh copies the example ONCE and never overwrites, so a default
+# added to the example later (a new hook, an allowlist entry, a flag) silently
+# never reaches a machine that already has a settings.json. This is the
+# deterministic detector for that gap: both files are flattened to leaf
+# identities and every identity present in the example but absent from the
+# live file is printed. Nothing is written — what to do about a gap is the
+# user's call (typically: ask claude to add the listed entries). Run by
+# seed_other.sh, and so by symlink_files.sh, setup.sh and bin/doctor.
+#
+#   claude-settings-check [live.json] [example.json]   (defaults: other/claude/)
+#
+# What "present" means, per shape:
+#   scalar leaf        its key path exists — value differences are NOT drift
+#                      (model, theme, effortLevel legitimately differ per machine)
+#   permissions.*[]    the exact entry string is in the live list
+#   hooks.<Event>[]    a live entry has the same matcher AND command
+#   other arrays       the exact JSON value is in the live array
+#
+# Exit 0 and silent when nothing is missing; 1 with one line per gap; 2 when
+# a file is missing or not valid JSON.
+set -uo pipefail
+
+DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+live="${1:-$DOTFILES/other/claude/settings.json}"
+example="${2:-$DOTFILES/other/claude/settings.json.example}"
+
+[[ -f "$example" ]] || { echo "claude-settings-check: no example at $example" >&2; exit 2; }
+[[ -f "$live" ]] || { echo "claude-settings-check: no live file at $live (run bin/seed_other.sh)" >&2; exit 2; }
+for f in "$live" "$example"; do
+    jq -e . "$f" >/dev/null 2>&1 || { echo "claude-settings-check: $f is not valid JSON" >&2; exit 2; }
+done
+
+# Emit "<path>\t<label>" for every identity in the example that the live file
+# lacks. `ids` flattens a settings document to [path, label] pairs following
+# the rules in the header; the set difference is plain array subtraction.
+missing=$(jq -r --slurpfile live "$live" '
+  def ids:
+    def flat($p):
+      if type == "object" then
+        to_entries[] as $e | ($e.value | flat($p + [$e.key]))
+      elif type == "array" then
+        if $p[0] == "hooks" then
+          .[] as $h | ($h.hooks // [])[]
+            | [($p | join(".")), "matcher=\($h.matcher // "") command=\(.command // "")"]
+        elif $p[0] == "permissions" then
+          .[] | [($p | join(".")), tostring]
+        else
+          .[] | [($p | join(".")), tojson]
+        end
+      else
+        [($p | join(".")), ""]
+      end;
+    [flat([])];
+  (ids - ($live[0] | ids))[] | "\(.[0])\t\(.[1])"
+' "$example")
+
+[[ -z "$missing" ]] && exit 0
+
+short() { case "$1" in "$HOME"/*) printf '~%s' "${1#"$HOME"}" ;; *) printf '%s' "$1" ;; esac; }
+count=$(printf '%s\n' "$missing" | wc -l | tr -d ' ')
+echo "$(short "$live") is missing $count entr$([[ "$count" == 1 ]] && echo y || echo ies) present in $(basename "$example"):"
+while IFS=$'\t' read -r path label; do
+    printf '  %-22s %s\n' "$path" "$label"
+done <<< "$missing"
+exit 1

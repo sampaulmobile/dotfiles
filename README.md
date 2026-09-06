@@ -14,6 +14,9 @@ cd ~/dotfiles && ./setup.sh
 
 # 3. (some machines) supplemental packages + local claude config
 ./setup_other.sh
+
+# later, after a git pull: what would a rerun change? (read-only)
+bin/doctor
 ```
 
 Both scripts end with a checklist of the remaining manual steps (logins,
@@ -42,7 +45,8 @@ and `*.example` templates are tracked; the real files never leave the machine.
 | `other/claude/` | symlinked into `~/.claude/` by `bin/symlink_files.sh` — settings.json (file link), skills/ and rules/ (dir links) |
 
 To start from a template: `cp other/<name>.example other/<name>` (setup.sh
-seeds these automatically).
+seeds these automatically; `bin/doctor` reports templates without a copy, and
+what `other/claude/settings.json` is missing relative to its example).
 
 All Claude Code config is machine-local: settings.json/skills/rules live in
 `other/claude/`, and per-machine model/env is set via env vars in
