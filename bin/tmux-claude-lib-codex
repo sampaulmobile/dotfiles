@@ -1,0 +1,259 @@
+#!/usr/bin/env bash
+
+# Codex-specific half of the shared agent library. Sourced at the end of
+# bin/tmux-claude-lib — never on its own — so everything here can assume the
+# generic helpers exist. Keeping it in its own file is what lets the claude
+# path in tmux-claude-lib stay byte-for-byte what it was: the dispatch in
+# classify_pane_status is one `if`, and the codex rules live here.
+#
+# Every string matched below was captured from codex-cli 0.153.4 running in
+# a throwaway tmux session (see tests/fixtures/codex-*.txt for the actual
+# screens). Same contract as the claude classifier: pure bash 3.2, no forks,
+# last 10 non-blank lines only.
+
+# classify_codex_pane_status <raw-content>
+#   Prints: working | idle | permission | unknown
+#   Called by classify_pane_status when the pane's agent is codex.
+classify_codex_pane_status() {
+    local raw="$1"
+
+    if [[ -z "$raw" ]]; then
+        echo "unknown"
+        return
+    fi
+
+    # Split into lines and drop blanks, then keep the last 10 — same
+    # windowing as the claude classifier (deliberately duplicated rather
+    # than factored out: the claude path is hot, well-tested, and not worth
+    # disturbing for a dozen lines).
+    local -a all filtered
+    IFS=$'\n' read -rd '' -a all <<< "$raw"
+    local line
+    for line in "${all[@]}"; do
+        [[ -n "$line" ]] && filtered+=("$line")
+    done
+
+    local total=${#filtered[@]}
+    if (( total == 0 )); then
+        echo "unknown"
+        return
+    fi
+
+    local start=0
+    (( total > 10 )) && start=$(( total - 10 ))
+    local -a window=("${filtered[@]:start}")
+
+    local content="" w
+    for w in "${window[@]}"; do
+        if [[ -n "$content" ]]; then
+            content+=$'\n'"$w"
+        else
+            content="$w"
+        fi
+    done
+
+    # Permission — checked first: the composer line ("› Ask Codex to do
+    # anything") that idle matches on can still be on screen above an
+    # overlay, and an overlay's own option list starts with "› 1. Yes, ...".
+    #
+    # Approval overlay headers (approval_overlay.rs): "Would you like to run
+    # the following command?" / "... make the following edits?" / "... grant
+    # these permissions?", and "<server> needs your approval." for MCP. The
+    # option list always offers a "Yes, " — requiring both halves keeps a
+    # transcript that merely QUOTES one of these headers from tripping it.
+    if [[ "$content" == *"Yes, "* ]] \
+       && [[ "$content" == *"Would you like to"* || "$content" == *"needs your approval"* ]]; then
+        echo "permission"
+        return
+    fi
+
+    # The two startup prompts that block a session just as hard as an
+    # approval: directory trust (on a cwd codex has not seen before) and
+    # hook trust (after any hooks.json change — see notes/codex.md). Both
+    # stop the agent dead waiting for a keystroke, which is exactly what the
+    # attention layer exists to surface.
+    if [[ "$content" == *"Do you trust the contents of this directory?"* \
+       || "$content" == *"Hooks need review"* ]]; then
+        echo "permission"
+        return
+    fi
+
+    # Working: the status line reads "• Working (4s • esc to interrupt)";
+    # tool runs show the same "esc to interrupt" tail. Matching the shorter
+    # "to interrupt" mirrors the claude classifier and survives a reworded
+    # key hint.
+    if [[ "$content" == *"to interrupt"* ]]; then
+        echo "working"
+        return
+    fi
+
+    # Idle: the composer placeholder, or its prompt char on its own (the
+    # placeholder disappears once you start typing).
+    if [[ "$content" == *"Ask Codex to do anything"* || "$content" == *"›"* ]]; then
+        echo "idle"
+        return
+    fi
+
+    echo "unknown"
+}
+
+# ── rollout telemetry ───────────────────────────────────
+#
+# Codex keeps one JSONL "rollout" per thread under
+# ~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<id>.jsonl. Record shapes below
+# were read off a live 0.153.4 rollout (jq -c '.type' over the file):
+#
+#   session_meta        .payload.session_id, .payload.cwd
+#   turn_context        .payload.model, .payload.cwd  (one per turn)
+#   event_msg           .payload.type == "token_count":
+#                         .payload.info.last_token_usage.{input,output,total}_tokens
+#                         .payload.info.total_token_usage.{...}
+#                         .payload.info.model_context_window
+#                         .payload.rate_limits.primary  (null on plans that
+#                                                        bill credits)
+#                       .payload.type == "task_started" — one per user turn
+#   token_usage_record  .payload.thread_token_usage.*   (cumulative)
+#   response_item       .payload.type == "message", .payload.role
+#
+# NOTE on token math: codex's cached_input_tokens are a SUBSET of
+# input_tokens (44173 input of which 39296 cached, total_tokens = input +
+# output), unlike Anthropic's disjoint cache_read/cache_creation counters —
+# so "context" here is last_token_usage.input_tokens on its own. Adding the
+# cached count would double-count.
+
+CODEX_SESSIONS_DIR="$HOME/.codex/sessions"
+CODEX_MAP_DIR="$HOME/.cache/claude-attention/codex"
+
+# codex_find_pane_jsonl <pane-id>
+#   Prints the rollout path for the codex running in one exact pane, or
+#   nothing. The SessionStart hook's map (written by tmux-claude-attention
+#   codex-session-start) is authoritative — it is pane-exact, and it is
+#   rewritten after /new. Fallback for a codex started before the hooks were
+#   trusted: the newest rollout whose session_meta cwd is this pane's cwd.
+#
+#   The map is keyed by bare pane id, and tmux reuses pane ids after a server
+#   restart — so an entry is only trusted while the cwd it recorded is still
+#   the pane's own (field 3). A mismatch means the id was recycled, or the
+#   codex was killed and relaunched elsewhere; treating it as a miss keeps a
+#   fresh codex from reading another project's thread until its first prompt
+#   rewrites the map. An unknown pane cwd (no server to ask) trusts the entry.
+codex_find_pane_jsonl() {
+    local pane="${1#%}"
+    local mapping="${CODEX_MAP_DIR}/${pane}.tsv"
+    local tpath mcwd pcwd
+    pcwd=$(tmux display-message -p -t "%${pane}" '#{pane_current_path}' 2>/dev/null)
+    if [[ -f "$mapping" ]]; then
+        # fields: session_id, rollout path, cwd
+        IFS=$'\t' read -r _ tpath mcwd < "$mapping"
+        if [[ -n "$tpath" && -f "$tpath" ]] &&
+           [[ -z "$pcwd" || -z "$mcwd" || "$pcwd" == "$mcwd" ]]; then
+            printf '%s' "$tpath"
+            return
+        fi
+    fi
+
+    [[ -z "$pcwd" ]] && return
+    _codex_newest_rollout_for_cwd "$pcwd"
+}
+
+# _codex_newest_rollout_for_cwd <cwd>
+#   Newest rollout (by mtime) whose session_meta records this cwd. Capped at
+#   the 20 most recent files: this is a fallback, and the dashboard must not
+#   pay a full scan of every rollout ever written.
+_codex_newest_rollout_for_cwd() {
+    local cwd="$1" f
+    [[ -d "$CODEX_SESSIONS_DIR" ]] || return
+    # rollout filenames are codex-generated (rollout-<iso-ts>-<uuid>.jsonl):
+    # no spaces or newlines to mishandle, and `ls -t` is the same
+    # newest-first idiom the claude transcript lookup in tmux-claude-lib uses
+    # shellcheck disable=SC2012
+    while IFS= read -r f; do
+        [[ -n "$f" ]] || continue
+        # session_meta is always the first record
+        if head -1 "$f" 2>/dev/null | jq -e --arg c "$cwd" \
+            'select(.type == "session_meta") | .payload.cwd == $c' >/dev/null 2>&1; then
+            printf '%s' "$f"
+            return
+        fi
+    done < <(ls -t "${CODEX_SESSIONS_DIR}"/*/*/*/rollout-*.jsonl 2>/dev/null | head -20)
+}
+
+# codex_get_context_and_model <rollout-path>
+#   Prints tab-separated: context model context_window
+#   Context is the last turn's prompt size; the window comes from the
+#   transcript itself (model_context_window) rather than a per-model table,
+#   so the dashboard needs no codex model list to keep up to date. Reads
+#   only the tail of the file, like its claude counterpart.
+codex_get_context_and_model() {
+    local jsonl="$1"
+    [[ ! -f "$jsonl" ]] && printf '0\tunknown\t0' && return
+
+    local result
+    result=$(tail -200 "$jsonl" | jq -Rn -r '
+        [inputs | fromjson?] as $recs |
+        ($recs | map(select(.payload.type == "token_count")) | last) as $tc |
+        ($recs | map(select(.type == "turn_context")) | last) as $turn |
+        [ ($tc.payload.info.last_token_usage.input_tokens // 0),
+          ($turn.payload.model // "unknown"),
+          ($tc.payload.info.model_context_window // 0)
+        ] | @tsv
+    ' 2>/dev/null)
+    [[ -z "$result" ]] && result=$'0\tunknown\t0'
+    printf '%s' "$result"
+}
+
+# codex_get_totals <rollout-path> [cache-file]
+#   Prints tab-separated: total_output total_all turns cost
+#   No incremental accumulation (unlike get_totals_incremental): codex's
+#   token_count carries CUMULATIVE totals for the thread, so the last one in
+#   the file is the answer. Turns are counted as task_started events — one
+#   per user prompt handled — with a plain grep, cached against the file's
+#   mtime when a cache path is given (a long rollout is a few MB and the
+#   dashboard re-reads on every refresh).
+#   cost: codex plans bill by rate limit, not per token, so the COST column
+#   shows the primary rate-limit window's usage ("5h:42%") when the
+#   transcript carries one, else "-".
+codex_get_totals() {
+    local jsonl="$1" cache="$2"
+    [[ ! -f "$jsonl" ]] && printf '0\t0\t0\t-' && return
+
+    local mtime="" cached
+    if [[ -n "$cache" ]]; then
+        mtime=$(_agent_file_mtime "$jsonl")
+        if cached=$(_agent_cache_get "$cache" "$mtime") && [[ -n "$cached" ]]; then
+            printf '%s' "$cached"
+            return
+        fi
+    fi
+
+    local turns
+    turns=$(grep -c '"type":"task_started"' "$jsonl" 2>/dev/null)
+    [[ "$turns" =~ ^[0-9]+$ ]] || turns=0
+
+    # tail is enough for cumulative counters; 256 KiB comfortably covers the
+    # last token_count even with large tool outputs in between
+    local result
+    result=$(tail -c 262144 "$jsonl" | jq -Rn -r --argjson turns "${turns:-0}" '
+        [inputs | fromjson?] as $recs |
+        ($recs | map(select(.payload.type == "token_count")) | last) as $tc |
+        ($recs | map(select(.type == "token_usage_record")) | last) as $tu |
+        ($tc.payload.info.total_token_usage // $tu.payload.thread_token_usage) as $u |
+        ($tc.payload.rate_limits.primary) as $rl |
+        [ ($u.output_tokens // 0),
+          ($u.total_tokens // 0),
+          $turns,
+          ( if $rl == null or ($rl.used_percent // null) == null then "-"
+            else
+              (($rl.window_minutes // 0) as $w
+               | (if $w >= 60 then (($w / 60 | floor | tostring) + "h:")
+                  elif $w > 0 then (($w | tostring) + "m:")
+                  else "" end))
+              + ($rl.used_percent | floor | tostring) + "%"
+            end )
+        ] | @tsv
+    ' 2>/dev/null)
+    [[ -z "$result" ]] && result=$(printf '0\t0\t%s\t-' "${turns:-0}")
+
+    [[ -n "$cache" ]] && _agent_cache_set "$cache" "$mtime" "$result"
+    printf '%s' "$result"
+}

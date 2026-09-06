@@ -1,31 +1,55 @@
 #!/usr/bin/env bash
 
-# C-Space: toggle the claude WINDOW within the current project session.
-# Bound directly in dots/tmux.conf.
+# The agent window bindings for the current project session. Bound directly
+# in dots/tmux.conf: C-Space (toggle) and prefix+C (--extra).
 #
-# Behavior:
-#   - on the claude window        -> back to your last-used window
-#   - elsewhere in the session    -> to the claude window
-#   - no claude window yet        -> create it (shell + `claude`) at the
-#                                    current pane's path
+# Which agent — claude or codex — is the session's @agent option, set when
+# the session was built (see new_hub_session in tmux-claude-lib); the window
+# is named after it, and typing the agent's name is what starts it.
 #
-# The window is found by NAME ("claude"); prefix+C's extra windows are named
-# "claude+" precisely so this lookup never grabs them.
+# Toggle (no args, C-Space):
+#   - on the agent window          -> back to your last-used window
+#   - elsewhere in the session     -> to the agent window
+#   - no agent window yet          -> create it (shell + `<agent>`) at the
+#                                     current pane's path
+#
+# Extra (--extra, prefix+C):
+#   always a NEW window at the current pane's directory, named "<agent>+" —
+#   the trailing + is what keeps the toggle's by-name lookup from ever
+#   grabbing it. The attention layer finds agents by tty, so extra windows
+#   land in the statusbar/dashboard/C-y with no extra wiring.
+#
+# Both start the agent by typing into an initialized shell rather than
+# running it as the window command: other/zshrc.local env (model, TLS, ...)
+# must apply, and the window survives the agent exiting.
+
+source ~/dotfiles/bin/tmux-claude-lib
 
 session=$(tmux display-message -p '#S')
+agent=$(session_agent "$session")
+win_name=$(agent_window_name "$agent")
 
-claude_win=$(tmux list-windows -t "${session}:" -F '#{window_name} #{window_id}' 2>/dev/null \
-    | awk '$1 == "claude" {print $2; exit}')
+if [[ "${1:-}" == "--extra" ]]; then
+    path=$(tmux display-message -p '#{pane_current_path}')
+    new_win=$(tmux new-window -t "${session}:" -n "${win_name}+" -c "$path" -P -F '#{window_id}')
+    tmux set-option -w -t "$new_win" automatic-rename off
+    tmux send-keys -t "$new_win" "$agent" Enter
+    exit 0
+fi
 
-if [[ -n "$claude_win" ]]; then
+agent_win=$(tmux list-windows -t "${session}:" -F '#{window_name} #{window_id}' 2>/dev/null \
+    | awk -v n="$win_name" '$1 == n {print $2; exit}')
+
+if [[ -n "$agent_win" ]]; then
     cur_win=$(tmux display-message -p '#{window_id}')
-    if [[ "$cur_win" == "$claude_win" ]]; then
+    if [[ "$cur_win" == "$agent_win" ]]; then
         tmux last-window 2>/dev/null || true
     else
-        tmux select-window -t "$claude_win"
+        tmux select-window -t "$agent_win"
     fi
 else
     path=$(tmux display-message -p '#{pane_current_path}')
-    new_win=$(tmux new-window -t "${session}:" -n claude -c "$path" -P -F '#{window_id}')
-    tmux send-keys -t "$new_win" "claude" Enter
+    new_win=$(tmux new-window -t "${session}:" -n "$win_name" -c "$path" -P -F '#{window_id}')
+    tmux set-option -w -t "$new_win" automatic-rename off
+    tmux send-keys -t "$new_win" "$agent" Enter
 fi

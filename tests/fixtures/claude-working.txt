@@ -1,0 +1,11 @@
+⏺ Read(bin/tmux-claude-lib)
+  ⎿  Read 853 lines
+
+⏺ Bash(shellcheck bin/tmux-claude-lib)
+  ⎿  Running…
+
+· Pondering… (41s · ↓ 1.9k tokens · esc to interrupt)
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ >                                                                            │
+╰──────────────────────────────────────────────────────────────────────────────╯

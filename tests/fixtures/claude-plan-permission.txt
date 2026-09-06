@@ -1,0 +1,12 @@
+⏺ Here is the plan:
+
+  1. Add the agent helpers to the shared library
+  2. Teach the launchers to read them
+  3. Document the result
+
+Would you like to proceed?
+1. Yes, and auto-accept edits
+2. Yes, and manually approve edits
+3. Keep planning
+
+Enter to select · Esc to go back

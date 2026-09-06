@@ -1,0 +1,9 @@
+# Tracked skills shared with codex — one name per line, matching a directory
+# in dots/claude/skills/. bin/symlink_files.sh layers each one into
+# other/codex/skills/ (linked to ~/.agents/skills), so codex and claude run
+# the SAME skill file.
+#
+# Only harness-neutral skills belong here. feature / hq / address-review lean
+# on Claude Code harness primitives (worktree-isolated Agent tool, ListAgents,
+# SendMessage) that codex has no equivalent for.
+pr

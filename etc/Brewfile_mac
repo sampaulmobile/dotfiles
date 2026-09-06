@@ -16,6 +16,7 @@ brew 'mosh'
 brew 'watch'
 brew 'shellcheck'
 brew 'lazygit'
+brew 'codex'
 
 # utilities
 brew 'fnm'
