@@ -889,11 +889,20 @@ get_agent_stats() {
 }
 
 # get_agent_snippet <agent-jsonl> <maxlen> [cache-file]
-#   Last assistant text across the tail of the transcript, flattened to a
-#   single line and truncated to maxlen. Reads only tail -c 65536 for
-#   speed; parses per-line via fromjson? so a partial first line (cut mid
-#   record by the byte-tail) is skipped instead of erroring. Empty output
-#   means "no recent text" — caller should fall back to meta description.
+#   A one-line "what is this agent doing" status, flattened and truncated to
+#   maxlen. Prefers the agent's most recent non-empty assistant text (its
+#   narration); when there is none in the window — a tool-heavy agent can run
+#   dozens of tool calls without narrating, pushing its last text far past the
+#   byte-tail — falls back to its last tool_use, rendered as "→ Tool: arg"
+#   (the arrow marks it as an action, not speech, once the caller quotes it).
+#   That fallback is why the window stays bounded: tool_use records are dense
+#   near EOF, so the action is always present even when narration is stale, and
+#   an in-window text is genuinely recent (huge tool_result records fill the
+#   window fast, so old narration naturally ages out of it rather than being
+#   shown as if current). Reads tail -c 131072 for speed; parses per-line via
+#   fromjson? so a partial first line (cut mid record by the byte-tail) is
+#   skipped instead of erroring. Empty output means the transcript has neither
+#   text nor a tool call yet — caller hides the line.
 get_agent_snippet() {
     local jsonl="$1" maxlen="${2:-60}" cache="$3"
     [[ ! -f "$jsonl" ]] && printf '' && return
@@ -909,10 +918,40 @@ get_agent_snippet() {
     fi
 
     local text
-    text=$(tail -c 65536 "$jsonl" | jq -Rn -r '
-        [inputs | fromjson?] |
-        [.[] | select(.type == "assistant") | (.message.content // [])[]? | select(.type == "text") | .text] |
-        last // empty
+    text=$(tail -c 131072 "$jsonl" | jq -Rn -r '
+        [inputs | fromjson?] as $recs |
+        # all assistant content blocks, in order, most recent last
+        [$recs[] | select(.type == "assistant") | (.message.content // [])[]?] as $blocks |
+        # prefer the last non-empty narration text
+        ([$blocks[] | select(.type == "text") | .text | select(length > 0)] | last) as $narration |
+        if $narration != null then
+            $narration
+        else
+            # else summarize the last tool call as the live action. Keyed on
+            # input FIELD names, not tool names: fields like command/path/query
+            # are shared across many tools and stable over time, where a
+            # tool-name switch rots (new tools, renames, mcp__* names all fall
+            # through). Pick the first present of a few salient field names,
+            # else the first string value in the input — so an unknown or MCP
+            # tool still gets a summary. "→ Tool" with no arg if nothing fits.
+            ($blocks | map(select(.type == "tool_use")) | last) as $tu |
+            if $tu == null then
+                empty
+            else
+                ($tu.input // {}) as $in |
+                ((["command","pattern","query","url","file_path","path","description","message","prompt"]
+                    | map($in[.]?) | map(select(type == "string" and length > 0)) | first)
+                 // ([$in | to_entries[] | .value | select(type == "string" and length > 0)] | first)) as $raw |
+                (if $raw == null then ""
+                 else ($raw | split("\n")[0]) as $line |
+                    # basename filesystem-path-like values (a slash, no spaces,
+                    # not a URL) so "/a/b/redis.py" reads as "redis.py"
+                    (if ($line | test("^[^ ]*/[^ ]*$")) and ($line | test("://") | not)
+                        then ($line | split("/") | last) else $line end)
+                 end) as $arg |
+                "→ " + ($tu.name // "tool") + (if ($arg | length) > 0 then ": " + $arg else "" end)
+            end
+        end
     ' 2>/dev/null)
 
     # flatten to a single line — a tab surviving here counts as 1 char in

@@ -13,5 +13,32 @@ post-switch = "wt-tmux-jump {{ worktree_path }}"
 post-merge = "wt-tmux-cleanup {{ worktree_path }} {{ repo }}"
 post-remove = "wt-tmux-cleanup {{ worktree_path }} {{ repo }}"
 
-# Candidate (enable after evaluating cost on big node_modules/.venv repos):
-# pre-start = "wt step copy-ignored"
+# Auto-copy gitignored ENV/secrets/config into every new worktree so it is
+# usable immediately (e.g. bin/ scripts that read .env* work at once). Runs
+# synchronously before the worktree starts, but the fat regenerable caches are
+# excluded below, so the copy is small + APFS-reflinked → effectively instant.
+# Heavy caches are regenerated on demand in the worktree (uv sync / pnpm install
+# / flutter pub get): a copied .venv isn't even relocatable (absolute shebangs +
+# pyvenv.cfg point back at the hub), so regenerating is both fast-when-cache-warm
+# and correct for the branch's lockfile. copy-ignored skips already-present files
+# (no --force), so re-running on an existing worktree is a cheap no-op.
+pre-start = "wt step copy-ignored"
+
+# copy-ignored copies ALL gitignored files by default; exclude the fat,
+# regenerable build/dep caches so only ENV/secrets/config/IDE settings copy over.
+# (Built-in excludes already skip VCS/tool-state dirs.)
+[step.copy-ignored]
+exclude = [
+  "node_modules",
+  ".venv",
+  ".dart_tool",
+  "build",
+  "target",
+  "dist",
+  ".next",
+  ".turbo",
+  "__pycache__",
+  ".pytest_cache",
+  ".mypy_cache",
+  ".ruff_cache",
+]

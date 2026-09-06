@@ -311,13 +311,17 @@ render() {
             local _exp=$agents_forced
             (( ${agent_working_counts[$_i]:-0} > 0 )) && _exp=1
             (( _exp )) && [[ -n "${agent_lines[$_i]}" ]] || continue
-            local aid adepth aparent atype _rest
-            while IFS=$'\t' read -r aid adepth aparent atype _rest; do
+            # agent MODEL cell is "agentType·model" (see render below), so
+            # size the column to the combined label, not the type alone.
+            local aid adepth aparent atype adesc amtime astarted actx aout aturns amdl _rest
+            while IFS=$'\t' read -r aid adepth aparent atype adesc amtime astarted actx aout aturns amdl _rest; do
                 [[ -z "$aid" ]] && continue
-                (( ${#atype} > mdl_need )) && mdl_need=${#atype}
+                local _label="$atype"
+                [[ -n "$amdl" && "$amdl" != "unknown" ]] && _label="${atype}·${amdl#claude-}"
+                (( ${#_label} > mdl_need )) && mdl_need=${#_label}
             done <<< "${agent_lines[$_i]}"
         done
-        (( mdl_need > 24 )) && mdl_need=24
+        (( mdl_need > 28 )) && mdl_need=28
         local growm=$(( mdl_need - mdl_w ))
         (( growm > spare )) && growm=$spare
         if (( growm > 0 )); then
@@ -590,7 +594,13 @@ render() {
                 row+="  ${sess_colored}$(printf '%*s' "$sess_pad" '')"
                 row+="${st_color}${st_label}${RST}$(printf '%*s' "$st_pad" '')"
                 if (( show_model )); then
+                    # MODEL cell for agents = "agentType·model": the row (its
+                    # subagent_type) plus the actual model it ran on, so a
+                    # per-seat model override (e.g. high implementers on opus,
+                    # high reviewers on fable) is visible instead of every
+                    # "high" row looking identical. Model omitted when unknown.
                     local amdl_field="$atype"
+                    [[ -n "$amdl" && "$amdl" != "unknown" ]] && amdl_field="${atype}·${amdl#claude-}"
                     if (( ${#amdl_field} > mdl_w )); then
                         (( mdl_w > 1 )) && amdl_field="${amdl_field:0:$(( mdl_w - 1 ))}…" || amdl_field="…"
                     fi
