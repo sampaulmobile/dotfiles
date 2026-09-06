@@ -16,9 +16,15 @@ cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // ""' 2>/dev/null || t
 cwd="$(printf '%s' "$input" | jq -r '.cwd // ""' 2>/dev/null || true)"
 [ -z "$cmd" ] && exit 0
 
-# Runners whose output is expensive to reproduce / must not be truncated away.
-EXPENSIVE='pytest|/pytest\.sh|(^|[^a-z])uv run|flutter[ _]|dart run|(^|[^a-z])cdk |run_cdk|npm (run|test|ci)|yarn (test|build)|pnpm |go test|cargo (test|build)|gradle|mvn |(^|[^a-z])make (test|build|lint)|redis-cli[^|]*scan|(^|[^a-z])k6 |terraform (plan|apply)|docker build|deploy'
-# A pipe into head/tail (with optional flags/spaces).
+# Expensive/long-running command BASENAMES (only matched at a command position).
+EXPENSIVE_CMDS='pytest|flutter|dart|cdk|run_cdk|npm|yarn|pnpm|cargo|gradle|mvn|make|uv|go|k6|terraform|redis-cli|deploy|docker'
+# Rule A as ONE regex, so both halves must be on the SAME line (kills the
+# false positives where an "expensive" word appears in a path/arg or a quoted
+# body far from an unrelated head/tail): an expensive command at a pipeline
+# segment start, piped DIRECTLY into head/tail within that same pipeline (no
+# ;/&& between). Optional path/env prefix (./bin/, /usr/…) allowed.
+ADJ_TRUNC='(^|[|;&(])[[:space:]]*([A-Za-z0-9_./~-]*/)?('"$EXPENSIVE_CMDS"')[^|;&]*\|[[:space:]]*(head|tail)([[:space:]]|$)'
+# A pipe into head/tail (with optional flags/spaces) — used by rule B.
 TRUNC='\|[[:space:]]*(head|tail)([[:space:]]|$)'
 # pipefail turned on anywhere.
 PIPEFAIL='set[[:space:]]+-[a-zA-Z]*o?[a-zA-Z]*[[:space:]]*pipefail|set[[:space:]]+-o[[:space:]]+pipefail|pipefail'
@@ -27,19 +33,31 @@ reason=""
 
 check_text() {  # $1 = text, $2 = where (for message)
   local text="$1" where="$2"
-  # tee or a redirect-capture means full output is preserved -> not the footgun.
+  # Join shell line-continuations so a pipeline split across lines is ONE logical
+  # line: a line ending in "\" (backslash continuation) or "|" (pipe continues)
+  # is glued to the next. Genuinely separate commands on separate lines stay
+  # separate — that's what keeps unrelated cross-line matches from tripping it.
+  local norm
+  norm="$(printf '%s' "$text" | awk '
+    { if (cont) buf = buf " " $0; else buf = $0
+      t = buf; sub(/[[:space:]]+$/,"",t)
+      if (t ~ /\\$/) { sub(/\\[[:space:]]*$/,"",buf); cont=1; next }
+      if (t ~ /\|$/) { cont=1; next }
+      print buf; cont=0; buf="" }
+    END { if (buf != "") print buf }')"
+  # tee (or a redirect-capture) means full output is preserved -> not the footgun.
   local has_tee=0
-  printf '%s' "$text" | grep -Eq '\|[[:space:]]*tee([[:space:]]|$)' && has_tee=1
-  # A: expensive | head/tail without a tee in the pipeline.
+  printf '%s' "$norm" | grep -Eq '\|[[:space:]]*tee([[:space:]]|$)' && has_tee=1
+  # A: an expensive command piped DIRECTLY into head/tail within one pipeline,
+  #    with no tee capturing the full output.
   if [ "$has_tee" -eq 0 ] \
-     && printf '%s' "$text" | grep -Eiq "$EXPENSIVE" \
-     && printf '%s' "$text" | grep -Eiq "$TRUNC"; then
+     && printf '%s' "$norm" | grep -Eiq "$ADJ_TRUNC"; then
     reason="Blocked: an expensive/long-running command is piped straight into head/tail${where}, which throws away the rest of its output. Capture full output to a file, then slice the file: \`<cmd> > /tmp/out.log 2>&1; tail -60 /tmp/out.log\` (or pipe through \`tee /tmp/out.log | tail\`)."
     return 0
   fi
   # B: pipefail + | head/tail  -> SIGPIPE aborts the pipeline (with set -e, the script).
-  if printf '%s' "$text" | grep -Eiq "$PIPEFAIL" \
-     && printf '%s' "$text" | grep -Eiq "$TRUNC"; then
+  if printf '%s' "$norm" | grep -Eiq "$PIPEFAIL" \
+     && printf '%s' "$norm" | grep -Eiq "$TRUNC"; then
     reason="Blocked: \`pipefail\` is combined with a pipe into head/tail${where}. When head/tail closes the pipe early the upstream stage gets SIGPIPE, pipefail promotes it to a pipeline failure, and \`set -e\` then aborts the script mid-run (this is exactly what silently killed a recon script). Drop pipefail on that pipeline, or write full output to a file and slice the file afterwards."
     return 0
   fi
