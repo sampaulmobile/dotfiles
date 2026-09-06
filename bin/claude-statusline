@@ -9,7 +9,7 @@ set -euo pipefail
 input=$(cat)
 
 # \x1f (unit separator) as IFS: unlike tab, it doesn't collapse across empty fields
-IFS=$'\x1f' read -r model_id model_name effort pct size cwd repo wt pr_num pr_state pr_url rl5 rl7 < <(
+IFS=$'\x1f' read -r model_id model_name effort pct size cwd repo wt pr_num pr_state pr_url rl5 rl5_reset rl7 < <(
   jq -r '[
     (.model.id // ""),
     (.model.display_name // "?"),
@@ -23,6 +23,7 @@ IFS=$'\x1f' read -r model_id model_name effort pct size cwd repo wt pr_num pr_st
     (.pr.review_state // ""),
     (.pr.url // ""),
     (.rate_limits.five_hour.used_percentage // -1 | floor),
+    (.rate_limits.five_hour.resets_at // 0 | floor),
     (.rate_limits.seven_day.used_percentage // -1 | floor)
   ] | map(tostring) | join("\u001f")' <<<"$input"
 )
@@ -74,7 +75,16 @@ if (( rl5 >= 0 )); then
   if   (( rl5 >= 90 )); then RLC=$'\033[91m'
   elif (( rl5 >= 70 )); then RLC=$'\033[93m'
   else                       RLC=$DIM; fi
-  right+=" ${DIM}·${RST} ${RLC}5h ${rl5}%${RST}"
+  # time until the 5h window resets (Hh Mm / Mm), dimmed alongside the percentage
+  rl5_left=""
+  if (( rl5_reset > 0 )); then
+    secs=$(( rl5_reset - $(date +%s) ))
+    (( secs < 0 )) && secs=0
+    h=$(( secs / 3600 )); m=$(( (secs % 3600) / 60 ))
+    if (( h > 0 )); then rl5_left="${h}h${m}m"; else rl5_left="${m}m"; fi
+    rl5_left=" ${DIM}${rl5_left} left${RST}"
+  fi
+  right+=" ${DIM}·${RST} ${RLC}5h ${rl5}%${RST}${rl5_left}"
   (( rl7 >= 70 )) && right+=" "$'\033[91m'"7d ${rl7}%${RST}"
 fi
 
