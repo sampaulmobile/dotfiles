@@ -7,15 +7,26 @@ Run the end-to-end feature pipeline. The argument is either a short description 
 
 ## Flags
 
-- `--quick` — trivial task: skip the workplan doc and the review loop entirely.
-- `--hard` — use opus for implementation (default is sonnet).
+**Per-seat model/effort** — value is `model` or `model:effort` (effort defaults to `high`). An explicit `--<seat>=` always wins over the convenience bundles below.
+- `--orchestrator=<model[:effort]>` — planner / review-coordinator / shipper seat. Default `fable:high`.
+- `--implementer=<model[:effort]>` — the coding seat. Default `sonnet:high`.
+- `--reviewer=<model[:effort]>` — the adversarial-review seat. Default `fable:high`.
+- `model` ∈ `opus|sonnet|fable|haiku`; `effort` ∈ `high|xhigh` (the presets that exist — see **Seat resolution**).
+
+**Behavior**
+- `--quick` — trivial task: skip the workplan doc and the review loop entirely (one implementer seat, no orchestrator/reviewer).
 - `--rounds N` — review/fix rounds before escalating (default 3). The loop always runs until a review returns CLEAN; hitting the cap with blockers still open stops and reports for a human decision — it never ships at the cap.
 - `--strict` — reviewer blocks on ANY finding with a concrete failure scenario (default: only what a senior human reviewer would request changes for).
-- `--xhigh` — run every pipeline seat at xhigh effort (swaps each `*-high` preset for its `*-xhigh` variant). Default is high.
-- `--best` — best possible result, cost/time no object: `fable-xhigh` in EVERY seat (including the implementer), strict review bar, rounds cap 5. For correctness-critical or overnight work. Natural-language requests for more rigor ("this one's gnarly, go all out") map to these escalation flags — the user only needs to remember `--quick` and `--best`.
 - `--local` — for repos with no push/PR access from this machine (e.g. a repo whose remote this machine isn't authed to): the ship step SKIPS `/pr` entirely. Instead the orchestrator leaves the reviewed work committed on its branch and reports: branch name, worktree path, diffstat, summary, and the merge command (`git merge <branch>` from the main checkout). Any unresolved findings go in the report instead of a PR body. Also use this mode automatically if `git push` fails with an auth/permission error — never retry pushes into a wall.
 
-**Tuning knobs**: pipeline seats use the model/effort presets in `~/.claude/agents/` (`sonnet-high`, `opus-high`, `fable-high` and their `-xhigh` variants — pure config shims, no role behavior; agent frontmatter is the only mechanism that can pin effort per-subagent). Orchestrator and reviewer run `fable-high`; implementer runs `sonnet-high` (`opus-high` with `--hard`); `--xhigh` swaps all seats to the `-xhigh` variants. To retune globally, edit the preset files. If a preset is missing, fall back to a plain agent with the matching `model:` (it will inherit session effort).
+**Convenience bundles** (sugar over the per-seat params; an explicit `--<seat>=` overrides them):
+- `--hard` — implementer model → `opus` (i.e. `--implementer=opus:high`).
+- `--xhigh` — bump every seat's effort to `xhigh` (models unchanged).
+- `--best` — best possible result, cost/time no object: every seat `fable:xhigh`, strict review bar, rounds cap 5. For correctness-critical or overnight work. Natural-language requests for more rigor ("this one's gnarly, go all out") map here — the user only needs to remember `--quick` and `--best`.
+
+## Seat resolution
+
+Each seat is a `<model>:<effort>` pair. Spawn it as **`subagent_type: "<effort>"`** (the effort preset in `~/.claude/agents/` — `high` / `xhigh`, pure config shims that pin ONLY effort, no role behavior) **with a `model: "<model>"` override** on the Agent call. The call-time `model` beats the preset's frontmatter, so effort comes from the preset while model is chosen per seat — that's why only two presets exist (the harness has no per-call effort param; frontmatter is the only way to pin effort). Add an effort level by dropping a `<name>.md` shim in `dots/claude/agents/`. If the requested effort has no preset, fall back to a plain agent with the matching `model:` (it inherits session effort).
 
 ## Setup (in the hub session)
 
@@ -36,7 +47,7 @@ Run the end-to-end feature pipeline. The argument is either a short description 
 
 ## Quick mode (--quick)
 
-Spawn ONE background agent (`subagent_type: "sonnet-high"` — or `"opus-high"` with `--hard` — with `isolation: "worktree"`) with this prompt (filled in):
+Spawn ONE background agent for the implementer seat (`subagent_type: "<IMPL_EFFORT>"`, `model: "<IMPL_MODEL>"` — resolved per `--implementer`, default `sonnet:high`; `opus` with `--hard` — and `isolation: "worktree"`) with this prompt (filled in):
 
 > Implement the following in this worktree: <FEATURE>. Follow the repo's conventions and CLAUDE.md. Run the tests and linters relevant to what you touch and get them passing. Commit specific files only (never `git add -A`). When done and verified, invoke the `pr` skill to commit anything remaining, push, and open the PR. Report back ONLY: the PR URL and a 2-line summary.
 
@@ -44,7 +55,7 @@ When it reports back, relay the PR URL to the user. Done — the rest of this fi
 
 ## Full pipeline
 
-Spawn ONE background orchestrator agent (`subagent_type: "fable-high"` — `"fable-xhigh"` with `--xhigh` — and `isolation: "worktree"`), using the prompt template below — fill in `<FEATURE>`, `<PLAN_PATH>` (if given), `<IMPL_AGENT>` (`sonnet-high`; `opus-high` with `--hard`; `-xhigh` variants with `--xhigh`), `<REVIEWER_AGENT>` (`fable-high`, or `fable-xhigh` with `--xhigh`), `<MAX_ROUNDS>`, `<DEFAULT_BRANCH>`, `<SLUG>`, `<STRICT>` (true only with `--strict`).
+Spawn ONE background orchestrator agent (`subagent_type: "<ORCH_EFFORT>"`, `model: "<ORCH_MODEL>"` — resolved per `--orchestrator`, default `fable:high` — and `isolation: "worktree"`), using the prompt template below — fill in `<FEATURE>`, `<PLAN_PATH>` (if given), `<IMPL_MODEL>`/`<IMPL_EFFORT>` (default `sonnet:high`; `opus` with `--hard`), `<REVIEWER_MODEL>`/`<REVIEWER_EFFORT>` (default `fable:high`), `<MAX_ROUNDS>`, `<DEFAULT_BRANCH>`, `<SLUG>`, `<STRICT>` (true only with `--strict`). Each seat's effort maps to its preset name and the model rides as an Agent `model:` override — see **Seat resolution**.
 
 Multiple `/feature` invocations may run concurrently — each gets its own orchestrator and worktree.
 
@@ -73,7 +84,7 @@ Max review rounds: <MAX_ROUNDS>. Default branch: <DEFAULT_BRANCH>. Strict review
 - Commit the workplan on its own before implementation starts.
 
 **2. Implement (round N)**
-Spawn a FRESH implementer subagent (`subagent_type: "<IMPL_AGENT>"`, no extra isolation — it inherits this worktree). Its prompt must tell it to:
+Spawn a FRESH implementer subagent (`subagent_type: "<IMPL_EFFORT>"`, `model: "<IMPL_MODEL>"`, no extra isolation — it inherits this worktree). Its prompt must tell it to:
 - Read the workplan, `.feature/NOTES.md`, and (round > 1) `.feature/findings-round-<N-1>.md`.
 - Round 1: implement the plan. Later rounds: address every blocking finding.
 - Follow repo conventions/CLAUDE.md; run the tests and linters relevant to what it touches and get them passing.
@@ -81,7 +92,7 @@ Spawn a FRESH implementer subagent (`subagent_type: "<IMPL_AGENT>"`, no extra is
 - Append to `.feature/NOTES.md` before finishing. Do NOT push or open a PR.
 
 **3. Review (round N)**
-Spawn a FRESH reviewer subagent (`subagent_type: "<REVIEWER_AGENT>"`). Its prompt must include this severity bar verbatim (unless <STRICT> is true, in which case: any finding with a concrete failure scenario is blocking): "Mark a finding BLOCKING only if a senior human reviewer would request changes for it — a concrete correctness bug, security issue, missing test for new behavior, or an unintentional workplan deviation. Hardening suggestions, docs polish, and style preferences are non-blocking notes. Do not manufacture blockers to justify the round: on a small clean diff, CLEAN is the correct and expected verdict." The prompt must also tell it to:
+Spawn a FRESH reviewer subagent (`subagent_type: "<REVIEWER_EFFORT>"`, `model: "<REVIEWER_MODEL>"`). Its prompt must include this severity bar verbatim (unless <STRICT> is true, in which case: any finding with a concrete failure scenario is blocking): "Mark a finding BLOCKING only if a senior human reviewer would request changes for it — a concrete correctness bug, security issue, missing test for new behavior, or an unintentional workplan deviation. Hardening suggestions, docs polish, and style preferences are non-blocking notes. Do not manufacture blockers to justify the round: on a small clean diff, CLEAN is the correct and expected verdict." The prompt must also tell it to:
 - Adversarially review `git diff <DEFAULT_BRANCH>...HEAD`: correctness bugs, unhandled edge cases, missing or weak tests, security issues, and conformance to the workplan (flag scope creep and silently-skipped plan items; check `.feature/NOTES.md` before calling a deviation unintentional).
 - If the `code-review` skill is available, invoke it as part of this pass.
 - Write `.feature/findings-round-<N>.md`: first line is the verdict, `CLEAN` or `FINDINGS`; then blocking findings (file:line, what is wrong, concrete failure scenario), then non-blocking notes.
