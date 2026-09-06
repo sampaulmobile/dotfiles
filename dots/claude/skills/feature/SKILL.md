@@ -76,6 +76,9 @@ Max review rounds: <MAX_ROUNDS>. Default branch: <DEFAULT_BRANCH>. Strict review
 **0. Branch**
 - Rename this worktree's auto-generated branch to match the repo's convention (`git branch -m feature/<SLUG>` or `fix/<SLUG>`, or whatever CLAUDE.md prescribes). Never attempt to check out the default branch from inside the worktree — it is checked out at the hub and git will refuse.
 
+**0b. Runtime files (only when a step needs them)**
+- A fresh worktree does NOT carry the repo's gitignored files. If planning, implementing, or testing needs runtime files that live only in the hub checkout — secrets, TLS certs, `.env.*`, or caches like `.venv`/`node_modules` required to actually run or test — run `wt step copy-ignored` from inside this worktree to populate them before the step that needs them, and tell any subagent that will run/test the same. Skip it for pure code changes that don't execute anything requiring those files (it can copy gigabytes). Never hand-copy secrets or paste them into prompts.
+
 **1. Plan**
 - If a workplan path was provided (<PLAN_PATH>), read it — that plan is authoritative. If it lives outside this worktree (typically an uncommitted file at the hub), copy it to `workplans/<basename>` here first; that copy is what gets committed below.
 - Otherwise write one to `workplans/<SLUG>-plan.md` (create the dir if the repo lacks it; if it exists, match the naming and style of the docs already in it). Spec it to handoff quality: goal, approach, files to touch, ordered steps, test plan, explicitly out of scope.
@@ -87,7 +90,7 @@ Max review rounds: <MAX_ROUNDS>. Default branch: <DEFAULT_BRANCH>. Strict review
 Spawn a FRESH implementer subagent (`subagent_type: "<IMPL_EFFORT>"`, `model: "<IMPL_MODEL>"`, no extra isolation — it inherits this worktree). Its prompt must tell it to:
 - Read the workplan, `.feature/NOTES.md`, and (round > 1) `.feature/findings-round-<N-1>.md`.
 - Round 1: implement the plan. Later rounds: address every blocking finding.
-- Follow repo conventions/CLAUDE.md; run the tests and linters relevant to what it touches and get them passing.
+- Follow repo conventions/CLAUDE.md; run the tests and linters relevant to what it touches and get them passing. If a test or run needs gitignored runtime files absent from the worktree (secrets/certs/`.env.*`/caches), run `wt step copy-ignored` first (see step 0b) — never hand-copy or inline secrets.
 - Commit as it goes — specific files only, never `git add -A`; clear messages in the repo's style.
 - Append to `.feature/NOTES.md` before finishing. Do NOT push or open a PR.
 
