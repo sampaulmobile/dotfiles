@@ -1,5 +1,16 @@
 # Workspace knowledge layer
 
+- Put knowledge at the altitude it applies to, and don't duplicate it downward.
+  Workspace-wide knowledge (applies to every repo in `~/dev`) belongs in a
+  global rule (`dots/claude/rules/`, always loaded), `~/dev/hq` (dispatch), or
+  the `~/dev/wiki` vault (architecture/runbooks) — NOT copied into an individual
+  repo's CLAUDE.md or a per-repo/project memory. A repo's CLAUDE.md holds only
+  genuinely repo-specific facts; generic scaffolding belongs to built-in/`high`
+  agents + skills, not bespoke per-repo agents. Duplicated workspace knowledge
+  rots and drifts across repos; a single top-level source stays correct
+  everywhere. Before adding cross-repo guidance to a repo's CLAUDE.md, put it
+  higher up and have the repo point to it (or hold only its repo-specific
+  nugget).
 - Cross-repo/workspace knowledge (architecture, repo relationships, where
   infra/monitors/secrets live, cross-repo concepts, runbooks, external
   systems) lives in the wikillm vault at `~/dev/wiki`. When a question is

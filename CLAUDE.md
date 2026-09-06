@@ -59,28 +59,18 @@ Brewfiles are fine. Sweep diffs before pushing.
 
 ## Worktrees: hub model (worktrunk)
 
-Work repos are normal clones ("hubs") at `~/dev/<repo>` with the default
-branch checked out. Branch work happens in disposable sibling worktrees
-managed by [worktrunk](https://github.com/max-sixty/worktrunk) (`wt`,
-installed via Brewfile):
+The generic worktrunk flow (`wt switch -c`, `wt step copy-ignored`, sibling
+naming, run-inside-the-worktree discipline, hub-vs-worktree context) lives in
+the global `dots/claude/rules/worktrees.md` rule — loaded into every session, so
+it is NOT repeated here. This section is only the DOTFILES-specific glue.
 
 ```
 ~/dev/myproject/                # hub: normal clone, main checked out — you live here
 ~/dev/myproject.feat-x/         # worktree for branch feat/x (slashes sanitized)
 ```
 
-- Daily flow: `Ctrl+F` to the hub → `git pull` → `wt switch -c <branch>` →
-  the post-switch hook drops you into a tmux session for the worktree →
-  `Ctrl+Space` for claude there. `wt remove <branch>` when done (hook kills
-  the worktree's tmux + claude sessions and returns you to the hub).
-- New branches base off LOCAL main — pull the hub first, same discipline as
-  `git checkout -b`.
-- `wt switch pr:123` makes a review worktree for a PR. Plain `wt switch`
-  (no `-c`) is redundant with `Ctrl+F`.
-- Secrets/machine-local files live in the hub checkout (gitignored).
-  `wt step copy-ignored` copies them (plus caches like `.venv`,
-  `node_modules`) into a worktree when it needs to be runnable — kept
-  MANUAL, not a hook: ~13s / 3.2 GiB on the biggest repo.
+- Daily entry: `Ctrl+F` to the hub → `wt switch -c <branch>` (post-switch hook
+  drops you into the worktree's tmux session) → `Ctrl+Space` for claude there.
 - Glue: `dots/worktrunk.toml` (user-level hooks) + `bin/wt-tmux-jump` /
   `bin/wt-tmux-cleanup`. `wt-tmux-jump` builds new worktree sessions with
   the same `new_hub_session` layout as the sessionizer (so in window mode
@@ -88,11 +78,8 @@ installed via Brewfile):
   switch so the invoking pane never moves. Session naming (dir basename,
   dots→underscores) matches the sessionizer, so Ctrl+F/Ctrl+Space/Ctrl+G
   work on worktrees with no special handling.
-- Claude memory/sessions key to the LAUNCH directory: hub sessions
-  accumulate context durably; per-worktree claude sessions are ephemeral
-  (put durable knowledge in the repo's CLAUDE.md, or CLAUDE.local.md at
-  the hub). For work whose context should persist, run claude AT the hub
-  and let it use its own worktree isolation.
+- `wt step copy-ignored` cost on the biggest repo here: ~13s / 3.2 GiB — the
+  reason it's kept manual rather than a switch hook.
 
 The previous bare+worktree layout (`.bare/` containers) and its `gw*`
 scripts are retired — kept in `archive/` for reference. The sessionizer
