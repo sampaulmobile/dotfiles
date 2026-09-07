@@ -6,8 +6,7 @@
 #
 # It changes NOTHING: every git/gh call here is a read, and `wt` is only ever
 # printed as the recommended fix, never executed. Acting on the report is
-# bin/worktree-sweep's job (it sources the derivation + classification here);
-# keep this one report-only.
+# bin/worktree-sweep's job; keep this one report-only.
 #
 # Liveness comes from `lsof -d cwd -Fpn` (a live process's cwd), never from
 # git's worktree lock file (whose reason names the *hub session's* pid, which
@@ -138,12 +137,10 @@ parse_porcelain_blocks() {
 }
 
 # ---- liveness + fact derivation (shared with bin/worktree-sweep) ----
-# These live ABOVE the source guard so the sweeper, which must classify a
-# worktree exactly as this report does before it deletes anything, sources
-# the identical machinery instead of keeping a second copy that could drift.
-# They read/write globals the caller owns: init_liveness fills live_paths;
-# derive_worktree_facts reads $repo, $default_ref and $GH_OK and writes the
-# f_* result globals below.
+# These live ABOVE the source guard so bin/worktree-sweep, which sources this
+# file, gets them too. They read/write globals the caller owns: init_liveness
+# fills live_paths; derive_worktree_facts reads $repo, $default_ref and
+# $GH_OK and writes the f_* result globals below.
 
 # init_liveness — fill live_paths (one cwd per line) from a single lsof and
 # set LSOF_RAN. Without lsof, live_paths stays empty and is_live is always

@@ -235,9 +235,7 @@ for arg in "$@"; do
     esac
 done
 
-# The doctor supplies the enumeration, the fact derivation and the bucket
-# rule; sourcing it (its BASH_SOURCE guard stops before its own report) is
-# what keeps "merged" identical between the report and this actor.
+# Its BASH_SOURCE guard stops before its own report.
 # shellcheck source=/dev/null
 source "$DOTFILES/bin/worktree-doctor"
 
