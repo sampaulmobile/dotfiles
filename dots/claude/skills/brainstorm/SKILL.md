@@ -22,25 +22,36 @@ flow at the end.
 
 ## Mode detection
 
-Do this first, before scaffolding anything:
+Do this first, before scaffolding anything, and only for a NEW design (see
+Resume rules below for the resume case):
 
-- **Repo mode**: `git rev-parse --is-inside-work-tree` succeeds AND `.git` at
-  the toplevel is a directory (a hub, not a linked worktree). Design dir is
-  `<repo>/docs/design/<slug>/` — unless the repo already has an obvious
-  design/ADR directory (e.g. `docs/adr/`, `design/`), in which case match
-  that instead.
-- **Greenfield mode**: anything else (including an hq session). Design dir is
-  `~/dev/hq/designs/<slug>/`. No hq repo at `~/dev/hq` → STOP and say so, the
-  same way `/hq` stops when `routing.md` is missing — mention that
+- **hq is always greenfield**: check this before the repo-mode test. If the
+  git toplevel IS the hq repo (`~/dev/hq`), treat the session as greenfield
+  mode immediately — hq is itself a git repo with a directory `.git`, so it
+  would otherwise match the repo-mode test below and greenfield would never
+  fire from an hq session.
+- **Repo mode**: otherwise, `git rev-parse --is-inside-work-tree` succeeds AND
+  `.git` at the toplevel is a directory (a hub, not a linked worktree). The
+  design root is `<repo>/docs/design/` — unless the repo already has an
+  obvious design/ADR directory (e.g. `docs/adr/`, `design/`), in which case
+  match that instead.
+- **Greenfield mode**: anything else (including an hq session, per above). The
+  design root is `~/dev/hq/designs/`. No hq repo at `~/dev/hq` → STOP and say
+  so, the same way `/hq` stops when `routing.md` is missing — mention that
   `~/dotfiles/bin/hq-init` scaffolds `designs/` along with the rest of hq.
+
+The design root is the mode's base directory (no slug yet); the design dir —
+`<design-root>/<slug>/` — is where this brainstorm's `design.md` and friends
+actually live (Step 1).
 
 ## Design is a directory
 
 ```
 <slug>/
-  design.md          # the doc; frontmatter status drives resume
-  recon.md            # recon output (may be near-empty in greenfield)
-  proposals/N.md       # only with --council: raw independent proposals
+  design.md                        # the doc; frontmatter status drives resume
+  recon.md                         # recon output (may be near-empty in greenfield)
+  proposals/1.md … proposals/N.md  # only with --council: one file per
+                                    # proposer, index = proposer number
 ```
 
 A directory, not a single file, so moving it later (greenfield → the repo
@@ -66,23 +77,39 @@ product of this skill — never silently proceed on a weaker model.
   (`understanding` → step 3, `options` → step 4, `deciding` → step 5,
   `approved` → step 6). The Q&A log and every other section already written
   are preserved verbatim; only continue forward from where `status` left off.
-- Otherwise → **new session**: derive a kebab-case slug from the idea and
-  scaffold fresh (step 1).
+  `mode` comes from this frontmatter, not from the invoking cwd — mode
+  detection (above) runs only when scaffolding a brand-new design, never on
+  resume.
+  - Special case: if `status: understanding` and `## Context` is still the
+    `TEMPLATE.md` placeholder, that means the session was killed during Step
+    2 (Recon) before it landed. If `--no-recon` was not given, run Step 2
+    first, then continue into Step 3. If `--no-recon` was given, write "recon
+    skipped (--no-recon)" into `## Context` instead of leaving the
+    placeholder ambiguous, then continue into Step 3.
+- Otherwise → **new session**: derive a kebab-case slug from the idea. Before
+  scaffolding, check whether `design.md` already exists at the derived design
+  dir path (mode detection's design root + slug); if it does, treat this call
+  as a **resume** of that existing design instead — never overwrite an
+  in-progress `design.md` or its Q&A log. Only when no `design.md` exists
+  there, scaffold fresh (step 1).
 
 ## Per-answer rewrite rule
 
 `design.md` is rewritten after **every** answer during questioning (step 3)
-and after every decision (step 5) — not batched to the end of the step. A
-killed session then loses at most one question's worth of work, and resuming
-picks up from a file that is always current.
+and after every decision (step 5) — not batched to the end of the step. Each
+rewrite also sets the frontmatter `updated:` to today's date. A killed
+session then loses at most one question's worth of work, and resuming picks
+up from a file that is always current.
 
 ## Step 1 — Locate and scaffold
 
-Run mode detection. New session: derive the slug, create
-`<design-dir>/<slug>/`, write `design.md` from `TEMPLATE.md` with
-`status: understanding`, `slug`, `mode`, `created`/`updated` filled in, and
-`## Prompt` filled in verbatim from the argument. Resume: just locate the
-existing dir. Either way, print the design dir path.
+New session: run mode detection to get the design root, derive the slug,
+create `<design-root>/<slug>/` (the design dir), write `design.md` from
+`TEMPLATE.md` with `status: understanding`, `slug`, `mode`,
+`created`/`updated` filled in, and `## Prompt` filled in verbatim from the
+argument. Resume: skip mode detection — `mode` and the design dir both come
+from the existing `design.md` (see Resume rules). Either way, print the
+design dir path.
 
 ## Step 2 — Recon (skip with `--no-recon`)
 
@@ -91,9 +118,10 @@ write `recon.md`. What it looks at depends on mode:
 
 - **Repo mode**: code relevant to the idea, existing docs/workplans that
   touch the area, open PRs in the same area.
-- **Greenfield mode**: relevant pages under `~/dev/wiki/wiki/_index/INDEX.md`,
-  mentions of the idea in `~/dev/hq/state/backlog.md`, routing-table repos
-  (`~/dev/hq/routing.md`) that look related.
+- **Greenfield mode**: start at `~/dev/wiki/wiki/_index/INDEX.md` and follow
+  wikilinks to relevant pages, mentions of the idea in
+  `~/dev/hq/state/backlog.md`, routing-table repos (`~/dev/hq/routing.md`)
+  that look related.
 
 Hard budget: a few minutes. "Nothing relevant found" is a fine, valid result
 — do not stretch the search to manufacture findings. When it lands, the main
@@ -137,8 +165,9 @@ the file.
 - **`--council[=N]`**: spawn N background agents (`subagent_type: "xhigh"`,
   `model: "fable"`), each given ONLY the `## Requirements` and `## Context`
   sections (never the others, and never each other's output) and told to
-  write one complete, independent proposal to `proposals/N.md`. Proposers
-  never interact with the user. When all N land, the main session
+  write one complete, independent proposal to its own `proposals/<N>.md`
+  (`<N>` = that proposer's number, one file per proposer). Proposers never
+  interact with the user. When all N land, the main session
   synthesizes them into `## Options`: merge duplicate proposals, keep
   genuine disagreements as separate options, and cite which proposal(s) each
   option came from.
