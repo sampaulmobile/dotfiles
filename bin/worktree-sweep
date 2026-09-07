@@ -47,6 +47,25 @@ EOF
 
 # ---- the gitignored-data guard (pure; unit-tested) ----
 
+# _toml_strip_comment <line> — <line> with a trailing `#...` comment removed,
+# unless the `#` is inside a double-quoted string (bash 3.2 has no
+# lookbehind, so this walks the line tracking quote state rather than using a
+# regex). Without this, a token-harvesting pass over the raw line would pull
+# quoted words out of the COMMENT too (B2: `"x", # was "cache" before`).
+_toml_strip_comment() {
+    local line="$1" out="" ch in_str=false i
+    for (( i = 0; i < ${#line}; i++ )); do
+        ch="${line:i:1}"
+        if [[ "$ch" == '"' ]]; then
+            if [[ "$in_str" == true ]]; then in_str=false; else in_str=true; fi
+        elif [[ "$ch" == '#' && "$in_str" == false ]]; then
+            break
+        fi
+        out+="$ch"
+    done
+    printf '%s' "$out"
+}
+
 # parse_copy_ignored_excludes <toml-path>
 #   Print, one per line, the regenerable-cache dir names from
 #   worktrunk.toml's [step.copy-ignored] exclude array — the SINGLE source of
@@ -54,13 +73,16 @@ EOF
 #   copied here: kept read from the toml so the two cannot drift. Tolerates
 #   inline or multi-line arrays; prints nothing if the section/key is absent
 #   (the guard then falls back to pure content comparison — more skips, never
-#   an unsafe removal).
+#   an unsafe removal). Comments are stripped before any match: a `#` inside
+#   a quoted string survives, one outside it (even on a `[step.copy-ignored]`
+#   header line) never reaches the header/token matching below.
 parse_copy_ignored_excludes() {
-    local toml="$1" line in_section=false collecting=false rest tok
+    local toml="$1" raw line in_section=false collecting=false rest tok
     [[ -f "$toml" ]] || return 0
-    while IFS= read -r line || [[ -n "$line" ]]; do
+    while IFS= read -r raw || [[ -n "$raw" ]]; do
+        line="$(_toml_strip_comment "$raw")"
         case "$line" in
-            *'[step.copy-ignored]'*) in_section=true; continue ;;
+            '[step.copy-ignored]'*) in_section=true; continue ;;
             \[*) in_section=false; collecting=false; continue ;;
         esac
         [[ "$in_section" == true ]] || continue
