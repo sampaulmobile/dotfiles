@@ -64,3 +64,6 @@ reads it from any shell; imported here so this session has it ambiently):
   repo; the human decides which workplans get `/feature`'d.
 - Backlog lives in `state/backlog.md` (item schema + lifecycle in its header).
   Prune + commit each time it's groomed.
+- Greenfield design docs (from `/brainstorm`) live in `designs/<slug>/` until
+  a repo exists for them, then graduate — the whole dir moves into that
+  repo's design folder.

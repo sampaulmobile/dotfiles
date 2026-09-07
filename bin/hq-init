@@ -3,9 +3,10 @@
 #
 # hq is the dispatcher home for the /hq skill: a routing table mapping
 # services to repo paths, a CLAUDE.md that makes the hq tmux session behave as
-# a coordinator, and a backlog. The template lives in dotfiles/templates/hq;
-# everything machine-specific (routing rows, cross-cutting systems) is filled
-# in by hand afterwards. Refuses to touch an existing directory.
+# a coordinator, a backlog, and a designs/ dir for /brainstorm design docs.
+# The template lives in dotfiles/templates/hq; everything machine-specific
+# (routing rows, cross-cutting systems) is filled in by hand afterwards.
+# Refuses to touch an existing directory.
 set -euo pipefail
 
 target=${1:-$HOME/dev/hq}
@@ -16,10 +17,11 @@ if [[ -e $target ]]; then
     exit 1
 fi
 
-mkdir -p "$target/state/recon"
+mkdir -p "$target/state/recon" "$target/designs"
 cp "$template/CLAUDE.md" "$template/routing.md" "$target/"
 cp "$template/state/backlog.md" "$target/state/"
 cp "$template/gitignore" "$target/.gitignore"
+touch "$target/designs/.gitkeep"
 
 git -C "$target" init -q
 git -C "$target" add -A
@@ -32,5 +34,6 @@ Next:
   - add a routing row per service in $target/routing.md (template in the file)
   - fill in the Cross-cutting section of $target/CLAUDE.md, or delete it
   - optional wiki vault: cd ~/dev && npx wikillm init wiki
+  - designs/ is ready for /brainstorm greenfield design docs
   - Ctrl+F → hq to open its session; /hq <request> works from any shell
 MSG
