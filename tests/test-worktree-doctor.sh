@@ -19,12 +19,19 @@
 # fixed (a stray `have_block || return 0` silently ran "have_block" as a
 # command instead of testing the variable, and every block was dropped) —
 # this fixture is the regression test that bug needed.
+#
+# derive_worktree_facts's f_merged_local case runs against a real throwaway
+# git repo (mktemp, like tests/test-check-prose-only.sh): a branch that never
+# diverged from default (HEAD == default's own commit) must never count as
+# merged_local (B6) even though `merge-base --is-ancestor` is trivially true
+# for it; a branch with its own commit, folded into default by a real local
+# merge, still must.
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-repo=$(dirname "$here")
+repo_dir=$(dirname "$here")
 
 # shellcheck source=/dev/null
-source "$repo/bin/worktree-doctor"
+source "$repo_dir/bin/worktree-doctor"
 
 pass=0
 fail=0
@@ -154,6 +161,50 @@ if [[ "$pb_got_joined" == "$pb_want_joined" ]]; then
     pass=$(( pass + 1 ))
 else
     printf '  FAIL %s\n       want:\n%s\n       got:\n%s\n' "parse_porcelain_blocks fixture" "$pb_want_joined" "$pb_got_joined"
+    fail=$(( fail + 1 ))
+fi
+
+echo "── derive_worktree_facts: f_merged_local (B6)"
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/test-worktree-doctor.XXXXXX") || exit 1
+trap 'rm -rf "$tmp"' EXIT
+
+wd="$tmp/repo"
+mkdir -p "$wd"
+git -C "$wd" init -q -b main 2>/dev/null || { echo "git init failed"; exit 1; }
+git -C "$wd" config user.email test@example.invalid
+git -C "$wd" config user.name "worktree-doctor test"
+echo one > "$wd/f"
+git -C "$wd" add f
+git -C "$wd" commit -qm one
+
+GH_OK=false
+repo="$wd"
+default_ref="main"
+
+zero_sha=$(git -C "$wd" rev-parse main)
+derive_worktree_facts "$wd" "zero-commit-branch" false "$zero_sha"
+if [[ "$f_merged_local" == false ]]; then
+    printf '  ok   %s\n' "branch never diverged (HEAD == default) -> not merged_local"
+    pass=$(( pass + 1 ))
+else
+    printf '  FAIL %s\n       got f_merged_local=%s want false\n' "branch never diverged" "$f_merged_local"
+    fail=$(( fail + 1 ))
+fi
+
+git -C "$wd" checkout -qb real main
+echo two >> "$wd/f"
+git -C "$wd" add f
+git -C "$wd" commit -qm two
+real_sha=$(git -C "$wd" rev-parse real)
+git -C "$wd" checkout -q main
+git -C "$wd" merge -q --no-ff real -m merge
+
+derive_worktree_facts "$wd" "real" false "$real_sha"
+if [[ "$f_merged_local" == true ]]; then
+    printf '  ok   %s\n' "branch with its own commit, folded in by a real merge -> merged_local"
+    pass=$(( pass + 1 ))
+else
+    printf '  FAIL %s\n       got f_merged_local=%s want true\n' "genuinely merged branch" "$f_merged_local"
     fail=$(( fail + 1 ))
 fi
 

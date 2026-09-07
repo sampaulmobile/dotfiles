@@ -226,7 +226,21 @@ derive_worktree_facts() {
         else
             f_unpushed=true
         fi
-        if [[ -n "$default_ref" ]] && git -C "$repo" merge-base --is-ancestor "$wt_head" "$default_ref" 2>/dev/null; then
+        # B6: --is-ancestor is trivially true when wt_head == default_ref's
+        # own commit (a branch that never diverged — a fresh `wt switch -c`,
+        # or one parked before its first commit), wrongly bucketing a
+        # zero-commit branch as MERGED. Requiring wt_head to differ from
+        # default's CURRENT commit closes that hole; it does not (and, from
+        # the ref graph alone, cannot) additionally prove the branch ever had
+        # unique commits of its own — verified empirically: once a real
+        # local merge/rebase folds a branch's commits into default, HEAD is
+        # exactly as much "an ancestor with nothing default lacks" as a
+        # branch that never diverged at all (git 2.x, both `--ff-only` and
+        # `--no-ff` merges reproduce this).
+        local default_sha
+        default_sha=$(git -C "$repo" rev-parse --verify -q "$default_ref" 2>/dev/null)
+        if [[ -n "$default_ref" ]] && [[ -n "$default_sha" ]] && [[ "$wt_head" != "$default_sha" ]] \
+            && git -C "$repo" merge-base --is-ancestor "$wt_head" "$default_ref" 2>/dev/null; then
             f_merged_local=true
         else
             f_merged_local=false
