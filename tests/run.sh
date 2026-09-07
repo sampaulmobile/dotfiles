@@ -19,6 +19,12 @@ shells=(/bin/bash bash)
 failed=0
 for shell in "${shells[@]}"; do
     command -v "$shell" >/dev/null 2>&1 || continue
+    # skip the second pass when PATH's bash IS /bin/bash (no Homebrew bash):
+    # the same binary twice proves nothing and the header would overclaim
+    if [[ "$shell" != /bin/bash && "$(command -v "$shell")" -ef /bin/bash ]]; then
+        printf '\n(bash on PATH is /bin/bash — one shell, run once)\n'
+        continue
+    fi
     # single quotes on purpose: $BASH_VERSION must expand in the TARGET shell
     # shellcheck disable=SC2016
     ver=$("$shell" -c 'echo $BASH_VERSION')
