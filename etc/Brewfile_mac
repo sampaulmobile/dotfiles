@@ -3,6 +3,7 @@ cask_args appdir: '/Applications'
 
 # shell stuff
 brew 'zsh'
+brew 'bash'
 brew 'tmux'
 brew 'eza'
 brew 'jq'
