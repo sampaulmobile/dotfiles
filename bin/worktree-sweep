@@ -100,18 +100,30 @@ parse_copy_ignored_excludes() {
     done < "$toml"
 }
 
-# _seg_is_cache <relpath> — true if any path segment of <relpath> is one of
-# the regenerable-cache names in the global sweep_excludes array.
+# _seg_is_cache <relpath> — true if <relpath> is (or is under) one of the
+# regenerable-cache names in the global sweep_excludes array. worktrunk
+# documents excludes gitignore-style (a trailing slash is common, e.g.
+# ".cache/"), so both sides of the comparison are compared with any trailing
+# slash trimmed (L2). Only a DIRECTORY segment ever counts: every ancestor
+# segment of a path is necessarily a directory and is always checked, but the
+# final segment (the entry's own name) counts only when the entry itself is a
+# directory (rel ends in "/") — a gitignored FILE that happens to be named
+# "build" must not be treated as a safe-to-drop cache.
 _seg_is_cache() {
-    local rel="${1%/}" seg ex
+    local rel="$1" seg ex rest is_dir=false first=true
     (( ${#sweep_excludes[@]} )) || return 1
-    while [[ -n "$rel" ]]; do
-        seg="${rel##*/}"
-        for ex in "${sweep_excludes[@]}"; do
-            [[ "$seg" == "$ex" ]] && return 0
-        done
-        [[ "$rel" == */* ]] || break
-        rel="${rel%/*}"
+    [[ "$rel" == */ ]] && is_dir=true
+    rest="${rel%/}"
+    while [[ -n "$rest" ]]; do
+        seg="${rest##*/}"
+        if [[ "$first" == false || "$is_dir" == true ]]; then
+            for ex in "${sweep_excludes[@]}"; do
+                [[ "$seg" == "${ex%/}" ]] && return 0
+            done
+        fi
+        [[ "$rest" == */* ]] || break
+        rest="${rest%/*}"
+        first=false
     done
     return 1
 }
@@ -121,17 +133,25 @@ _seg_is_cache() {
 #   so a fully-ignored dir arrives collapsed with a trailing slash):
 #     safe-cache  a regenerable cache (segment in sweep_excludes) — rebuilds
 #     safe-copy   a plain file byte-identical to the hub's copy — hub keeps it
+#     recurse     an ignored DIRECTORY, not a cache and not .feature/: the
+#                 caller (worktree_ignored_at_risk) must list its files
+#                 individually and classify each — never dropped as a whole
+#                 unit sight-unseen (B7)
 #     at-risk     everything else: worktree-unique, or a copied-in file since
-#                 edited, or an ignored DIRECTORY whose contents can't be
-#                 verified file-by-file (surfaced for a human, never dropped
-#                 silently)
+#                 edited
+#   .feature/ is the /feature pipeline's own scratch state (workplans are
+#   committed; nothing under .feature/ has a hub counterpart to compare
+#   against), so it is disposable like a cache, not "recurse".
 classify_ignored_file() {
     local rel="$1" wt="$2" hub="$3"
     if _seg_is_cache "$rel"; then
         echo "safe-cache"; return
     fi
     if [[ "$rel" == */ ]]; then
-        echo "at-risk"; return
+        if [[ "$rel" == .feature/ || "$rel" == */.feature/ ]]; then
+            echo "safe-cache"; return
+        fi
+        echo "recurse"; return
     fi
     if [[ -f "$hub/$rel" ]] && cmp -s "$wt/$rel" "$hub/$rel"; then
         echo "safe-copy"; return
@@ -139,17 +159,56 @@ classify_ignored_file() {
     echo "at-risk"
 }
 
+# _ignored_dir_at_risk <reldir> <wt> <hub>
+#   Print the at-risk files (relative paths) inside a non-cache ignored
+#   directory (B7): lists it WITHOUT --directory so nested entries come back
+#   individually rather than re-collapsed, then classifies each. A listing
+#   failure fails closed — the whole directory is printed as at-risk, same as
+#   worktree_ignored_at_risk's own git failure handling.
+_ignored_dir_at_risk() {
+    local reldir="$1" wt="$2" hub="$3" sub verdict
+    if ! git -C "$wt" ls-files --others --ignored --exclude-standard -z -- "$reldir" >/dev/null 2>&1; then
+        printf '%s\n' "$reldir"
+        return
+    fi
+    while IFS= read -r -d '' sub; do
+        [[ -z "$sub" ]] && continue
+        verdict="$(classify_ignored_file "$sub" "$wt" "$hub")"
+        case "$verdict" in
+            safe-cache|safe-copy) : ;;
+            *) printf '%s\n' "$sub" ;;
+        esac
+    done < <(git -C "$wt" ls-files --others --ignored --exclude-standard -z -- "$reldir" 2>/dev/null)
+}
+
 # worktree_ignored_at_risk <wt> <hub>
 #   Print each at-risk gitignored entry in <wt> (relative path), one per line;
 #   empty output means the worktree carries no unsaved data and is safe to
-#   remove. --directory collapses whole ignored dirs (node_modules/, .venv/)
-#   into one entry so a big cache is one cheap segment check, never a walk.
+#   remove. FAILS CLOSED (B1): a `git ls-files` that errors (e.g. a worktree
+#   whose .git file points at a missing gitdir) prints a placeholder at-risk
+#   entry instead of silently yielding "nothing found" — this function's
+#   caller treats ANY non-empty output as "do not remove without --force".
+#   --directory collapses a wholly-ignored dir (node_modules/, .venv/) into
+#   one entry so a big cache is one cheap segment check, never a walk; a
+#   non-cache directory is expanded by _ignored_dir_at_risk instead of being
+#   dropped as a unit. -z / NUL-delimited throughout: core.quotePath octal-
+#   quotes non-ASCII names in plain `ls-files` output, which would otherwise
+#   make a byte-identical café.env a permanent false at-risk (L5).
 worktree_ignored_at_risk() {
-    local wt="$1" hub="$2" rel
-    while IFS= read -r rel; do
+    local wt="$1" hub="$2" rel verdict
+    if ! git -C "$wt" ls-files --others --ignored --exclude-standard --directory -z >/dev/null 2>&1; then
+        printf '%s\n' "<git ls-files failed — cannot verify gitignored contents, treating as at-risk>"
+        return
+    fi
+    while IFS= read -r -d '' rel; do
         [[ -z "$rel" ]] && continue
-        [[ "$(classify_ignored_file "$rel" "$wt" "$hub")" == at-risk ]] && printf '%s\n' "$rel"
-    done < <(git -C "$wt" ls-files --others --ignored --exclude-standard --directory 2>/dev/null)
+        verdict="$(classify_ignored_file "$rel" "$wt" "$hub")"
+        case "$verdict" in
+            safe-cache|safe-copy) : ;;
+            recurse) _ignored_dir_at_risk "$rel" "$wt" "$hub" ;;
+            *) printf '%s\n' "$rel" ;;
+        esac
+    done < <(git -C "$wt" ls-files --others --ignored --exclude-standard --directory -z 2>/dev/null)
 }
 
 # Sourced (tests/test-worktree-sweep.sh) rather than executed: hand back the
