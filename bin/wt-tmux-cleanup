@@ -13,14 +13,19 @@
 # recover an agent worktree's branch — it would fall back to the basename
 # (<repo>_agent-<id>), missing the <repo>_<branch> name Ctrl+F actually
 # created and leaking that session. dots/worktrunk.toml therefore passes the
-# removed worktree's branch as a 3rd hook argument; when present, this uses
-# bin/project-dirs-lib's session_name_for_branch to derive the name directly
-# from repo+branch (same naming rule, one home), falling back to
-# session_name_for "$path" only when no branch is given (a worktrunk sibling
-# removal, whose name is pure basename and needs no branch anyway).
-# wt-tmux-jump is unaffected — post-switch runs with the worktree present.
-# The hub name also goes through session_name_for now (fork-free; was a
-# private `tr . _`) — hub sessions are always plain basenames, same result.
+# removed worktree's branch as a 3rd hook argument — worktrunk ALWAYS
+# supplies this word, and for a DETACHED worktree it renders as the literal
+# string "HEAD" (empirical, wt v0.68.0; see .feature/NOTES.md), never empty.
+# bin/project-dirs-lib's session_name_for_removed treats an empty OR "HEAD"
+# branch as "no real branch" and falls back to session_name_for "$path"
+# (the basename rule — the same name Ctrl+F/wt-tmux-jump give a detached
+# worktree, and a worktrunk sibling removal needs no branch anyway); any
+# other value derives the name from repo+branch via session_name_for_branch.
+# "HEAD" is a safe sentinel: `git check-ref-format --branch HEAD` refuses it
+# as a real branch name. wt-tmux-jump is unaffected — post-switch runs with
+# the worktree present. The hub name also goes through session_name_for now
+# (fork-free; was a private `tr . _`) — hub sessions are always plain
+# basenames, same result.
 
 set -euo pipefail
 
@@ -30,11 +35,7 @@ branch="${3:-}"
 
 source "$HOME/dotfiles/bin/project-dirs-lib"
 
-if [[ -n "$branch" ]]; then
-    session_name_for_branch "$repo" "$branch"
-else
-    session_name_for "$path"
-fi
+session_name_for_removed "$repo" "$path" "$branch"
 name="$session_name"
 
 hub_path="$HOME/dev/$repo"

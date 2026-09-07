@@ -78,6 +78,31 @@ session_name_for_branch() {
     session_name="${name//./_}"
 }
 
+# session_name_for_removed <repo-name> <path> <branch>
+#   wt-tmux-cleanup's naming entry point. worktrunk ALWAYS passes a 3rd hook
+#   argument for post-remove/post-merge, and for a DETACHED worktree that
+#   argument renders as the literal string "HEAD" (empirical, wt v0.68.0 —
+#   see .feature/NOTES.md; the docs claim `branch` is undefined there and
+#   that undefined variables error, but the shipped binary renders "HEAD"
+#   instead), never empty. So an empty OR "HEAD" branch both mean "no real
+#   branch" and fall back to session_name_for's path-basename rule — the
+#   same name Ctrl+F/wt-tmux-jump give a detached agent worktree or sibling,
+#   and the only option left once the directory (and its .git file) is
+#   already gone, since session_name_for's fallback needs no filesystem read
+#   for this case. "HEAD" is an unambiguous sentinel: it can never be a real
+#   branch name (`git check-ref-format --branch HEAD` refuses it). Writes
+#   the global `session_name`. Fork-free.
+session_name_for_removed() {
+    local repo_name="$1"
+    local path="$2"
+    local branch="$3"
+    if [[ -z "$branch" || "$branch" == "HEAD" ]]; then
+        session_name_for "$path"
+    else
+        session_name_for_branch "$repo_name" "$branch"
+    fi
+}
+
 # session_name_for <path>
 #   Compute the tmux session name for a project/worktree path. Writes the
 #   global `session_name` (no subshell fork per call — this runs once per

@@ -83,9 +83,12 @@ it is NOT repeated here. This section is only the DOTFILES-specific glue.
   post-merge hooks run after the worktree directory is already gone, so
   `dots/worktrunk.toml` passes the removed branch as a 3rd argument for
   cleanup to name the session from, rather than reading a `.git` file that
-  no longer exists. Session naming (dir basename,
-  dots→underscores) matches the sessionizer, so Ctrl+F/Ctrl+Space/Ctrl+G
-  work on worktrees with no special handling.
+  no longer exists — worktrunk always supplies this argument, rendering it
+  as the literal string `HEAD` for a detached worktree, in which case
+  `session_name_for_removed` falls back to the removed path's basename
+  instead of treating `HEAD` as a real branch name. Session naming (dir
+  basename, dots→underscores) matches the sessionizer, so
+  Ctrl+F/Ctrl+Space/Ctrl+G work on worktrees with no special handling.
 - `wt step copy-ignored` cost on the biggest repo here: ~13s / 3.2 GiB — the
   reason it's kept manual rather than a switch hook.
 

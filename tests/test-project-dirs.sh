@@ -185,6 +185,50 @@ else
     bad "session_name_for_branch on the same worktree" "got [$session_name]"
 fi
 
+echo "── session_name_for_removed: worktrunk always passes a 3rd word; HEAD means detached"
+# worktrunk's post-remove/post-merge ALWAYS supply a 3rd hook argument, and
+# for a detached worktree that argument renders as the literal string "HEAD"
+# (empirical, wt v0.68.0 — see .feature/NOTES.md), never empty. Both empty
+# and "HEAD" must fall back to the path-basename rule (session_name_for);
+# anything else is a real branch and goes through session_name_for_branch.
+gone="$work/repo/.claude/worktrees/agent-x"
+
+session_name_for_removed "repo" "$gone" "feature/x"
+if [[ "$session_name" == "repo_feature-x" ]]; then
+    ok "session_name_for_removed: real branch -> repo_feature-x"
+else
+    bad "session_name_for_removed: real branch" "got [$session_name]"
+fi
+
+session_name_for_removed "repo" "$gone" "HEAD"
+if [[ "$session_name" == "repo_agent-x" ]]; then
+    ok "session_name_for_removed: HEAD (detached sentinel) -> path-based repo_agent-x"
+else
+    bad "session_name_for_removed: HEAD sentinel" "got [$session_name]"
+fi
+
+session_name_for_removed "repo" "$gone" ""
+if [[ "$session_name" == "repo_agent-x" ]]; then
+    ok "session_name_for_removed: empty branch -> path-based repo_agent-x"
+else
+    bad "session_name_for_removed: empty branch" "got [$session_name]"
+fi
+
+sibling_gone="$work/repo.feat-x"
+session_name_for_removed "repo" "$sibling_gone" "HEAD"
+if [[ "$session_name" == "repo_feat-x" ]]; then
+    ok "session_name_for_removed: detached worktrunk sibling -> path-based repo_feat-x"
+else
+    bad "session_name_for_removed: detached worktrunk sibling" "got [$session_name]"
+fi
+
+session_name_for_removed "repo" "$gone" "release/1.2"
+if [[ "$session_name" == "repo_release-1_2" ]]; then
+    ok "session_name_for_removed: branch with dots -> repo_release-1_2"
+else
+    bad "session_name_for_removed: branch with dots" "got [$session_name]"
+fi
+
 echo
 if (( fail )); then
     echo "FAILED: $fail failed, $pass passed"

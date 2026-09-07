@@ -283,13 +283,14 @@ with the fallback that covers it if wrong.
   `~/dotfiles/.claude/worktrees/` right now; NO `~/dotfiles.*` worktrunk
   sibling exists, so the depth-0 sibling path is exercised only by the test's
   fake tree.
-- ASSUMED — worktrunk's `sanitize` filter maps `/` → `-` and leaves other
-  characters alone (evidence: CLAUDE.md's `~/dev/myproject.feat-x/ # worktree
-  for branch feat/x (slashes sanitized)` example and `dots/worktrunk.toml`'s
-  `{{ branch | sanitize }}` path template; wt source not inspected). If it
-  also rewrites other characters, an agent worktree and a `wt` sibling for
-  such a branch would get different session names — a naming mismatch, not
-  a failure.
+- VERIFIED — worktrunk's `sanitize` filter maps `/` → `-` (evidence:
+  worktrunk.dev/config documents `sanitize` as "filesystem-safe: `/` and `\`
+  become `-`", and `\` is illegal in a git refname, so only `/` can ever
+  appear in a branch name — the two rules are equivalent). Hand-traced
+  `feature/x` → `repo_feature-x`, `release/1.2` → `repo_release-1_2`, and a
+  dotted repo `my.proj` + `feat/x` → `my_proj_feat-x` from both the sibling
+  path and the branch form. Matters more now that round 2's fix also names
+  worktrunk-sibling removals from the branch, not just agent worktrees.
 - VERIFIED — `gh 2.96.0`, authenticated (`gh auth status` reports a login), so
   `gh pr list --head <branch> --state all --json number,state,url` is
   available in the non-`--offline` run; absence/no-auth still degrades to
@@ -336,3 +337,15 @@ Recorded here so the PR body carries them; both are deliberate.
    MERGED/ABANDONED row is `locked`, the printed action is
    `git -C <repo> worktree unlock <path> && wt -C <repo> remove ...`. The
    bucket itself is unchanged. Still printed only, never executed.
+3. **`wt-tmux-cleanup` treats a `HEAD` branch arg as "no branch".**
+   Round 2's branch-bearing fix (amendment 1) assumed the 3rd hook argument
+   would be empty for a detached worktree; instead worktrunk renders it as
+   the literal string `HEAD` (empirical, wt v0.68.0 — see
+   `.feature/NOTES.md`), so the branch-derived name was always taken and the
+   path-based fallback was dead code, leaking a detached agent worktree's
+   session on removal. Fix: `bin/project-dirs-lib` gains
+   `session_name_for_removed <repo-name> <path> <branch>`, which treats an
+   empty OR `HEAD` branch as "no real branch" (falling back to
+   `session_name_for "$path"`) and anything else as a real branch (via
+   `session_name_for_branch`); `HEAD` is a safe sentinel because
+   `git check-ref-format --branch HEAD` refuses it as an actual branch name.
