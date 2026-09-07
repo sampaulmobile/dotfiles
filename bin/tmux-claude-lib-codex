@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
 
 # Codex-specific half of the shared agent library. Sourced at the end of
-# bin/tmux-claude-lib — never on its own — so everything here can assume the
-# generic helpers exist. Keeping it in its own file is what lets the claude
-# path in tmux-claude-lib stay byte-for-byte what it was: the dispatch in
-# classify_pane_status is one `if`, and the codex rules live here.
+# bin/tmux-claude-lib, never on its own, so it can assume the generic
+# helpers exist.
 #
-# Every string matched below was captured from codex-cli 0.153.4 running in
-# a throwaway tmux session (see tests/fixtures/codex-*.txt for the actual
-# screens). Same contract as the claude classifier: pure bash 3.2, no forks,
-# last 10 non-blank lines only.
+# Every TUI string matched below was captured from codex-cli 0.153.4 in a
+# throwaway tmux session (tests/fixtures/codex-*.txt holds the screens).
+# Same contract as the claude classifier: pure bash 3.2, no forks, last 10
+# non-blank lines only.
 
 # classify_codex_pane_status <raw-content>
 #   Prints: working | idle | permission | unknown
@@ -22,10 +20,9 @@ classify_codex_pane_status() {
         return
     fi
 
-    # Split into lines and drop blanks, then keep the last 10 — same
-    # windowing as the claude classifier (deliberately duplicated rather
-    # than factored out: the claude path is hot, well-tested, and not worth
-    # disturbing for a dozen lines).
+    # Same windowing as the claude classifier, duplicated on purpose: that
+    # path is hot and well-tested, and not worth disturbing for a dozen
+    # lines.
     local -a all filtered
     IFS=$'\n' read -rd '' -a all <<< "$raw"
     local line
@@ -52,14 +49,14 @@ classify_codex_pane_status() {
         fi
     done
 
-    # Permission — checked first: the composer line ("› Ask Codex to do
-    # anything") that idle matches on can still be on screen above an
-    # overlay, and an overlay's own option list starts with "› 1. Yes, ...".
+    # Checked before idle: the composer line ("› Ask Codex to do anything")
+    # that idle matches on can still be on screen above an overlay, and an
+    # overlay's own option list starts with "› 1. Yes, ...".
     #
-    # Approval overlay headers (approval_overlay.rs): "Would you like to run
-    # the following command?" / "... make the following edits?" / "... grant
-    # these permissions?", and "<server> needs your approval." for MCP. The
-    # option list always offers a "Yes, " — requiring both halves keeps a
+    # Approval overlay headers: "Would you like to run the following
+    # command?" / "... make the following edits?" / "... grant these
+    # permissions?", plus "<server> needs your approval." for MCP. The option
+    # list always offers a "Yes, ", and requiring both halves stops a
     # transcript that merely QUOTES one of these headers from tripping it.
     if [[ "$content" == *"Yes, "* ]] \
        && [[ "$content" == *"Would you like to"* || "$content" == *"needs your approval"* ]]; then
@@ -67,28 +64,25 @@ classify_codex_pane_status() {
         return
     fi
 
-    # The two startup prompts that block a session just as hard as an
-    # approval: directory trust (on a cwd codex has not seen before) and
-    # hook trust (after any hooks.json change — see notes/codex.md). Both
-    # stop the agent dead waiting for a keystroke, which is exactly what the
-    # attention layer exists to surface.
+    # Two startup prompts block a session as hard as an approval does:
+    # directory trust (a cwd codex has not seen before) and hook trust
+    # (after any hooks.json change — see notes/codex.md).
     if [[ "$content" == *"Do you trust the contents of this directory?"* \
        || "$content" == *"Hooks need review"* ]]; then
         echo "permission"
         return
     fi
 
-    # Working: the status line reads "• Working (4s • esc to interrupt)";
-    # tool runs show the same "esc to interrupt" tail. Matching the shorter
-    # "to interrupt" mirrors the claude classifier and survives a reworded
-    # key hint.
+    # The status line reads "• Working (4s • esc to interrupt)", and tool
+    # runs show the same tail. Matching the shorter "to interrupt" mirrors
+    # the claude classifier and survives a reworded key hint.
     if [[ "$content" == *"to interrupt"* ]]; then
         echo "working"
         return
     fi
 
-    # Idle: the composer placeholder, or its prompt char on its own (the
-    # placeholder disappears once you start typing).
+    # The composer placeholder, or its prompt char alone once typing has
+    # made the placeholder disappear.
     if [[ "$content" == *"Ask Codex to do anything"* || "$content" == *"›"* ]]; then
         echo "idle"
         return
@@ -127,16 +121,16 @@ CODEX_MAP_DIR="$HOME/.cache/claude-attention/codex"
 # codex_find_pane_jsonl <pane-id>
 #   Prints the rollout path for the codex running in one exact pane, or
 #   nothing. The SessionStart hook's map (written by tmux-claude-attention
-#   codex-session-start) is authoritative — it is pane-exact, and it is
-#   rewritten after /new. Fallback for a codex started before the hooks were
-#   trusted: the newest rollout whose session_meta cwd is this pane's cwd.
+#   codex-session-start) is authoritative: pane-exact, and rewritten after
+#   /new. The fallback — newest rollout whose session_meta cwd is this
+#   pane's — covers a codex started before the hooks were trusted.
 #
-#   The map is keyed by bare pane id, and tmux reuses pane ids after a server
-#   restart — so an entry is only trusted while the cwd it recorded is still
-#   the pane's own (field 3). A mismatch means the id was recycled, or the
-#   codex was killed and relaunched elsewhere; treating it as a miss keeps a
-#   fresh codex from reading another project's thread until its first prompt
-#   rewrites the map. An unknown pane cwd (no server to ask) trusts the entry.
+#   The map is keyed by bare pane id and tmux reuses pane ids after a server
+#   restart, so an entry is trusted only while the cwd it recorded is still
+#   the pane's own. A mismatch means a recycled id, or a codex relaunched
+#   elsewhere; treating it as a miss is what stops a fresh codex from reading
+#   another project's thread until its first prompt rewrites the map. An
+#   unknown pane cwd (no server to ask) trusts the entry.
 codex_find_pane_jsonl() {
     local pane="${1#%}"
     local mapping="${CODEX_MAP_DIR}/${pane}.tsv"
@@ -163,9 +157,8 @@ codex_find_pane_jsonl() {
 _codex_newest_rollout_for_cwd() {
     local cwd="$1" f
     [[ -d "$CODEX_SESSIONS_DIR" ]] || return
-    # rollout filenames are codex-generated (rollout-<iso-ts>-<uuid>.jsonl):
-    # no spaces or newlines to mishandle, and `ls -t` is the same
-    # newest-first idiom the claude transcript lookup in tmux-claude-lib uses
+    # Rollout filenames are codex-generated (rollout-<iso-ts>-<uuid>.jsonl),
+    # so `ls -t` has no spaces or newlines to mishandle here.
     # shellcheck disable=SC2012
     while IFS= read -r f; do
         [[ -n "$f" ]] || continue
@@ -204,15 +197,13 @@ codex_get_context_and_model() {
 
 # codex_get_totals <rollout-path> [cache-file]
 #   Prints tab-separated: total_output total_all turns cost
-#   No incremental accumulation (unlike get_totals_incremental): codex's
-#   token_count carries CUMULATIVE totals for the thread, so the last one in
-#   the file is the answer. Turns are counted as task_started events — one
-#   per user prompt handled — with a plain grep, cached against the file's
-#   mtime when a cache path is given (a long rollout is a few MB and the
-#   dashboard re-reads on every refresh).
-#   cost: codex plans bill by rate limit, not per token, so the COST column
-#   shows the primary rate-limit window's usage ("5h:42%") when the
-#   transcript carries one, else "-".
+#   No incremental accumulation, unlike get_totals_incremental: codex's
+#   token_count carries CUMULATIVE thread totals, so the last one wins.
+#   Turns are task_started events, counted with a plain grep and cached
+#   against the file's mtime when a cache path is given — a long rollout is
+#   a few MB and the dashboard re-reads it every refresh.
+#   cost: codex plans bill by rate limit, not per token, so COST shows the
+#   primary rate-limit window's usage ("5h:42%") when present, else "-".
 codex_get_totals() {
     local jsonl="$1" cache="$2"
     [[ ! -f "$jsonl" ]] && printf '0\t0\t0\t-' && return
