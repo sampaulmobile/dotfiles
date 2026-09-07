@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+
+# Shared "what's a project directory" library. Sourced by bin/tmux-sessionizer,
+# bin/worktree-doctor, bin/wt-tmux-jump and bin/wt-tmux-cleanup — one place
+# owns search_dirs, the .local override, and the tmux-session naming rule so
+# none of the consumers keep a second copy. No side effects beyond defining
+# functions/defaults: sourcing this file touches no disk beyond reading the
+# .local override file, if any, and never forks.
+#
+# Fork-free by design: the sessionizer calls project_dirs() on its hot path
+# (before fzf draws), so everything here is globs, [[ -f ]]/[[ -d ]], `read`
+# from files, and parameter expansion — no $(...), no git, no basename.
+# bash 3.2 compatible (macOS /bin/bash): no mapfile, no associative arrays,
+# no ${var,,}, no `local -n`.
+
+# ---- Project directories ----
+# Add entries as "path:depth"
+#   depth 0 = the directory itself is a project
+#   depth 1 = search one level deep for projects inside it
+# Defined only if unset, so a test (or an earlier source of this file) can
+# pre-set search_dirs before calling project_dirs — the same contract the
+# .local override below relies on. bash 3.2 quirk: ${arr+x} on an array
+# tests element 0, which is exactly what "is this unset" needs here.
+if [[ -z "${search_dirs+x}" ]]; then
+    search_dirs=(
+        "$HOME/dev:1"
+        "$HOME/research:1"
+        "$HOME/dotfiles:0"
+    )
+fi
+
+# Machine-local override (untracked): may redefine search_dirs entirely. See
+# other/tmux-sessionizer.local.example. PROJECT_DIRS_LOCAL lets a test point
+# this at /nonexistent instead of the real machine's file.
+PROJECT_DIRS_LOCAL="${PROJECT_DIRS_LOCAL:-$HOME/dotfiles/other/tmux-sessionizer.local}"
+[[ -f "$PROJECT_DIRS_LOCAL" ]] && source "$PROJECT_DIRS_LOCAL"
+# ------------------------------
+
+# worktree_branch <path>
+#   Fork-free branch lookup for a linked worktree (its .git is a FILE
+#   reading "gitdir: <repo>/.git/worktrees/<name>"): read that admin dir's
+#   HEAD and strip "ref: refs/heads/". Detached HEAD (or not a linked
+#   worktree at all) -> empty. Writes the global `worktree_branch_out`.
+worktree_branch() {
+    local path="$1" gitfile line gitdir ref
+    worktree_branch_out=""
+    gitfile="$path/.git"
+    [[ -f "$gitfile" ]] || return 0
+    line=""
+    IFS= read -r line < "$gitfile" 2>/dev/null || :
+    case "$line" in
+        "gitdir: "*) gitdir="${line#gitdir: }" ;;
+        *) return 0 ;;
+    esac
+    [[ -f "$gitdir/HEAD" ]] || return 0
+    ref=""
+    IFS= read -r ref < "$gitdir/HEAD" 2>/dev/null || :
+    case "$ref" in
+        "ref: refs/heads/"*) worktree_branch_out="${ref#ref: refs/heads/}" ;;
+        *) worktree_branch_out="" ;;
+    esac
+}
+
+# session_name_for <path>
+#   Compute the tmux session name for a project/worktree path. Writes the
+#   global `session_name` (no subshell fork per call — this runs once per
+#   candidate dir on the sessionizer's hot path).
+#   - agent worktree (path under <repo>/.claude/worktrees/<x>): "<repo>_<branch>",
+#     branch's "/" -> "-" (matches worktrunk's sanitize, so an agent worktree
+#     and a `wt switch -c` sibling for the same branch land on the same
+#     session name); detached HEAD falls back to "<repo>_<basename>".
+#   - legacy .bare/ worktree (parent contains .bare/): "<project>_<branch>",
+#     as today.
+#   - anything else (plain project dir, or a worktrunk sibling like
+#     proj.feat-x, whose dir name already encodes repo+branch): basename.
+#   Then, always, "." -> "_" (tmux session names don't love dots).
+session_name_for() {
+    # One variable per `local` statement, on purpose: bash expands every
+    # word in a `local a=$x b=$a` command before any assignment in it
+    # takes effect, so a combined statement would compute parent/base from
+    # path's OLD (unset, on first call) value instead of "$1".
+    local path="$1"
+    local parent="${path%/*}"
+    local base="${path##*/}"
+    local name repo repo_base
+
+    case "$path" in
+        */.claude/worktrees/*)
+            repo="${path%%/.claude/worktrees/*}"
+            repo_base="${repo##*/}"
+            worktree_branch "$path"
+            if [[ -n "$worktree_branch_out" ]]; then
+                name="${repo_base}_${worktree_branch_out//\//-}"
+            else
+                name="${repo_base}_${base}"
+            fi
+            ;;
+        *)
+            if [[ -d "$parent/.bare" ]]; then
+                name="${parent##*/}_${base}"
+            else
+                name="$base"
+            fi
+            ;;
+    esac
+    session_name="${name//./_}"
+}
+
+# project_dirs
+#   Fills the global array project_dirs_out with every project directory,
+#   per search_dirs entry, in this order:
+#     1. the entry itself (depth 0) or its immediate children (depth 1);
+#     2. legacy .bare/ containers expanded into their worktree children;
+#     3. for every candidate from 1-2 that is a git repo (.git is a
+#        directory, i.e. a main worktree, not a linked one), its agent
+#        worktrees: <cand>/.claude/worktrees/*/;
+#     4. for depth-0 entries only, worktrunk siblings: <entry>.*/, keeping
+#        only linked worktrees (.git is a FILE) so a plain sibling like
+#        proj.bak is not picked up. Depth-1 entries need nothing: their
+#        siblings are already plain depth-1 rows.
+# _project_dirs_add_one <path>
+#   Appends <path> to project_dirs_out, then, if it's a git repo (.git is a
+#   directory — a main worktree, not a linked one), its agent worktrees.
+_project_dirs_add_one() {
+    local cand="$1" wt
+    project_dirs_out+=("$cand")
+    if [[ -d "$cand/.git" ]]; then
+        for wt in "$cand"/.claude/worktrees/*/; do
+            wt="${wt%/}"
+            _project_dirs_add_one "$wt"
+        done
+    fi
+}
+
+# _project_dirs_add_candidate <path>
+#   Expands a legacy .bare/ container into its worktree children (each
+#   still going through _project_dirs_add_one, so its OWN .git-dir check
+#   applies too — a .bare worktree is linked, so this is normally a no-op),
+#   otherwise adds <path> directly.
+_project_dirs_add_candidate() {
+    local cand="$1" wt
+    if [[ -d "$cand/.bare" ]]; then
+        for wt in "$cand"/*/; do
+            wt="${wt%/}"
+            [[ "${wt##*/}" == ".bare" ]] && continue
+            _project_dirs_add_one "$wt"
+        done
+    else
+        _project_dirs_add_one "$cand"
+    fi
+}
+
+# project_dirs
+#   Fills the global array project_dirs_out with every project directory,
+#   per search_dirs entry, in this order:
+#     1. the entry itself (depth 0) or its immediate children (depth 1);
+#     2. legacy .bare/ containers expanded into their worktree children;
+#     3. for every candidate from 1-2 that is a git repo (.git is a
+#        directory, i.e. a main worktree, not a linked one), its agent
+#        worktrees: <cand>/.claude/worktrees/*/;
+#     4. for depth-0 entries only, worktrunk siblings: <entry>.*/, keeping
+#        only linked worktrees (.git is a FILE) so a plain sibling like
+#        proj.bak is not picked up. Depth-1 entries need nothing: their
+#        siblings are already plain depth-1 rows.
+#   Deliberately never builds an intermediate "these are the candidates"
+#   array and iterates it with "${arr[@]}" — bash 3.2 (macOS's /bin/bash,
+#   and this machine's default `bash`) treats that expansion as unbound
+#   under `set -u` when the array has zero elements (e.g. a depth-1 entry
+#   with no matching subdirectories), and this lib is sourced into
+#   bin/worktree-doctor's `set -uo pipefail` shell. Globbing straight into
+#   a `for x in <pattern>; do` loop has no such problem: with nullglob, a
+#   pattern matching nothing just runs the loop zero times.
+project_dirs() {
+    project_dirs_out=()
+    local entry dir depth cand sib
+
+    shopt -s nullglob
+    for entry in "${search_dirs[@]}"; do
+        dir="${entry%%:*}"
+        depth="${entry##*:}"
+
+        if [[ "$depth" -eq 0 ]]; then
+            _project_dirs_add_candidate "$dir"
+        else
+            for cand in "$dir"/*/; do
+                cand="${cand%/}"
+                _project_dirs_add_candidate "$cand"
+            done
+        fi
+
+        if [[ "$depth" -eq 0 ]]; then
+            for sib in "$dir".*/; do
+                sib="${sib%/}"
+                [[ -f "$sib/.git" ]] || continue
+                project_dirs_out+=("$sib")
+            done
+        fi
+    done
+    shopt -u nullglob
+}
