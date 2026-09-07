@@ -211,6 +211,53 @@ worktree_ignored_at_risk() {
     done < <(git -C "$wt" ls-files --others --ignored --exclude-standard --directory -z 2>/dev/null)
 }
 
+# sweep_is_removable <bucket> <unpushed>
+#   True only for a MERGED bucket whose worktree has no local-only commits.
+#   classify_worktree can call a worktree MERGED (via gh's pr_state or a local
+#   ancestor check) while it ALSO carries commits made after that merge
+#   point (f_unpushed=true) — removing it would orphan those commits on a
+#   branch nothing lists (B3). Every other bucket is never removable here
+#   regardless of unpushed (the sweep only ever acts on MERGED).
+sweep_is_removable() {
+    local bucket="$1" unpushed="$2"
+    [[ "$bucket" == MERGED && "$unpushed" != true ]]
+}
+
+# sweep_would_kill_own_session <repo> <path> <branch>
+#   True when removing <path> would make worktrunk's post-remove hook
+#   (wt-tmux-cleanup) kill the CURRENT tmux session (P3): that hook kills the
+#   session NAMED after the removed worktree unconditionally, and post-remove
+#   hooks run in the background regardless of --foreground (`wt hook --help`:
+#   "post- — background"), so nothing here can wait it out — the only
+#   defense is to never start the removal. is_live is cwd-only and misses
+#   this (a sweep run with its panes cd'd to the HUB, not the worktree, looks
+#   not-live while still sitting in the worktree's own tmux session). Needs
+#   bin/project-dirs-lib's session_name_for_removed already sourced by the
+#   caller; a read-only `tmux display-message`, never a mutating command.
+sweep_would_kill_own_session() {
+    local repo="$1" path="$2" branch="$3" repo_name cur_session
+    [[ -n "${TMUX:-}" ]] || return 1
+    cur_session=$(tmux display-message -p '#S' 2>/dev/null) || return 1
+    [[ -n "$cur_session" ]] || return 1
+    repo_name="${repo##*/}"
+    session_name_for_removed "$repo_name" "$path" "$branch"
+    [[ "$cur_session" == "$session_name" ]]
+}
+
+# sweep_remove_cmd <repo> <path> <branch> <locked>
+#   Render the exact command sequence remove_worktree runs, as text — the
+#   ONE place that knows it, so the dry-run "would run:" line can never drift
+#   from what --apply actually does (L1).
+sweep_remove_cmd() {
+    local repo="$1" path="$2" branch="$3" locked="$4" target cmd
+    target="${branch:-$path}"
+    cmd=""
+    [[ "$locked" == true ]] && cmd+="git -C $repo worktree unlock $path && "
+    cmd+="wt -C $repo remove --foreground --no-delete-branch $target"
+    [[ -n "$branch" ]] && cmd+=" && git -C $repo branch -D $branch"
+    printf '%s' "$cmd"
+}
+
 # Sourced (tests/test-worktree-sweep.sh) rather than executed: hand back the
 # guard functions above and run none of the sweep below.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
@@ -293,18 +340,43 @@ shorten() {
 }
 
 # remove_worktree <repo> <path> <branch> <locked> — the actual removal (only
-# reached in --apply). Unlock first if locked (wt/git refuse a locked
-# worktree); target by branch, or by path when detached. --foreground so the
-# removal and its tmux-cleanup hook finish before the next row. No -f: the
-# guard already required a clean tree, so git removes the (safe) ignored files
-# on its own; -f would defeat the dirty check.
+# reached in --apply; mirrors sweep_remove_cmd). Unlock first if locked
+# (wt/git refuse a locked worktree). --foreground blocks until the worktree
+# directory itself is gone; it does NOT wait out the post-remove hook
+# (wt-tmux-cleanup), which worktrunk always runs in the background regardless
+# (`wt hook --help`: "post- — background") — callers must not assume that
+# hook has finished by the time this returns. No -f: the guard already
+# required a clean tree, so git removes the (safe) ignored files on its own;
+# -f would defeat the dirty check.
+#
+# --no-delete-branch + our own `git branch -D`, rather than letting `wt
+# remove` decide branch deletion (B4): wt re-derives "merged" itself, offline
+# and capped at 500 commits — when it disagrees with the bucket this sweep
+# already computed (gh-aware, uncapped), the old code removed the worktree
+# but silently kept the branch. Deleting it ourselves is safe here only
+# because on_worktree_block already required sweep_is_removable (MERGED and
+# not unpushed) before ever calling this.
+#
+# On a failed removal, sets REMOVE_FAIL_NOTE to say whether an unlock already
+# happened (a mutation that survives the failure — L1) so the FAILED row can
+# report it instead of leaving it invisible.
 remove_worktree() {
-    local repo="$1" path="$2" branch="$3" locked="$4" target
+    local repo="$1" path="$2" branch="$3" locked="$4" target unlocked=false
     target="${branch:-$path}"
+    REMOVE_FAIL_NOTE=""
     if [[ "$locked" == true ]]; then
-        git -C "$repo" worktree unlock "$path" 2>/dev/null || true
+        if git -C "$repo" worktree unlock "$path" 2>/dev/null; then
+            unlocked=true
+        fi
     fi
-    wt -C "$repo" remove --foreground "$target"
+    if ! wt -C "$repo" remove --foreground --no-delete-branch "$target" </dev/null; then
+        [[ "$unlocked" == true ]] && REMOVE_FAIL_NOTE=" (worktree was unlocked before this failure and is left unlocked)"
+        return 1
+    fi
+    if [[ -n "$branch" ]]; then
+        git -C "$repo" branch -D "$branch" >/dev/null 2>&1
+    fi
+    return 0
 }
 
 # on_worktree_block <path> <branch> <locked> <prunable> <wt_head>
@@ -320,6 +392,17 @@ on_worktree_block() {
     derive_worktree_facts "$path" "$branch" "$prunable" "$wt_head"
     bucket=$(classify_worktree "$f_live" "$f_dirty" "$prunable" "$f_pr_state" "$f_unpushed" "$f_merged_local")
     [[ "$bucket" == MERGED ]] || return 0
+
+    # B3: a MERGED bucket with local-only commits (made after the merge
+    # point) is never removable — surface it, never delete it.
+    if ! sweep_is_removable "$bucket" "$f_unpushed"; then
+        CNT_SKIP=$((CNT_SKIP + 1))
+        repo_out+=$(printf '  SKIP    %-24s %-16s %s\n' "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path")")
+        repo_out+=$'\n'
+        repo_out+=$(printf '      merged upstream, but this worktree has local commits not on the merged branch — needs manual review, never auto-removed\n')
+        repo_out+=$'\n'
+        return 0
+    fi
 
     at_risk=$(worktree_ignored_at_risk "$path" "$repo")
 
@@ -338,6 +421,32 @@ on_worktree_block() {
         return 0
     fi
 
+    # P3: never start a removal whose background post-remove hook would kill
+    # the tmux session running this very sweep.
+    if [[ "$APPLY" == true ]] && sweep_would_kill_own_session "$repo" "$path" "$branch"; then
+        CNT_SKIP=$((CNT_SKIP + 1))
+        repo_out+=$(printf '  SKIP    %-24s %-16s %s\n' "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path")")
+        repo_out+=$'\n'
+        repo_out+=$(printf '      merged, but removing it would kill the tmux session this sweep is running in — run it from elsewhere\n')
+        repo_out+=$'\n'
+        return 0
+    fi
+
+    # P2: liveness was snapshotted once, before any (possibly slow, one gh
+    # call per row) work above — refresh it right before the point of no
+    # return so a worktree opened mid-run is not removed out from under it.
+    if [[ "$APPLY" == true ]]; then
+        init_liveness
+        if is_live "$path"; then
+            CNT_SKIP=$((CNT_SKIP + 1))
+            repo_out+=$(printf '  SKIP    %-24s %-16s %s\n' "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path")")
+            repo_out+=$'\n'
+            repo_out+=$(printf '      merged, but became live just before removal (re-checked) — left in place\n')
+            repo_out+=$'\n'
+            return 0
+        fi
+    fi
+
     CNT_REMOVE=$((CNT_REMOVE + 1))
     if [[ -n "$at_risk" ]]; then
         repo_out+=$(printf '  REMOVE  %-24s %-16s %s   (--force: dropping at-risk files)\n' \
@@ -352,10 +461,10 @@ on_worktree_block() {
             repo_out+=$(printf '      removed\n')
         else
             CNT_FAIL=$((CNT_FAIL + 1))
-            repo_out+=$(printf '      FAILED to remove (left in place)\n')
+            repo_out+=$(printf '      FAILED to remove (left in place)%s\n' "$REMOVE_FAIL_NOTE")
         fi
     else
-        repo_out+=$(printf '      would run: wt -C %s remove --foreground %s\n' "$(shorten "$repo")" "${branch:-$path}")
+        repo_out+=$(printf '      would run: %s\n' "$(sweep_remove_cmd "$repo" "$path" "$branch" "$locked")")
     fi
     repo_out+=$'\n'
 }
@@ -380,7 +489,6 @@ echo
 echo "-- summary --"
 if [[ "$APPLY" == true ]]; then
     printf 'removed:%d  skipped(at-risk):%d  failed:%d\n' "$CNT_REMOVE" "$CNT_SKIP" "$CNT_FAIL"
-    (( CNT_FAIL > 0 )) && exit 2
 else
     printf 'would-remove:%d  skipped(at-risk):%d\n' "$CNT_REMOVE" "$CNT_SKIP"
     if (( CNT_REMOVE > 0 )); then
@@ -389,3 +497,18 @@ else
         echo "dry-run — nothing to sweep"
     fi
 fi
+if [[ "$LSOF_RAN" == true ]]; then
+    echo "lsof consulted: yes"
+else
+    echo "lsof consulted: no (lsof not found — liveness unknown, treated as not-live)"
+fi
+
+# B5: this must be the script's LAST word on its own exit status. A bare
+# `(( CNT_FAIL > 0 )) && exit 2` as the final statement leaks bash's
+# arithmetic-false status (1) as the script's exit code whenever CNT_FAIL is
+# 0 — a fully successful --apply run exited 1 (reproduced under bash 3.2 and
+# 5.x). The explicit `exit 0` below is load-bearing, not a stylistic no-op.
+if [[ "$APPLY" == true ]] && (( CNT_FAIL > 0 )); then
+    exit 2
+fi
+exit 0
