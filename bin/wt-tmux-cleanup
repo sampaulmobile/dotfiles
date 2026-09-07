@@ -1,20 +1,46 @@
 #!/usr/bin/env bash
 #
-# wt-tmux-cleanup <worktree-path> <repo>
+# wt-tmux-cleanup <worktree-path> <repo> [branch]
 #
 # worktrunk post-merge / post-remove hook: kill the removed worktree's
 # tmux session. If we're currently inside it, switch to the repo's hub
 # session first (creating it if needed) so the client isn't stranded.
 # No-op outside tmux for the switching; still kills the stray session.
+#
+# post-remove/post-merge run AFTER the worktree directory is gone (`wt hook
+# --help`: "the active worktree is gone, so the hook runs in the primary
+# worktree"), so session_name_for "$path" can no longer read <wt>/.git to
+# recover an agent worktree's branch — it would fall back to the basename
+# (<repo>_agent-<id>), missing the <repo>_<branch> name Ctrl+F actually
+# created and leaking that session. dots/worktrunk.toml therefore passes the
+# removed worktree's branch as a 3rd hook argument — worktrunk ALWAYS
+# supplies this word, and for a DETACHED worktree it renders as the literal
+# string "HEAD" (empirical, wt v0.68.0; see .feature/NOTES.md), never empty.
+# bin/project-dirs-lib's session_name_for_removed treats an empty OR "HEAD"
+# branch as "no real branch" and falls back to session_name_for "$path"
+# (the basename rule — the same name Ctrl+F/wt-tmux-jump give a detached
+# worktree, and a worktrunk sibling removal needs no branch anyway); any
+# other value derives the name from repo+branch via session_name_for_branch.
+# "HEAD" is a safe sentinel: `git check-ref-format --branch HEAD` refuses it
+# as a real branch name. wt-tmux-jump is unaffected — post-switch runs with
+# the worktree present. The hub name also goes through session_name_for now
+# (fork-free; was a private `tr . _`) — hub sessions are always plain
+# basenames, same result.
 
 set -euo pipefail
 
-path="${1:?usage: wt-tmux-cleanup <worktree-path> <repo>}"
-repo="${2:?usage: wt-tmux-cleanup <worktree-path> <repo>}"
+path="${1:?usage: wt-tmux-cleanup <worktree-path> <repo> [branch]}"
+repo="${2:?usage: wt-tmux-cleanup <worktree-path> <repo> [branch]}"
+branch="${3:-}"
 
-name=$(basename "$path" | tr . _)
-hub=$(echo "$repo" | tr . _)
+source "$HOME/dotfiles/bin/project-dirs-lib"
+
+session_name_for_removed "$repo" "$path" "$branch"
+name="$session_name"
+
 hub_path="$HOME/dev/$repo"
+session_name_for "$hub_path"
+hub="$session_name"
 
 if [[ -n "${TMUX:-}" ]]; then
     current=$(tmux display-message -p '#S' 2>/dev/null || true)

@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+#
+# classify_worktree/action_for/parse_porcelain_blocks — the pure functions
+# behind bin/worktree-doctor's per-worktree buckets, commands and porcelain
+# parsing. Offline: it SOURCES bin/worktree-doctor, which hands back all
+# three (and usage) and stops before the report itself (the BASH_SOURCE
+# guard near the top of that file), so no git, no gh, no lsof and no real
+# machine worktree is ever touched.
+#
+#   tests/test-worktree-doctor.sh
+#
+# The classify_worktree case that matters is precedence: LIVE beats DIRTY
+# beats PRUNABLE beats MERGED beats ABANDONED beats IN-REVIEW beats PARKED
+# beats SHIPPED?, first match wins — so a merged worktree that's still dirty
+# must report DIRTY (keep, inspect), never silently look removable.
+# action_for's case that matters is the locked-unlock prefix landing on
+# MERGED/ABANDONED only, never changing any other bucket's command.
+# parse_porcelain_blocks's case that matters is a real parser bug this PR
+# fixed (a stray `have_block || return 0` silently ran "have_block" as a
+# command instead of testing the variable, and every block was dropped) —
+# this fixture is the regression test that bug needed.
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+repo=$(dirname "$here")
+
+# shellcheck source=/dev/null
+source "$repo/bin/worktree-doctor"
+
+pass=0
+fail=0
+
+# case_ <label> <live> <dirty> <prunable> <pr_state> <unpushed> <merged_local> <want-bucket>
+case_() {
+    local label="$1" live="$2" dirty="$3" prunable="$4" pr_state="$5" unpushed="$6" merged_local="$7" want="$8"
+    local got
+    got=$(classify_worktree "$live" "$dirty" "$prunable" "$pr_state" "$unpushed" "$merged_local")
+    if [[ "$got" == "$want" ]]; then
+        printf '  ok   %-46s -> %s\n' "$label" "$got"
+        pass=$(( pass + 1 ))
+    else
+        printf '  FAIL %-46s -> got [%s] want [%s]\n' "$label" "$got" "$want"
+        fail=$(( fail + 1 ))
+    fi
+}
+
+echo "── sourcing bin/worktree-doctor ran no report (main is guarded)"
+if declare -f classify_worktree >/dev/null && declare -f usage >/dev/null \
+    && declare -f action_for >/dev/null && declare -f parse_porcelain_blocks >/dev/null; then
+    printf '  ok   %s\n' "functions available after sourcing"
+    pass=$(( pass + 1 ))
+else
+    printf '  FAIL %s\n' "classify_worktree/usage/action_for/parse_porcelain_blocks not defined by sourcing"
+    fail=$(( fail + 1 ))
+fi
+
+echo "── one bucket at a time (everything else false/none)"
+case_ "live"                        true  false false none    false false LIVE
+case_ "dirty"                       false true  false none    false false DIRTY
+case_ "prunable"                    false false true  none    false false PRUNABLE
+case_ "merged (pr state)"           false false false MERGED  false false MERGED
+case_ "merged (local ancestor)"     false false false none    false true  MERGED
+case_ "abandoned (pr closed)"       false false false CLOSED  false false ABANDONED
+case_ "in-review (pr open)"         false false false OPEN    false false IN-REVIEW
+case_ "parked (no PR, unpushed)"    false false false none    true  false PARKED
+case_ "parked (pr unknown, unpushed)" false false false unknown true false PARKED
+case_ "shipped? (no PR, pushed)"    false false false none    false false "SHIPPED?"
+case_ "shipped? (pr unknown, pushed)" false false false unknown false false "SHIPPED?"
+
+echo "── precedence: first match wins"
+case_ "live beats everything"       true  true  true  MERGED  true  true  LIVE
+case_ "dirty beats prunable+merged" false true  true  MERGED  true  true  DIRTY
+case_ "prunable beats merged"       false false true  CLOSED  false false PRUNABLE
+case_ "merged beats abandoned"      false false false CLOSED  false true  MERGED
+case_ "merged (local) beats in-review" false false false OPEN false true  MERGED
+case_ "abandoned beats in-review"   false false false CLOSED  false false ABANDONED
+case_ "in-review beats parked"      false false false OPEN    true  false IN-REVIEW
+case_ "parked beats shipped?"       false false false none    true  false PARKED
+
+# action_for_ <label> <bucket> <locked> <want>
+#   repo/path/branch are fixed dummy strings — only bucket/locked vary.
+action_for_() {
+    local label="$1" bucket="$2" locked="$3" want="$4"
+    local got
+    got=$(action_for "$bucket" /repo /repo/wt branchname "$locked")
+    if [[ "$got" == "$want" ]]; then
+        printf '  ok   %s\n' "$label"
+        pass=$(( pass + 1 ))
+    else
+        printf '  FAIL %s\n       got  [%s]\n       want [%s]\n' "$label" "$got" "$want"
+        fail=$(( fail + 1 ))
+    fi
+}
+
+echo "── action_for: locked prefixes MERGED/ABANDONED with an unlock, nothing else"
+action_for_ "merged, unlocked -> plain wt remove" MERGED false \
+    "wt -C /repo remove branchname  (deletes the merged branch too)"
+action_for_ "merged, locked -> unlock && wt remove" MERGED true \
+    "git -C /repo worktree unlock /repo/wt && wt -C /repo remove branchname  (deletes the merged branch too)"
+action_for_ "abandoned, unlocked -> plain wt remove -D" ABANDONED false \
+    "wt -C /repo remove -D branchname  (confirm first — deletes an unmerged branch)"
+action_for_ "abandoned, locked -> unlock && wt remove -D" ABANDONED true \
+    "git -C /repo worktree unlock /repo/wt && wt -C /repo remove -D branchname  (confirm first — deletes an unmerged branch)"
+action_for_ "live, locked -> bucket unaffected, no unlock prefix" LIVE true \
+    "keep — in use"
+action_for_ "prunable, locked -> bucket unaffected, no unlock prefix" PRUNABLE true \
+    "git -C /repo worktree prune"
+
+echo "── parse_porcelain_blocks: fixture (worktree/HEAD/branch/locked/prunable/detached, main-worktree skip, trailing flush)"
+# on_worktree_block is what the real script defines AFTER the BASH_SOURCE
+# guard (never reached by sourcing), so this test's own definition is the
+# only one in play — it just records its arguments instead of touching
+# git/gh, exercising the parser in total isolation from the real machine.
+pb_calls=()
+on_worktree_block() {
+    pb_calls+=("$1|$2|$3|$4|$5")
+}
+
+pb_fixture=$(cat <<'FIXTURE'
+worktree /repo
+HEAD aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+branch refs/heads/main
+
+worktree /repo/wt1
+HEAD bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+branch refs/heads/feature/x
+
+worktree /repo/wt2
+HEAD cccccccccccccccccccccccccccccccccccccccc
+detached
+
+worktree /repo/wt3
+HEAD dddddddddddddddddddddddddddddddddddddddd
+branch refs/heads/locked-branch
+locked custom lock reason
+
+worktree /repo/wt4
+HEAD 0000000000000000000000000000000000000000
+prunable gitdir file points to non-existent location
+FIXTURE
+)
+
+parse_porcelain_blocks /repo <<< "$pb_fixture"
+
+pb_want=(
+    "/repo/wt1|feature/x|false|false|bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    "/repo/wt2||false|false|cccccccccccccccccccccccccccccccccccccccc"
+    "/repo/wt3|locked-branch|true|false|dddddddddddddddddddddddddddddddddddddddd"
+    "/repo/wt4||false|true|0000000000000000000000000000000000000000"
+)
+pb_got_joined=$(printf '%s\n' "${pb_calls[@]}")
+pb_want_joined=$(printf '%s\n' "${pb_want[@]}")
+if [[ "$pb_got_joined" == "$pb_want_joined" ]]; then
+    printf '  ok   %s\n' "main worktree skipped; branch/detached/locked/prunable blocks all parsed; trailing block flushed"
+    pass=$(( pass + 1 ))
+else
+    printf '  FAIL %s\n       want:\n%s\n       got:\n%s\n' "parse_porcelain_blocks fixture" "$pb_want_joined" "$pb_got_joined"
+    fail=$(( fail + 1 ))
+fi
+
+echo
+if (( fail )); then
+    echo "FAILED: $fail failed, $pass passed"
+    exit 1
+fi
+echo "ok: $pass passed"

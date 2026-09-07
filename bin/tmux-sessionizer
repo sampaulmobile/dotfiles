@@ -26,11 +26,32 @@
 # HAS a session all three just switch to it (the session keeps the agent it
 # was built with).
 #
-# Worktree support: if a project directory contains a .bare/ subdir (the
-# legacy bare+worktree layout — see archive/gwclone), its worktree subdirs
-# are enumerated as separate entries. Session names become "<project>_<branch>"
-# so two projects with the same branch name don't collide. (worktrunk-style
-# sibling worktrees like ~/dev/proj.feat-x are plain depth-1 entries.)
+# Worktree support (bin/project-dirs-lib): if a project directory contains a
+# .bare/ subdir (the legacy bare+worktree layout — see archive/gwclone), its
+# worktree subdirs are enumerated as separate entries. worktrunk-style
+# sibling worktrees (~/dev/proj.feat-x, and for depth-0 entries like
+# dotfiles, ~/dotfiles.feat-x) are enumerated too, as are agent worktrees
+# (<repo>/.claude/worktrees/agent-<id>, made by the Agent tool's worktree
+# isolation and by /feature) for every repo the sessionizer already knows
+# about. Session names become "<project>_<branch>" (slashes in the branch
+# sanitized to "-", matching worktrunk) so two projects with the same branch
+# name don't collide, and an agent worktree lands on the same session name
+# as a `wt switch -c` sibling for that branch.
+#
+# Rows for a linked worktree (.git is a file — any of the three kinds above)
+# render as two fzf fields, "<key>\t<display>": the picker shows only the
+# display field, cyan-tinted like today, laid out as three aligned fields —
+# "<~repo-path>  <origin>  ⎇ <branch>" — where the repo path is padded to
+# the widest path among ALL dir rows, worktree or not, plus the same
+# two-space gap that separates the other fields — a long plain repo name
+# then never runs through the tag column of the worktree rows around it —
+# and <origin> is a fixed-width dim
+# tag: "agent" (harness-made, under .claude/worktrees/) or "wt" (a worktrunk
+# sibling). A sibling shows its REPO's path (recovered from its .git file's
+# gitdir pointer), not its own proj.feat-x dir name, so every worktree row
+# reads "which repo, which branch" the same way. The tag doubles as a filter
+# word (type "agent"). The key (what's actually selected) is unchanged — the
+# worktree's own ~-shortened path.
 
 # Split fzf's --expect output into the globals `fzf_key` (the accepting key,
 # empty for a plain Enter) and `selected` (the chosen row). fzf prints the key
@@ -76,38 +97,12 @@ C_CYN=$'\033[2;36m'
 C_RST=$'\033[0m'
 
 # ---- Project directories ----
-# Add entries as "path:depth"
-#   depth 0 = the directory itself is a project
-#   depth 1 = search one level deep for projects inside it
-search_dirs=(
-    "$HOME/dev:1"
-    "$HOME/research:1"
-    "$HOME/dotfiles:0"
-)
-
-# Machine-local override (untracked): may redefine search_dirs entirely.
-# See other/tmux-sessionizer.local.example.
-[[ -f "$HOME/dotfiles/other/tmux-sessionizer.local" ]] && source "$HOME/dotfiles/other/tmux-sessionizer.local"
+# search_dirs defaults, the .local override, project_dirs, worktree_branch
+# and session_name_for all live in bin/project-dirs-lib now — shared with
+# bin/worktree-doctor, bin/wt-tmux-jump and bin/wt-tmux-cleanup. See that
+# file for the search_dirs "path:depth" contract and the naming rule.
+source "$HOME/dotfiles/bin/project-dirs-lib"
 # ------------------------------
-
-# Compute the tmux session name for a given project/worktree path.
-# - For a worktree (parent contains .bare/), uses "<project>_<branch>".
-# - Otherwise, uses basename of the path.
-# Dots are translated to underscores (tmux session names don't love dots).
-# Writes the result to the global `session_name` to avoid a subshell fork
-# per call (this runs once per candidate dir in the hot path).
-session_name_for() {
-    local path="$1"
-    local parent="${path%/*}"
-    local base="${path##*/}"
-    local name
-    if [[ -d "$parent/.bare" ]]; then
-        name="${parent##*/}_${base}"
-    else
-        name="$base"
-    fi
-    session_name="${name//./_}"
-}
 
 # ---- Preview mode (invoked by fzf per highlighted row; lazy, read-only) ----
 if [[ "$1" == "--preview" ]]; then
@@ -190,77 +185,111 @@ else
         shopt -u nullglob
     fi
 
+    # Rows are two tab-separated fields, "<key>\t<display>": fzf shows only
+    # the display field (--with-nth 2) and matches against it, but the FULL
+    # line (both fields) is what comes back on selection — see the parse
+    # below. Key is exactly what a row's single field was before this
+    # split (a session name, or a dir's ~-shortened path) so the mapping
+    # code past fzf needs no change; only display differs, and only for
+    # linked-worktree dir rows. Key never carries color codes, so slicing
+    # it back out after selection needs no ANSI-stripping care.
+    #
     # Everything below streams straight into fzf so it draws immediately.
     emit_rows() {
-        # Existing sessions first (MRU order), colored by status.
+        # Existing sessions first (MRU order), colored by status. Key ==
+        # display (both the session name) — unchanged text and colors.
         local sess
         while IFS= read -r sess; do
             [[ -z "$sess" ]] && continue
             if [[ "$perm_list" == *$'\n'"$sess"$'\n'* ]]; then
-                printf '%s%s%s\n' "$C_RED" "$sess" "$C_RST"
+                printf '%s\t%s%s%s\n' "$sess" "$C_RED" "$sess" "$C_RST"
             elif [[ "$done_list" == *$'\n'"$sess"$'\n'* ]]; then
-                printf '%s%s%s\n' "$C_GRN" "$sess" "$C_RST"
+                printf '%s\t%s%s%s\n' "$sess" "$C_GRN" "$sess" "$C_RST"
             elif [[ "$work_list" == *$'\n'"$sess"$'\n'* ]]; then
-                printf '%s%s%s\n' "$C_BLU" "$sess" "$C_RST"
+                printf '%s\t%s%s%s\n' "$sess" "$C_BLU" "$sess" "$C_RST"
             elif [[ "$idle_list" == *$'\n'"$sess"$'\n'* ]]; then
-                printf '%s%s%s\n' "$C_IBL" "$sess" "$C_RST"
+                printf '%s\t%s%s%s\n' "$sess" "$C_IBL" "$sess" "$C_RST"
             else
-                printf '%s\n' "$sess"
+                printf '%s\t%s\n' "$sess" "$sess"
             fi
         done <<< "$existing"
 
-        # Then project dirs not yet opened as sessions.
-        # Shell globs instead of find — no fork, much faster for shallow depth.
-        shopt -s nullglob
-        local entry dir depth cand wt disp
-        local -a raw candidates
-        candidates=()
-        for entry in "${search_dirs[@]}"; do
-            dir="${entry%%:*}"
-            depth="${entry##*:}"
-            if [[ $depth -eq 0 ]]; then
-                raw=("$dir")
-            else
-                raw=("$dir"/*/)
-                raw=("${raw[@]%/}")
-            fi
-            # Expand worktree-layout projects (parent has .bare/) into individual worktrees.
-            for cand in "${raw[@]}"; do
-                if [[ -d "$cand/.bare" ]]; then
-                    for wt in "$cand"/*/; do
-                        wt="${wt%/}"
-                        [[ "${wt##*/}" == ".bare" ]] && continue
-                        candidates+=("$wt")
-                    done
-                else
-                    candidates+=("$cand")
-                fi
-            done
-        done
-        shopt -u nullglob
+        # Then project dirs not yet opened as sessions (search_dirs +
+        # agent/worktrunk worktrees — see bin/project-dirs-lib).
+        project_dirs
 
         # Filter out dirs that already have a session (builtin pattern match
         # against a delimited string — no fork per check), emit ~-shortened
-        # and dimmed; a linked worktree (.git is a file) gets a cyan tint.
+        # and dimmed; a linked worktree (.git is a file) gets a cyan tint and
+        # the aligned "<~repo-path>  <origin>  ⎇ <branch>" display described
+        # in the header. Two passes over the (already complete) array: the
+        # first resolves each row and measures the widest path (worktree
+        # rows' repo path, plain rows' own path), the
+        # second prints with that padding — still zero forks (parameter
+        # expansion, `read` from two files per worktree, printf -v).
         # $existing excludes the current session, so add it back here or the
         # dir you're calling from reappears as a "no session yet" row.
         local nl_existing=$'\n'"$current_session"$'\n'"$existing"$'\n'
-        for dir in "${candidates[@]}"; do
+        local dir key repo repo_disp i n repo_w padded tag_padded
+        local -a row_key row_kind row_repo row_tag row_branch
+        n=0
+        repo_w=0
+        for dir in "${project_dirs_out[@]}"; do
             session_name_for "$dir"
-            if [[ "$nl_existing" != *$'\n'"$session_name"$'\n'* ]]; then
-                disp="$dir"
-                [[ "$disp" == "$HOME/"* ]] && disp="~/${disp#"$HOME"/}"
-                if [[ -f "$dir/.git" ]]; then
-                    printf '%s%s%s\n' "$C_CYN" "$disp" "$C_RST"
-                else
-                    printf '%s%s%s\n' "$C_DIM" "$disp" "$C_RST"
-                fi
+            [[ "$nl_existing" != *$'\n'"$session_name"$'\n'* ]] || continue
+            key="$dir"
+            [[ "$key" == "$HOME/"* ]] && key="~/${key#"$HOME"/}"
+            row_key[n]="$key"
+            if [[ -f "$dir/.git" ]]; then
+                worktree_branch "$dir"
+                row_kind[n]=wt
+                row_branch[n]="${worktree_branch_out:-detached}"
+                case "$dir" in
+                    */.claude/worktrees/*)
+                        repo="${dir%%/.claude/worktrees/*}"
+                        row_tag[n]=agent
+                        ;;
+                    *)
+                        # worktrunk sibling (or any other linked worktree):
+                        # its repo comes from the gitdir pointer; fall back
+                        # to its own path if that wasn't recoverable.
+                        repo="${worktree_repo_out:-$dir}"
+                        row_tag[n]=wt
+                        ;;
+                esac
+                repo_disp="$repo"
+                [[ "$repo_disp" == "$HOME/"* ]] && repo_disp="~/${repo_disp#"$HOME"/}"
+                row_repo[n]="$repo_disp"
+                (( ${#repo_disp} > repo_w )) && repo_w=${#repo_disp}
+            else
+                row_kind[n]=dir
+                # plain dir rows take part in the measurement too, so a long
+                # repo name never runs through the tag column of the
+                # worktree rows beneath it — the picker reads as one grid.
+                (( ${#key} > repo_w )) && repo_w=${#key}
             fi
+            n=$(( n + 1 ))
+        done
+        i=0
+        while (( i < n )); do
+            if [[ "${row_kind[i]}" == wt ]]; then
+                printf -v padded '%-*s' "$repo_w" "${row_repo[i]}"
+                printf -v tag_padded '%-5s' "${row_tag[i]}"
+                printf '%s\t%s%s  %s%s%s  ⎇ %s%s\n' "${row_key[i]}" \
+                    "$C_CYN" "$padded" "$C_DIM" "$tag_padded" "$C_CYN" \
+                    "${row_branch[i]}" "$C_RST"
+            else
+                printf '%s\t%s%s%s\n' "${row_key[i]}" "$C_DIM" "${row_key[i]}" "$C_RST"
+            fi
+            i=$(( i + 1 ))
         done
     }
 
     # --tiebreak=index keeps MRU order among equal matches; --ansi renders
     # the row colors and strips them from the selected line's output.
+    # --delimiter/--with-nth show only the display field (2); the key (1)
+    # still travels with the accepted line, which is what --preview and the
+    # selection parse below read.
     # --expect makes fzf print the accepting key on its FIRST output line
     # (empty for a plain Enter), then the selection — that's how the agent
     # override arrives. fzf 0.74 knows alt-enter but neither shift-enter nor
@@ -268,9 +297,10 @@ else
     default_agent=$(agent_default)
     other_agent=$(agent_other "$default_agent")
     fzf_out=$(emit_rows | fzf --ansi --tiebreak=index \
+        --delimiter '\t' --with-nth 2 \
         --expect=ctrl-x,alt-enter \
         --header "⏎ new: ${default_agent} · ⌥⏎/^x new: ${other_agent}" \
-        --preview "$HOME/dotfiles/bin/tmux-sessionizer --preview {}" \
+        --preview "$HOME/dotfiles/bin/tmux-sessionizer --preview {1}" \
         --preview-window 'right,55%,hidden' \
         --bind 'ctrl-/:toggle-preview')
 
@@ -280,6 +310,10 @@ else
     case "$fzf_key" in
         ctrl-x|alt-enter) new_agent="$other_agent" ;;
     esac
+
+    # Take field 1 (the key) — a no-op when there's no tab, i.e. the
+    # one-argument CLI form below that sets $selected directly.
+    selected="${selected%%$'\t'*}"
 
     # Re-expand the ~-shortened display path
     [[ "$selected" == "~/"* ]] && selected="$HOME/${selected#\~/}"
