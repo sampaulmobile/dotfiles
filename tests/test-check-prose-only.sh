@@ -112,6 +112,13 @@ rm -f "$fixture/bin/example"
 expect_ "removed a tracked script" 1
 write_baseline
 
+echo "── renaming a file and editing it is rejected (rename detection off)"
+git -C "$fixture" mv bin/example bin/renamed
+printf '#!/usr/bin/env bash\necho goodbye\n' > "$fixture/bin/renamed"
+expect_ "renamed + edited script" 1
+git -C "$fixture" mv bin/renamed bin/example
+write_baseline
+
 echo "── files outside bin/ and tests/ are ignored"
 echo "notes" > "$fixture/README.md"
 git -C "$fixture" add README.md

@@ -11,6 +11,11 @@
 # full-line only, so touching a trailing comment reports as a code change.
 # That is the intended bar: edit a comment only where it owns the whole line.
 #
+# Blind spot: a full-line "#" inside a quoted jq/awk program is stripped too,
+# though to bash it is string content — an apostrophe there ends the quote,
+# and jq/awk semantics can change, with this check none the wiser. Run
+# `bash -n` alongside, and run the affected script against its base version.
+#
 # bash 3.2 clean (macOS /bin/bash): no mapfile, no associative arrays.
 
 set -uo pipefail
@@ -54,7 +59,10 @@ fi
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/check-prose-only.XXXXXX") || exit 2
 trap 'rm -rf "$tmp"' EXIT
 
-git -C "$repo" diff --name-only "$base" -- bin tests > "$tmp/files" || exit 2
+# --no-renames: with rename detection a renamed+edited file lists only its new
+# path, which has no base version, so both the deletion and the edit would
+# pass silently.
+git -C "$repo" diff --no-renames --name-only "$base" -- bin tests > "$tmp/files" || exit 2
 
 status=0
 checked=0
