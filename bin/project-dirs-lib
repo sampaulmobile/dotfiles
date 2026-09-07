@@ -41,9 +41,15 @@ PROJECT_DIRS_LOCAL="${PROJECT_DIRS_LOCAL:-$HOME/dotfiles/other/tmux-sessionizer.
 #   reading "gitdir: <repo>/.git/worktrees/<name>"): read that admin dir's
 #   HEAD and strip "ref: refs/heads/". Detached HEAD (or not a linked
 #   worktree at all) -> empty. Writes the global `worktree_branch_out`.
+#   Also writes `worktree_repo_out`: the MAIN repo's path, recovered from
+#   the same gitdir line (everything before "/.git/worktrees/") — how the
+#   sessionizer shows a worktrunk sibling (~/dev/proj.feat-x) under its repo
+#   (~/dev/proj) rather than under its own dir name. Empty when the gitdir
+#   isn't of that shape (or the path isn't a linked worktree).
 worktree_branch() {
     local path="$1" gitfile line gitdir ref
     worktree_branch_out=""
+    worktree_repo_out=""
     gitfile="$path/.git"
     [[ -f "$gitfile" ]] || return 0
     line=""
@@ -51,6 +57,9 @@ worktree_branch() {
     case "$line" in
         "gitdir: "*) gitdir="${line#gitdir: }" ;;
         *) return 0 ;;
+    esac
+    case "$gitdir" in
+        */.git/worktrees/*) worktree_repo_out="${gitdir%%/.git/worktrees/*}" ;;
     esac
     [[ -f "$gitdir/HEAD" ]] || return 0
     ref=""

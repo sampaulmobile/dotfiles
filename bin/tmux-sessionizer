@@ -40,9 +40,18 @@
 #
 # Rows for a linked worktree (.git is a file — any of the three kinds above)
 # render as two fzf fields, "<key>\t<display>": the picker shows only the
-# display field, "<~repo-path>  ⎇ <branch>" (agent worktrees add a dim
-# "agent" tag), cyan-tinted like today; the key (what's actually selected)
-# is unchanged — the worktree's own ~-shortened path.
+# display field, cyan-tinted like today, laid out as three aligned fields —
+# "<~repo-path>  <origin>  ⎇ <branch>" — where the repo path is padded to
+# the widest path among ALL dir rows, worktree or not, plus the same
+# two-space gap that separates the other fields — a long plain repo name
+# then never runs through the tag column of the worktree rows around it —
+# and <origin> is a fixed-width dim
+# tag: "agent" (harness-made, under .claude/worktrees/) or "wt" (a worktrunk
+# sibling). A sibling shows its REPO's path (recovered from its .git file's
+# gitdir pointer), not its own proj.feat-x dir name, so every worktree row
+# reads "which repo, which branch" the same way. The tag doubles as a filter
+# word (type "agent"). The key (what's actually selected) is unchanged — the
+# worktree's own ~-shortened path.
 
 # Split fzf's --expect output into the globals `fzf_key` (the accepting key,
 # empty for a plain Enter) and `selected` (the chosen row). fzf prints the key
@@ -211,38 +220,68 @@ else
 
         # Filter out dirs that already have a session (builtin pattern match
         # against a delimited string — no fork per check), emit ~-shortened
-        # and dimmed; a linked worktree (.git is a file) gets a cyan tint,
-        # displayed as "<~repo-path>  ⎇ <branch>" (agent worktrees add a dim
-        # "agent" tag so the two origins are distinguishable).
+        # and dimmed; a linked worktree (.git is a file) gets a cyan tint and
+        # the aligned "<~repo-path>  <origin>  ⎇ <branch>" display described
+        # in the header. Two passes over the (already complete) array: the
+        # first resolves each row and measures the widest path (worktree
+        # rows' repo path, plain rows' own path), the
+        # second prints with that padding — still zero forks (parameter
+        # expansion, `read` from two files per worktree, printf -v).
         # $existing excludes the current session, so add it back here or the
         # dir you're calling from reappears as a "no session yet" row.
         local nl_existing=$'\n'"$current_session"$'\n'"$existing"$'\n'
-        local dir key repo tag branch repo_disp
+        local dir key repo repo_disp i n repo_w padded tag_padded
+        local -a row_key row_kind row_repo row_tag row_branch
+        n=0
+        repo_w=0
         for dir in "${project_dirs_out[@]}"; do
             session_name_for "$dir"
-            if [[ "$nl_existing" != *$'\n'"$session_name"$'\n'* ]]; then
-                key="$dir"
-                [[ "$key" == "$HOME/"* ]] && key="~/${key#"$HOME"/}"
-                if [[ -f "$dir/.git" ]]; then
-                    worktree_branch "$dir"
-                    branch="${worktree_branch_out:-detached}"
-                    case "$dir" in
-                        */.claude/worktrees/*)
-                            repo="${dir%%/.claude/worktrees/*}"
-                            tag=" ${C_DIM}agent${C_RST}"
-                            ;;
-                        *)
-                            repo="$dir"
-                            tag=""
-                            ;;
-                    esac
-                    repo_disp="$repo"
-                    [[ "$repo_disp" == "$HOME/"* ]] && repo_disp="~/${repo_disp#"$HOME"/}"
-                    printf '%s\t%s%s  ⎇ %s%s%s\n' "$key" "$C_CYN" "$repo_disp" "$branch" "$C_RST" "$tag"
-                else
-                    printf '%s\t%s%s%s\n' "$key" "$C_DIM" "$key" "$C_RST"
-                fi
+            [[ "$nl_existing" != *$'\n'"$session_name"$'\n'* ]] || continue
+            key="$dir"
+            [[ "$key" == "$HOME/"* ]] && key="~/${key#"$HOME"/}"
+            row_key[n]="$key"
+            if [[ -f "$dir/.git" ]]; then
+                worktree_branch "$dir"
+                row_kind[n]=wt
+                row_branch[n]="${worktree_branch_out:-detached}"
+                case "$dir" in
+                    */.claude/worktrees/*)
+                        repo="${dir%%/.claude/worktrees/*}"
+                        row_tag[n]=agent
+                        ;;
+                    *)
+                        # worktrunk sibling (or any other linked worktree):
+                        # its repo comes from the gitdir pointer; fall back
+                        # to its own path if that wasn't recoverable.
+                        repo="${worktree_repo_out:-$dir}"
+                        row_tag[n]=wt
+                        ;;
+                esac
+                repo_disp="$repo"
+                [[ "$repo_disp" == "$HOME/"* ]] && repo_disp="~/${repo_disp#"$HOME"/}"
+                row_repo[n]="$repo_disp"
+                (( ${#repo_disp} > repo_w )) && repo_w=${#repo_disp}
+            else
+                row_kind[n]=dir
+                # plain dir rows take part in the measurement too, so a long
+                # repo name never runs through the tag column of the
+                # worktree rows beneath it — the picker reads as one grid.
+                (( ${#key} > repo_w )) && repo_w=${#key}
             fi
+            n=$(( n + 1 ))
+        done
+        i=0
+        while (( i < n )); do
+            if [[ "${row_kind[i]}" == wt ]]; then
+                printf -v padded '%-*s' "$repo_w" "${row_repo[i]}"
+                printf -v tag_padded '%-5s' "${row_tag[i]}"
+                printf '%s\t%s%s  %s%s%s  ⎇ %s%s\n' "${row_key[i]}" \
+                    "$C_CYN" "$padded" "$C_DIM" "$tag_padded" "$C_CYN" \
+                    "${row_branch[i]}" "$C_RST"
+            else
+                printf '%s\t%s%s%s\n' "${row_key[i]}" "$C_DIM" "${row_key[i]}" "$C_RST"
+            fi
+            i=$(( i + 1 ))
         done
     }
 

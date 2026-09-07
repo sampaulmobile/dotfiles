@@ -44,7 +44,9 @@ mkdir -p "$work/dev/bareproj/feature-y"
 mkdir -p "$work/dotfiles/.git"
 mkdir -p "$work/dotfiles.bak/.git"                 # non-worktree sibling: excluded
 mkdir -p "$work/dotfiles.featx"                    # .git is a FILE here: included
+mkdir -p "$work/dotfiles/.git/worktrees/featx"
 echo "gitdir: $work/dotfiles/.git/worktrees/featx" > "$work/dotfiles.featx/.git"
+echo "ref: refs/heads/feat/x" > "$work/dotfiles/.git/worktrees/featx/HEAD"
 
 # ---- point the lib at the fake tree, not the real machine ----
 search_dirs=(
@@ -107,6 +109,35 @@ if [[ -z "$worktree_branch_out" ]]; then
     ok "worktree_branch: not a linked worktree (.git is a dir) -> empty"
 else
     bad "worktree_branch: not a linked worktree" "got [$worktree_branch_out]"
+fi
+
+echo "── worktree_branch: worktree_repo_out (main repo recovered from gitdir)"
+worktree_branch "$work/dev/proj1/.claude/worktrees/agent-abc123"
+if [[ "$worktree_repo_out" == "$work/dev/proj1" ]]; then
+    ok "worktree_repo_out: agent worktree -> its repo"
+else
+    bad "worktree_repo_out: agent worktree" "got [$worktree_repo_out]"
+fi
+worktree_branch "$work/dotfiles.featx"
+if [[ "$worktree_repo_out" == "$work/dotfiles" && "$worktree_branch_out" == "feat/x" ]]; then
+    ok "worktree_repo_out: worktrunk sibling -> its repo (branch feat/x)"
+else
+    bad "worktree_repo_out: worktrunk sibling" "got repo [$worktree_repo_out] branch [$worktree_branch_out]"
+fi
+worktree_branch "$work/dev/proj1"
+if [[ -z "$worktree_repo_out" ]]; then
+    ok "worktree_repo_out: not a linked worktree -> empty"
+else
+    bad "worktree_repo_out: not a linked worktree" "got [$worktree_repo_out]"
+fi
+# a gitdir pointer of an unexpected shape yields no repo but must not error
+mkdir -p "$work/dev/odd"
+echo "gitdir: $work/somewhere/else" > "$work/dev/odd/.git"
+worktree_branch "$work/dev/odd"
+if [[ -z "$worktree_repo_out" && -z "$worktree_branch_out" ]]; then
+    ok "worktree_repo_out: unrecognized gitdir shape -> empty, no error"
+else
+    bad "worktree_repo_out: unrecognized gitdir shape" "got repo [$worktree_repo_out] branch [$worktree_branch_out]"
 fi
 
 echo "── session_name_for: every kind"

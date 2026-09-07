@@ -349,3 +349,18 @@ Recorded here so the PR body carries them; both are deliberate.
    `session_name_for "$path"`) and anything else as a real branch (via
    `session_name_for_branch`); `HEAD` is a safe sentinel because
    `git check-ref-format --branch HEAD` refuses it as an actual branch name.
+
+## Amendments (round 4, after live testing at the hub)
+
+3. **Aligned worktree rows, and siblings shown under their repo.** The first
+   live Ctrl+F showed the `<~repo-path>  ⎇ <branch>  agent` rows ragged, and a
+   worktrunk sibling displayed under its own `proj.feat-x` dir name while the
+   agent rows displayed under the repo. Change: the display is now three
+   aligned fields, `<~repo-path>  <origin>  ⎇ <branch>` — repo path padded to
+   the widest path among all dir rows (plain ones included, so a long repo
+   name never runs through the tag column), a fixed-width dim origin tag
+   (`agent` / `wt`) that doubles as a filter word, then the branch. The
+   sibling's repo path comes from its `.git` file's gitdir pointer
+   (`<repo>/.git/worktrees/<name>`), which `worktree_branch` already reads, so
+   it now also sets `worktree_repo_out`; still zero forks (two passes over
+   the already-complete array: measure, then print). Key field unchanged.
