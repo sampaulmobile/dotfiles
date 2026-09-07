@@ -1,18 +1,16 @@
 #!/usr/bin/env bash
 
-# Interactive dashboard for agent tmux sessions — claude and codex alike.
-# Shows status, token usage, and model — one row per agent PANE (any
-# window of any session), so a second agent launched outside window 1
-# gets its own row (named "session:N") with its own transcript, tokens,
-# and (claude only) subagent tree.
-# Bound to Ctrl+G via tmux neww.
+# Interactive dashboard for agent tmux sessions, bound to Ctrl+G. Columns,
+# keys and what each one means: the repo's CLAUDE.md.
 #
-# Per-agent differences, all decided by the agent column get_claude_panes
+# One row per agent PANE, never per session — that is what gives an agent
+# outside window 1 its own row, transcript and subagent tree.
+#
+# Per-agent differences all hang off the agent column get_claude_panes
 # reports: claude rows read ~/.claude transcripts and size CONTEXT from the
-# per-model table below; codex rows read ~/.codex rollouts, take their
-# window from the transcript itself, show the rate-limit usage in COST
-# instead of a dollar figure, and have no subagent tree (codex subagents are
-# out of scope for now).
+# per-model table below; codex rows read ~/.codex rollouts, take their window
+# from the transcript itself, show rate-limit usage in COST, and have no
+# subagent tree.
 
 source ~/dotfiles/bin/tmux-claude-lib
 
@@ -69,15 +67,11 @@ DIM_RED=$'\033[2;31m'
 # ── helpers ─────────────────────────────────────────────
 
 # reload_sessions
-#   Re-collects the row list from tmux — one row per claude PANE, not per
-#   tmux session (a second claude outside window 1 gets its own row; its
-#   subagent tree was invisible when rows were per-session and pinned to
-#   window 1's transcript). Fills the parallel arrays sessions/panes/names.
-#   Display name: the session name for a window-1 claude (the hub layout's
-#   front door — matches the old per-session rows), "session:N" for a
-#   claude in window N elsewhere.
-#   Preserves selected cursor by pane id (not index), since the list is
-#   sorted by activity time and the order changes between refreshes.
+#   Re-collects the row list from tmux into the parallel arrays
+#   sessions/panes/names. Display name: the session name for a window-1
+#   agent, "session:N" for one in window N.
+#   The cursor is preserved by pane id, not index: rows are sorted by
+#   activity time, so the order changes between refreshes.
 reload_sessions() {
     local prev=""
     if (( ${#panes[@]} > 0 && selected < ${#panes[@]} )); then
@@ -124,14 +118,13 @@ session_row_count() {
 }
 
 # kill_selected_row
-#   Kills the row at the current selection: the whole tmux session when
-#   this is its only claude row (the old per-session behavior), just this
-#   claude's pane when the session has other claude rows — so killing a
-#   secondary claude never takes down the session's primary one. No silent
-#   failure paths: any refusal/error is reported via kill_error for the
-#   caller to display. Killing the dashboard's own host session is ALLOWED
-#   (the x handler warns first) — with detach-on-destroy off the client
-#   just moves to the last session; this window dies with its host.
+#   Kills the row at the current selection: the whole tmux session when this
+#   is its only agent row, otherwise just this pane — killing a secondary
+#   agent must never take down the session's primary one. No silent failure
+#   paths: every refusal is reported via kill_error for the caller to show.
+#   Killing the dashboard's own host session is ALLOWED (the x handler warns
+#   first); with detach-on-destroy off the client just moves to the last
+#   session, and this window dies with its host.
 kill_error=""
 kill_selected_row() {
     kill_error=""
@@ -170,8 +163,7 @@ get_row_stats() {
         return
     fi
 
-    # cache path is per row + transcript (hashed so a path can't escape into
-    # a filename); shared by both agents' readers
+    # Per row + transcript, hashed so a path cannot escape into a filename.
     local jsonl_hash
     jsonl_hash=$(echo "$jsonl" | md5 -q 2>/dev/null || echo "$jsonl" | md5sum 2>/dev/null | cut -d' ' -f1)
     local totals_cache="${CACHE_DIR}/${session}.${jsonl_hash}.totals"
@@ -179,19 +171,14 @@ get_row_stats() {
     local ctx mdl win=0 tout tall turns cost mt
 
     if [[ "$agent" == "codex" ]]; then
-        # rollout: cumulative counters, window from the transcript, COST is
-        # the rate-limit window's usage (plan billing has no per-token cost)
         IFS=$'\t' read -r ctx mdl win <<< "$(codex_get_context_and_model "$jsonl")"
         IFS=$'\t' read -r tout tall turns cost <<< "$(codex_get_totals "$jsonl" "$totals_cache")"
     else
-        # fast: context + model from tail of file
         IFS=$'\t' read -r ctx mdl <<< "$(get_context_and_model "$jsonl")"
-        # incremental: totals from cache + delta (keyed by jsonl path for
-        # /clear safety)
         IFS=$'\t' read -r tout tall turns cost <<< "$(get_totals_incremental "$jsonl" "$totals_cache")"
     fi
 
-    # transcript mtime — render shows it as an age on idle/done/permission
+    # render shows this mtime as an age on idle/done/permission rows
     mt=$(_agent_file_mtime "$jsonl")
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
         "${ctx:-0}" "${tout:-0}" "${tall:-0}" "${turns:-0}" "${cost:--}" "$mdl" "${mt:-0}" "${win:-0}"
@@ -221,11 +208,10 @@ get_row_agent_tree() {
         local agent_jsonl="${subdir}/agent-${aid}.jsonl"
         local ctx out mdl
         IFS=$'\t' read -r ctx out mdl < <(get_agent_stats "$agent_jsonl" "${CACHE_DIR}/agents/${session}.${aid}.stats")
-        # OUTPUT: cumulative output tokens (same meaning as session rows) —
-        # get_agent_stats' `out` is only the last turn's; the incremental
-        # totals parse is cheap (new bytes only, offset cached per agent).
-        # Turns come free from the same parse (usually 1; >1 = continued
-        # via SendMessage).
+        # get_agent_stats' `out` is only the LAST turn's, where session rows
+        # show cumulative output — so overwrite it from the incremental
+        # parse, which is cheap (new bytes only) and yields turns for free
+        # (usually 1; >1 means the agent was continued via SendMessage).
         local aout_total _all aturns _acost
         IFS=$'\t' read -r aout_total _all aturns _acost < <(get_totals_incremental "$agent_jsonl" "${CACHE_DIR}/agents/${session}.${aid}.totals" 1)
         out="$aout_total"
@@ -242,7 +228,6 @@ render() {
     local cols
     cols=$(tmux display-message -p '#{pane_width}' 2>/dev/null || tput cols 2>/dev/null || echo 80)
 
-    # find longest session name
     local max_name=7
     for n in "${names[@]}"; do
         (( ${#n} > max_name )) && max_name=${#n}
@@ -252,7 +237,7 @@ render() {
     # ctx_w fits the used/total fraction, e.g. "199.9k/200k"
     local ctx_w=12 out_w=9 all_w=9 mdl_w=12 pct_w=4 turns_w=5 cost_w=7
 
-    # row_width computes exact visible chars for a given configuration
+    # Exact VISIBLE chars for a layout:
     # row = marker(2) + name_w + status(15) + ctx(12) + 1+pct(4)
     #       [+ 2+mdl] [+ 1+turns] [+ 1+out] [+ 1+all] [+ 1+cost]
     row_width() {
@@ -266,8 +251,8 @@ render() {
         echo $w
     }
 
-    # try each layout: prefer full names; drop optional columns — in order
-    # TURNS, COST, MODEL, TOTAL, OUTPUT — before truncating names
+    # Full names are preferred over columns: drop optional columns first,
+    # and only truncate names when even the smallest layout does not fit.
     local show_output=1 show_total=1 show_model=1 show_turns=1 show_cost=1
     local name_w=$max_name _drop
     for _drop in none turns cost model total output; do
@@ -349,7 +334,6 @@ render() {
     local now
     now=$(date +%s)
 
-    # header
     local rhs="[⏎ · x · X · a · r · q]"
     (( cols >= 80 )) && rhs="[⏎ switch · x kill · X prune · a agents · r refresh · q quit]"
     local title="  Agent Sessions"
@@ -358,7 +342,6 @@ render() {
     out+="${BOLD}${title}${RST}$(printf '%*s' "$pad" '')${DIM}${rhs}${RST}"$'\n'
     out+="  $(printf '─%.0s' $(seq 1 $(( cols - 4 ))))"$'\n'
 
-    # column headers
     local hdr
     local hdr_name_w=$(( name_w + name_gap ))
     hdr=$(printf "%-${hdr_name_w}s %-13s " "SESSION" "STATUS")
@@ -370,7 +353,6 @@ render() {
     (( show_cost ))   && hdr+=$(printf " %${cost_w}s" "COST")
     out+="  ${DIM}${hdr}${RST}"$'\n'
 
-    # rows
     for i in "${!sessions[@]}"; do
         local working_agents="${agent_working_counts[$i]:-0}"
 
@@ -402,22 +384,20 @@ render() {
         out+="$(printf '%*s' "$(( name_w - ${#name} - ${#badge} + name_gap ))" '')"
         (( i == selected )) && out+="${RST}"
 
-        # an idle row with an attention done-flag (finished but unseen —
-        # the statusbar's ✅ and C-y's jump target) shows as "done" here so
-        # the dashboard reveals WHICH claude the bar's ✅ belongs to. Flags
-        # are per pane ("<session>@<pane>.done"), matching rows exactly.
+        # An idle row carrying an attention flag shows as "done", so the
+        # dashboard reveals WHICH agent the statusbar's ✅ belongs to. The
+        # flags are per pane, matching rows exactly.
         if [[ "$st" == "idle" && -e "$HOME/.cache/claude-attention/${sessions[$i]}@${panes[$i]#%}.done" ]]; then
             st="done"
         fi
 
-        # status — padded to exactly 15 visible columns. idle/done get an
-        # age suffix (time since the transcript's last write); permission
-        # too — claude stops writing when it prompts, so the mtime is a
-        # good proxy for how long it's been stuck (label shortened to
-        # "perm" so icon+label+age fit 15). working stays bare — its
-        # transcript writes constantly, so age would read ~0s.
-        # st_iconw: extra display column for Wide glyphs (✅ ⏳ are 2 cols
-        # wide but count as 1 char; ⚙ ● ✗ … are Narrow).
+        # Padded to exactly 15 VISIBLE columns. idle/done/permission get an
+        # age suffix from the transcript mtime — an agent stops writing at a
+        # prompt, so mtime is a fair proxy for how long it has been stuck
+        # ("perm" is the short label that keeps icon+label+age inside 15).
+        # working stays bare: its transcript writes constantly, so its age
+        # would always read ~0s. st_iconw is the extra display column Wide
+        # glyphs need (✅ ⏳ are 2 columns but 1 char; ⚙ ● ✗ … are Narrow).
         local sage=""
         if [[ "$st" == "idle" || "$st" == "done" || "$st" == "permission" ]] \
             && [[ "${mtimes[$i]:-0}" =~ ^[0-9]+$ ]] && (( ${mtimes[$i]:-0} > 0 )); then
@@ -504,11 +484,10 @@ render() {
             local aid adepth aparent atype adesc amtime astarted actx aout aturns amdl asnip
             while IFS=$'\t' read -r aid adepth aparent atype adesc amtime astarted actx aout aturns amdl asnip; do
                 [[ -z "$aid" ]] && continue
-                # Defense in depth for B3: ${#row_plain} below counts a tab
-                # as 1 char, but the terminal expands it to the next
-                # 8-column stop — neutralize any tab that reaches these
-                # fields (from any source) before it can break the width
-                # math that keeps rows from wrapping/misaligning.
+                # ${#row_plain} below counts a tab as 1 char, but the
+                # terminal expands it to the next 8-column stop, breaking
+                # the width math that keeps rows from wrapping. Neutralize
+                # any tab reaching these fields, whatever its source.
                 adesc="${adesc//$'\t'/ }"
                 atype="${atype//$'\t'/ }"
                 asnip="${asnip//$'\t'/ }"
@@ -535,13 +514,12 @@ render() {
                 local aindent
                 aindent=$(printf '%*s' $(( 2 * adepth )) '')
 
-                # ── SESSION column: tree marker + description, aligned to
-                # the same hdr_name_w field the session name column uses.
-                # Whole-string truncation (rather than truncating only the
-                # description) guarantees this field never exceeds
-                # hdr_name_w even in a pathological deep-nesting-vs-narrow-
-                # terminal case, which keeps every column after it aligned
-                # with the header no matter what.
+                # ── SESSION column: tree marker + description in the same
+                # hdr_name_w field the session name uses. Truncating the
+                # WHOLE string, not just the description, is what guarantees
+                # the field never exceeds hdr_name_w when deep nesting meets
+                # a narrow terminal — and so keeps every later column
+                # aligned with the header.
                 local sess_prefix="${aindent}└ "
                 local sess_full="${sess_prefix}${amarker} ${adesc}"
                 local sess_plain sess_colored
@@ -567,9 +545,8 @@ render() {
                 local sess_pad=$(( hdr_name_w - ${#sess_plain} ))
                 (( sess_pad < 0 )) && sess_pad=0
 
-                # ── STATUS column: working/idle styled like session status,
-                # age appended — fixed 15-visible-col field, same as session
-                # rows.
+                # ── STATUS column: same fixed 15-visible-column field as
+                # session rows.
                 local st_label st_color
                 if (( aworking )); then
                     st_label="working ${aage_str}"
@@ -582,10 +559,9 @@ render() {
                 local st_pad=$(( 15 - ${#st_label} ))
                 (( st_pad < 0 )) && st_pad=0
 
-                # ── CONTEXT / OUTPUT / TOTAL / MODEL — same field widths
-                # and same show_output/show_total/show_model gating the
-                # session row already computed for this render, so agent
-                # rows drop columns at identical breakpoints.
+                # ── CONTEXT / OUTPUT / TOTAL / MODEL reuse the widths and
+                # show_* gates the session row computed for this render, so
+                # agent rows drop columns at identical breakpoints.
                 local actx_fmt aout_fmt
                 actx_fmt=$(format_tokens "${actx:-0}")
                 aout_fmt=$(format_tokens "${aout:-0}")
@@ -594,11 +570,10 @@ render() {
                 row+="  ${sess_colored}$(printf '%*s' "$sess_pad" '')"
                 row+="${st_color}${st_label}${RST}$(printf '%*s' "$st_pad" '')"
                 if (( show_model )); then
-                    # MODEL cell for agents = "agentType·model": the row (its
-                    # subagent_type) plus the actual model it ran on, so a
-                    # per-seat model override (e.g. high implementers on opus,
-                    # high reviewers on fable) is visible instead of every
-                    # "high" row looking identical. Model omitted when unknown.
+                    # "agentType·model": the subagent_type plus the model it
+                    # actually ran on, so a per-seat model override is
+                    # visible instead of every "high" row looking alike.
+                    # The model half is dropped when unknown.
                     local amdl_field="$atype"
                     [[ -n "$amdl" && "$amdl" != "unknown" ]] && amdl_field="${atype}·${amdl#claude-}"
                     if (( ${#amdl_field} > mdl_w )); then
@@ -606,9 +581,8 @@ render() {
                     fi
                     row+="${DIM}$(printf "%-${mdl_w}s" "$amdl_field")${RST}  "
                 fi
-                # percent of window from the agent's real model (amdl) — the
-                # MODEL column shows the agentType, but the transcript's
-                # model id is what sizes the window
+                # The window is sized from the transcript's model id, not
+                # from the agentType the MODEL column shows.
                 local awin apct=-1 apct_fmt="-" apct_color=""
                 awin=$(context_window_for "$amdl")
                 if (( awin > 0 )) && [[ "${actx:-0}" =~ ^[0-9]+$ ]]; then
@@ -628,9 +602,9 @@ render() {
                 (( show_cost ))   && row+="$(printf " %${cost_w}s" "-")"
                 out+="${row}"$'\n'
 
-                # ── activity snippet — own dim full-width line beneath the
-                # row, indented past the tree marker to the description's
-                # start column; working agents only.
+                # ── activity snippet: its own dim line beneath the row,
+                # indented to the description's start column. Working
+                # agents only.
                 if (( aworking )) && [[ -n "$asnip" ]]; then
                     local snip_indent
                     snip_indent=$(printf '%*s' $(( 2 + ${#sess_prefix} + 2 )) '')
@@ -651,11 +625,9 @@ render() {
     done
 
     out+=$'\n'
-    # Responsive like the header rhs above: the round-1 "a agents" addition
-    # made this 85 chars, wider than an 80-col terminal (was 74 before),
-    # wrapping onto the next line and garbling the display — a real
-    # regression caught during round-2 smoke testing, not in the original
-    # findings list. Drop the added text at narrow widths instead.
+    # Responsive like the header rhs above: the full key list is 85 chars,
+    # which wraps and garbles the display on an 80-column terminal. Drop
+    # text at narrow widths instead of letting the line wrap.
     local footer="  j/k navigate · ⏎ switch · x kill · X prune · r refresh · R hard · q quit"
     (( cols >= 85 )) && footer="  j/k navigate · ⏎ switch · x kill · X prune · a agents · r refresh · R hard · q quit"
     out+="${DIM}${footer}${RST}"
@@ -696,7 +668,6 @@ load_data() {
     done
     render
 
-    # batch CWD→sessionId map once
     build_cwd_session_map
 
     # collect all data in parallel — each session writes to a temp file
@@ -729,7 +700,6 @@ load_data() {
     done
     wait
 
-    # read results and populate arrays
     local now
     now=$(date +%s)
     for i in "${!sessions[@]}"; do
@@ -788,7 +758,6 @@ agent_working_counts=()
 agent_total_counts=()
 agents_forced=0
 
-# initial load
 reload_sessions
 
 if (( session_count == 0 )); then
@@ -837,8 +806,7 @@ while true; do
             load_data
             ;;
         x)
-            # kill selected row (confirm if live): the whole session when
-            # it's the session's only claude row, just this pane otherwise
+            # kill selected row (confirm if live) — see kill_selected_row
             if (( session_count > 0 )); then
                 _do_kill=0
                 _kill_what="session"
@@ -881,9 +849,8 @@ while true; do
             fi
             ;;
         X)
-            # prune all gone rows: kill the session when EVERY claude row
-            # of that session is gone; kill just the gone pane when the
-            # session still has live claude rows (never take those down)
+            # Prune gone rows: kill the session only when EVERY row of it is
+            # gone, else just the gone panes — never take a live one down.
             _killed=0
             for i in "${!sessions[@]}"; do
                 [[ "${statuses[$i]}" == "gone" ]] || continue
