@@ -191,7 +191,10 @@ alias gcam='git commit -a -m'
 alias gci='git commit'
 git_checkout() {
     if [ "$#" -ne 1 ]; then
-        local branch=$(git branch -av | fzf -0 | awk '{print $1}' | sed -e "s/^remotes\/origin\///")
+        # `git branch -av` prefixes the current branch with `*` and branches
+        # checked out in another worktree with `+`; strip the marker column
+        # before taking the name, and drop the `remotes/origin/HEAD -> ...` row.
+        local branch=$(git branch -av | grep -v ' -> ' | fzf -0 | sed -E 's/^[*+]? +//' | awk '{print $1}' | sed -e "s/^remotes\/origin\///")
         if [[ "$branch" == "" ]]; then
             return 1
         fi
