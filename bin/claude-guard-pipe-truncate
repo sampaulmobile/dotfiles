@@ -16,30 +16,65 @@ cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // ""' 2>/dev/null || t
 cwd="$(printf '%s' "$input" | jq -r '.cwd // ""' 2>/dev/null || true)"
 [ -z "$cmd" ] && exit 0
 
-# Runners whose output is expensive to reproduce / must not be truncated away.
-EXPENSIVE='pytest|/pytest\.sh|(^|[^a-z])uv run|flutter[ _]|dart run|(^|[^a-z])cdk |run_cdk|npm (run|test|ci)|yarn (test|build)|pnpm |go test|cargo (test|build)|gradle|mvn |(^|[^a-z])make (test|build|lint)|redis-cli[^|]*scan|(^|[^a-z])k6 |terraform (plan|apply)|docker build|deploy'
-# A pipe into head/tail (with optional flags/spaces).
+# Expensive/long-running commands, matched only at a COMMAND position (start
+# of a pipeline segment, after an optional prefix — see ADJ_TRUNC). Keep the
+# sub-command qualifiers: `uv run`/`docker build` do work, `uv pip list`/
+# `docker ps` don't, and the trailing boundary in ADJ_TRUNC keeps `go` from
+# matching `gofmt`/`golangci-lint` and `uv` from matching `uvicorn`.
+# Script-style entries (pytest.sh, deploy_prod.sh, run_cdk*) allow a suffix.
+EXPENSIVE_CMDS='pytest[A-Za-z0-9_.-]*|uv run|flutter|dart run|cdk|run_cdk[A-Za-z0-9_.-]*|npm (run|test|ci|install)|yarn (test|build)|pnpm (run|test|build)|go (test|build|run|vet)|cargo (test|build|run|clippy)|gradlew?|mvn|make (test|build|lint)|redis-cli[^|;&]*[[:space:]]scan|k6|terraform (plan|apply)|docker build|docker compose (up|build)|deploy[A-Za-z0-9_.-]*'
+# Things that may sit between the segment start and the command proper:
+# VAR=val assignments, sudo/time/env/nohup/nice/command/exec, and the shell
+# keywords that open a compound command (`if pytest | head; then`).
+CMD_PREFIX='(([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*|sudo|time|env|nohup|nice|command|exec|if|then|else|do|while|until)[[:space:]]+)*'
+# Rule A as ONE regex, so both halves must be on the SAME logical line (kills
+# the false positives where an "expensive" word appears in a path/arg or a
+# quoted body far from an unrelated head/tail): an expensive command at a
+# pipeline segment start, piped DIRECTLY into head/tail within that same
+# pipeline (no ;/&&/|| between). Optional path prefix (./bin/, /usr/…) allowed.
+# The gap `[^|;&]*` relies on check_text having blanked fd redirections
+# (`2>&1`, `&>`) first — otherwise their `&` would break the run and the most
+# common shape, `<cmd> 2>&1 | tail`, would slip through.
+ADJ_TRUNC='(^|[|;&(`])[[:space:]]*'"$CMD_PREFIX"'([A-Za-z0-9_./~-]*/)?('"$EXPENSIVE_CMDS"')([[:space:]][^|;&]*)?\|[[:space:]]*(head|tail)([[:space:]]|$)'
+# A pipe into head/tail (with optional flags/spaces) — used by rule B.
 TRUNC='\|[[:space:]]*(head|tail)([[:space:]]|$)'
-# pipefail turned on anywhere.
-PIPEFAIL='set[[:space:]]+-[a-zA-Z]*o?[a-zA-Z]*[[:space:]]*pipefail|set[[:space:]]+-o[[:space:]]+pipefail|pipefail'
+# pipefail actually turned on: `set -o pipefail`, `set -euo pipefail`,
+# `set -e -o pipefail`. Deliberately NOT the bare word — a comment or an echo
+# that merely mentions pipefail must not trip rule B.
+PIPEFAIL='set[[:space:]]+(-[a-zA-Z]*[[:space:]]+)*-[a-zA-Z]*o[[:space:]]+pipefail'
 
 reason=""
 
 check_text() {  # $1 = text, $2 = where (for message)
   local text="$1" where="$2"
-  # tee or a redirect-capture means full output is preserved -> not the footgun.
+  # Join shell line-continuations so a pipeline split across lines is ONE logical
+  # line: a line ending in "\" (backslash continuation) or "|" (pipe continues)
+  # is glued to the next. Genuinely separate commands on separate lines stay
+  # separate — that's what keeps unrelated cross-line matches from tripping it.
+  # Then blank fd redirections (2>&1, >&2, &>f) so `&` only ever means a
+  # command separator to the regexes below.
+  local norm
+  norm="$(printf '%s' "$text" | awk '
+    { if (cont) buf = buf " " $0; else buf = $0
+      t = buf; sub(/[[:space:]]+$/,"",t)
+      if (t ~ /\\$/) { sub(/\\[[:space:]]*$/,"",buf); cont=1; next }
+      if (t ~ /\|$/) { cont=1; next }
+      print buf; cont=0; buf="" }
+    END { if (buf != "") print buf }' \
+    | sed -E 's/[0-9]*[<>]&[0-9-]+/ /g; s/&>>?/ /g')"
+  # tee (or a redirect-capture) means full output is preserved -> not the footgun.
   local has_tee=0
-  printf '%s' "$text" | grep -Eq '\|[[:space:]]*tee([[:space:]]|$)' && has_tee=1
-  # A: expensive | head/tail without a tee in the pipeline.
+  printf '%s' "$norm" | grep -Eq '\|[[:space:]]*tee([[:space:]]|$)' && has_tee=1
+  # A: an expensive command piped DIRECTLY into head/tail within one pipeline,
+  #    with no tee capturing the full output.
   if [ "$has_tee" -eq 0 ] \
-     && printf '%s' "$text" | grep -Eiq "$EXPENSIVE" \
-     && printf '%s' "$text" | grep -Eiq "$TRUNC"; then
+     && printf '%s' "$norm" | grep -Eiq "$ADJ_TRUNC"; then
     reason="Blocked: an expensive/long-running command is piped straight into head/tail${where}, which throws away the rest of its output. Capture full output to a file, then slice the file: \`<cmd> > /tmp/out.log 2>&1; tail -60 /tmp/out.log\` (or pipe through \`tee /tmp/out.log | tail\`)."
     return 0
   fi
   # B: pipefail + | head/tail  -> SIGPIPE aborts the pipeline (with set -e, the script).
-  if printf '%s' "$text" | grep -Eiq "$PIPEFAIL" \
-     && printf '%s' "$text" | grep -Eiq "$TRUNC"; then
+  if printf '%s' "$norm" | grep -Eiq "$PIPEFAIL" \
+     && printf '%s' "$norm" | grep -Eiq "$TRUNC"; then
     reason="Blocked: \`pipefail\` is combined with a pipe into head/tail${where}. When head/tail closes the pipe early the upstream stage gets SIGPIPE, pipefail promotes it to a pipeline failure, and \`set -e\` then aborts the script mid-run (this is exactly what silently killed a recon script). Drop pipefail on that pipeline, or write full output to a file and slice the file afterwards."
     return 0
   fi

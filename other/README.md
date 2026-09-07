@@ -47,3 +47,11 @@ files claude uses (`codex/skills/pr -> ../../../dots/claude/skills/pr`).
 To start: `bin/seed_other.sh` copies every missing `<name>.example` to
 `<name>` (never overwrites, logs created vs existing), then edit. `setup.sh`
 and `bin/symlink_files.sh` both run it, so a rerun of either fills gaps.
+
+Because the copy happens once, a default added to an `.example` later never
+reaches an existing `<name>` on its own. For `claude/settings.json` the run
+ends with `bin/claude-settings-check`, which lists every hook, allowlist entry
+or key the example has that the live file lacks (values that legitimately
+differ per machine — model, theme — are not drift). It only reports; add what
+you want by hand or ask claude to. `bin/doctor` runs the same check
+(`bin/seed_other.sh --check`) without seeding anything.

@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# doctor — read-only health check for this dotfiles install. Reports drift
+# between what the repo says this machine should look like and what it does
+# look like, and changes NOTHING. setup.sh is the whole fresh-machine
+# bootstrap; this is the small thing to run after a `git pull`, or whenever
+# something feels off, to see what a rerun of the individual scripts would
+# fix. Every line names the script that fixes it.
+#
+#   bin/doctor        exit 0 when clean, 1 when anything is flagged
+#
+# Each section is another script's own --check (or dry-run) mode, so the
+# doctor never keeps a second copy of what "correct" means:
+#   machine-local config   bin/seed_other.sh --check
+#       - other/**/<name> missing where a <name>.example exists
+#       - settings.json missing entries its example has since gained
+#         (bin/claude-settings-check)
+#   symlinks               bin/symlink_files.sh --check
+#       - links missing, pointing elsewhere, or a real file in the way
+#       - tracked skills/rules/agents not layered into ~/.claude, ~/.agents
+#   brew                   brew bundle check --file=etc/Brewfile_mac
+#       - formulae/casks in the base Brewfile that aren't installed
+# Add a section by giving the owning script a --check mode and calling it
+# here.
+set -uo pipefail
+
+DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+failed=0
+
+section() { printf '\n== %s\n' "$1"; }
+
+section "machine-local config (other/)"
+"$DOTFILES/bin/seed_other.sh" --check || failed=1
+
+section "symlinks"
+"$DOTFILES/bin/symlink_files.sh" --check || failed=1
+
+section "brew (etc/Brewfile_mac)"
+if command -v brew >/dev/null 2>&1; then
+    # --verbose names the missing deps; plain output only says "can't satisfy".
+    # No auto-update: a health check must not spend a minute refreshing taps.
+    HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ENV_HINTS=1 \
+    brew bundle check --verbose --no-upgrade --file="$DOTFILES/etc/Brewfile_mac" \
+        || { echo "  fix: brew bundle --no-upgrade --file=etc/Brewfile_mac"; failed=1; }
+else
+    echo "  brew not on PATH — skipped"
+fi
+
+echo
+if (( failed )); then
+    echo "doctor: issues found (see above)"
+    exit 1
+fi
+echo "doctor: all clear"

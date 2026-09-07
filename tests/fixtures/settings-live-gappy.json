@@ -1,0 +1,42 @@
+{
+  "model": "opus[1m]",
+  "env": {
+    "DISABLE_AUTOUPDATER": "1"
+  },
+  "voice": {
+    "mode": "hold"
+  },
+  "effortLevel": "medium",
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/dotfiles/bin/tmux-claude-attention flag-done",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/dotfiles/bin/some-other-guard"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git push:*)"
+    ],
+    "defaultMode": "auto"
+  }
+}

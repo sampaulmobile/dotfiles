@@ -1,0 +1,55 @@
+{
+  "model": "opus[1m]",
+  "theme": "dark",
+  "env": {
+    "DISABLE_AUTOUPDATER": "1",
+    "EXTRA": "local-only"
+  },
+  "voice": {
+    "mode": "toggle",
+    "enabled": false
+  },
+  "effortLevel": "medium",
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/dotfiles/bin/tmux-claude-attention flag-done",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/dotfiles/bin/claude-guard-pipe-truncate",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "command": "~/dotfiles/bin/claude-statusline",
+    "type": "command",
+    "padding": 0
+  },
+  "permissions": {
+    "allow": [
+      "Bash(uv tree:*)",
+      "Bash(git push:*)",
+      "Bash(git status:*)"
+    ],
+    "deny": [
+      "Bash(tmux kill-server:*)"
+    ],
+    "defaultMode": "auto"
+  }
+}
