@@ -10,7 +10,8 @@ CLAUDE_PROJECTS_DIR="$HOME/.claude/projects"
 
 # Agent liveness thresholds (tunable). An agent transcript with mtime within
 # LIVE_AGENT_SECS renders as working (●); older renders as done/idle (◯)
-# with its age; older than STALE_AGENT_SECS is hidden entirely.
+# with its age; older than STALE_AGENT_SECS is hidden entirely. Rationale:
+# workplans/tmux-claude-dashboard-agent-trees-plan.md.
 LIVE_AGENT_SECS=120
 STALE_AGENT_SECS=1800
 

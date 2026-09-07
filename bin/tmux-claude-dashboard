@@ -1,10 +1,36 @@
 #!/usr/bin/env bash
 
-# Interactive dashboard for agent tmux sessions, bound to Ctrl+G. Columns,
-# keys and what each one means: the repo's CLAUDE.md.
+# Interactive dashboard for agent tmux sessions, bound to Ctrl+G.
 #
 # One row per agent PANE, never per session — that is what gives an agent
-# outside window 1 its own row, transcript and subagent tree.
+# outside window 1 its own row (named session:N, N = window index),
+# transcript and subagent tree.
+#
+# Columns: SESSION STATUS MODEL CONTEXT CTX% TURNS OUTPUT TOTAL COST, filling
+# the terminal width; SESSION absorbs the spare width, the rest pin right,
+# and columns drop before names truncate.
+#   CONTEXT  used/total of the model's window (162.7k/1M); bare number when
+#            the window is unknown.
+#   CTX%     the same as a percent; drives the coloring — yellow >=50%,
+#            red >=70%, bold red >=90%; absolute thresholds when unknown.
+#   TURNS    user prompts handled, not API requests.
+#   COST     $1.23 = claude's own cost-state snapshot (subagents included;
+#            live sessions rarely have one); ~$1.23 = price-sheet estimate
+#            over the main transcript only; - = neither.
+#   STATUS   idle/done/permission rows carry an age since the transcript's
+#            last write (⏳ perm 9m); a row whose cwd is gone shows ✗ gone.
+# Keys: j/k navigate · ⏎ switch to the row's exact pane · x kill row (the
+# session when it is that session's only agent row, else just the pane) ·
+# X prune gone rows · a toggle agent trees · r refresh · R hard refresh
+# (clears the token cache) · q quit.
+# Agent trees: a session row expands into its live subagents, indented by
+# spawn depth, parents first, on the same grid. STATUS is `working 12m`
+# (since spawn) or `idle 3m` (since last write); MODEL is agentType·model
+# (e.g. high·opus vs high·fable, so per-seat overrides are visible; the
+# ·model half is dropped when unknown). A working agent's latest narration,
+# or its last tool call as `→ Tool: arg`, prints as a dim quoted line beneath
+# it. A +N badge marks sessions with N agents working; those auto-expand,
+# `a` forces every tree open.
 #
 # Per-agent differences all hang off the agent column get_claude_panes
 # reports: claude rows read ~/.claude transcripts and size CONTEXT from the
