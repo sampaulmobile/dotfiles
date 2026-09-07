@@ -1,19 +1,14 @@
 #!/bin/bash
 ############################
-# symlink_files.sh
-# This script creates symlinks for ALL THE FILES
+# symlink_files.sh — create every symlink this repo owns.
 #
-#   symlink_files.sh          create every link that is missing or wrong (backs
-#                             up real files in the way). Links already pointing
-#                             at the right target are left alone and NOT
-#                             listed — the output is what changed, plus a
-#                             summary; a rerun with nothing to do prints only
-#                             the summary.
-#   symlink_files.sh --check  report only: every link this script would make
-#                             is compared with what's there — MISSING, WRONG
-#                             target, or a real file INPLACE — and nothing is
-#                             changed (no backup dir, no mkdir, no seeding;
-#                             seed_other.sh has its own --check). Exit 1 if
+#   symlink_files.sh          make each link that is missing or wrong, backing
+#                             up any real file in the way. Correct links are
+#                             left alone and NOT printed: the output is what
+#                             changed, plus a summary.
+#   symlink_files.sh --check  report only (MISSING / WRONG target / a real
+#                             file INPLACE) and write nothing at all — no
+#                             backup dir, no mkdir, no seeding. Exit 1 if
 #                             anything is off. This is what bin/doctor runs.
 ############################
 
@@ -49,13 +44,13 @@ OS="$(uname -s)"
 ensure_dir() { (( check )) || mkdir -p "$@"; }
 
 # Helper: make $2 a symlink to $1. A link already pointing at $1 is left
-# untouched and unlisted (a rerun is the common case, and listing 30
-# unchanged links buried the two that mattered). A link elsewhere is just
-# replaced (its target is safe) — moving it into a backup dir that already
-# held a same-named link is what used to nest stale links inside their own
-# targets. A real file/dir is backed up to $deldir first.
-# In --check mode: compare only. Correct is silent; anything else is one
-# report line and one issue.
+# untouched and unlisted — a rerun is the common case, and 30 unchanged
+# lines bury the two that matter. A link pointing elsewhere is REPLACED, not
+# backed up: its target is safe, and moving it into a backup dir that
+# already holds a same-named link nests stale links inside their own
+# targets. Only a real file/dir is backed up, to $deldir.
+# --check compares only: correct is silent, anything else is one report line
+# and one issue.
 link() {
     local got
     if [[ -L "$2" ]]; then
@@ -186,13 +181,9 @@ fi
 (( check )) || "$HOME/dotfiles/bin/seed_other.sh"
 
 # ===== claude code =====
-# settings.json is a file link (~/.claude itself holds machine state).
-# ~/.claude/{skills,rules,agents} are whole-directory links into other/claude/
-# (private, gitignored) — anything dropped there is private by default. The
-# tracked generic set in dots/claude/ is layered in as per-item RELATIVE links
-# inside those dirs, so both kinds show up under ~/.claude. Promote a private
-# item by moving it to dots/claude/<kind>/ and re-running this script; a
-# private entry with the same name as a tracked one is left alone (warned).
+# ~/.claude itself holds machine state, so settings.json is a FILE link while
+# skills/rules/agents are whole-directory links into the private
+# other/claude/. The two-layer arrangement is described in CLAUDE.md.
 ensure_dir ~/.claude "$other/claude/skills" "$other/claude/rules" "$other/claude/agents"
 [[ -f $other/claude/settings.json ]] && link $other/claude/settings.json ~/.claude/settings.json
 for kind in skills rules agents; do
@@ -201,14 +192,11 @@ for kind in skills rules agents; do
 done
 
 # ===== codex =====
-# Same two layers as claude, mapped onto codex's paths: ~/.codex holds machine
-# state, so config.toml and AGENTS.md are FILE links into other/codex/
-# (private, gitignored — codex writes its own [projects] trust entries into
-# config.toml) while the generic hooks.json is a file link into dots/codex/.
-# Skills: ~/.agents/skills is codex's user-level skill dir, linked to
-# other/codex/skills so anything dropped there is private by default; the
-# harness-neutral tracked skills named in dots/codex/shared-skills are layered
-# in as per-item relative links to the SAME files claude uses.
+# The same two layers on codex's paths. config.toml must stay private and
+# writable: codex writes its own [projects] trust entries into it.
+# ~/.agents/skills is codex's user-level skill dir, and the tracked skills
+# named in dots/codex/shared-skills are layered in as relative links to the
+# SAME files claude uses.
 ensure_dir ~/.codex ~/.agents "$other/codex/skills"
 [[ -f $other/codex/config.toml ]] && link "$other/codex/config.toml" ~/.codex/config.toml
 [[ -f $other/codex/AGENTS.md ]] && link "$other/codex/AGENTS.md" ~/.codex/AGENTS.md

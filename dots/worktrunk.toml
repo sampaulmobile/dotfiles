@@ -10,8 +10,13 @@
 # session names, so Ctrl+F / Ctrl+Space / Ctrl+G all work unmodified)
 
 post-switch = "wt-tmux-jump {{ worktree_path }}"
-post-merge = "wt-tmux-cleanup {{ worktree_path }} {{ repo }}"
-post-remove = "wt-tmux-cleanup {{ worktree_path }} {{ repo }}"
+# post-merge/post-remove run AFTER the worktree directory is gone (`wt hook
+# --help`: "the active worktree is gone, so the hook runs in the primary
+# worktree"), so wt-tmux-cleanup can no longer read <wt>/.git to recover an
+# agent worktree's branch. Pass the branch as a 3rd arg — cleanup uses it to
+# derive the session name directly instead of falling back to the basename.
+post-merge = "wt-tmux-cleanup {{ worktree_path }} {{ repo }} {{ branch }}"
+post-remove = "wt-tmux-cleanup {{ worktree_path }} {{ repo }} {{ branch }}"
 
 # Auto-copy gitignored ENV/secrets/config into every new worktree so it is
 # usable immediately (e.g. bin/ scripts that read .env* work at once). Runs

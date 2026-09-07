@@ -2,21 +2,23 @@
 #
 # wt-tmux-jump <worktree-path>
 #
-# worktrunk post-switch hook: land in a tmux session for the worktree
-# instead of cd'ing the invoking pane (the wt() zsh wrapper passes
-# --no-cd). Session naming matches tmux-sessionizer: directory basename
-# with dots translated to underscores (myproject.feat-x -> myproject_feat-x).
-# No-op outside tmux.
+# worktrunk post-switch hook: land in a tmux session for the worktree instead
+# of cd'ing the invoking pane (the wt() zsh wrapper passes --no-cd). Naming
+# goes through bin/project-dirs-lib's session_name_for, so a `wt switch -c`
+# sibling and an agent worktree for the same branch share one session, and
+# Ctrl+F finds it. No-op outside tmux. Unlike wt-tmux-cleanup, post-switch
+# runs with the worktree present, so reading its .git here is fine.
 
 set -euo pipefail
 
 path="${1:?usage: wt-tmux-jump <worktree-path>}"
 [[ -n "${TMUX:-}" ]] || exit 0
 
-name=$(basename "$path" | tr . _)
+source "$HOME/dotfiles/bin/project-dirs-lib"
+session_name_for "$path"
+name="$session_name"
 
 if ! tmux has-session -t="$name" 2>/dev/null; then
-    # standard hub layout ([claude,] nvim, zsh) — shared with tmux-sessionizer
     source "$HOME/dotfiles/bin/tmux-claude-lib"
     new_hub_session "$name" "$path"
 fi

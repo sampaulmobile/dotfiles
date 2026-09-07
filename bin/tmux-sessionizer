@@ -1,48 +1,22 @@
 #!/usr/bin/env bash
 
 # Fuzzy find a project directory and create/switch to a tmux session for it.
-# Based on ThePrimeagen's tmux-sessionizer.
+# Based on ThePrimeagen's tmux-sessionizer. What the rows, colors and keys
+# mean is in the repo's CLAUDE.md; which directories are candidates and how
+# sessions are named is in bin/project-dirs-lib.
 #
-# Fast path: NOTHING is scanned at keypress time. Row colors come from
-# ~/.cache/claude-attention/status.tsv — published every ~5s by
-# tmux-claude-statusbar's already-batched pane scan — plus the attention
-# layer's .done flag files (see bin/tmux-claude-attention). Entries stream
-# into fzf as they're produced, so the picker draws immediately.
-#
-# Row colors (--ansi):
-#   red       session waiting on a permission/plan prompt
-#   green     session finished but unseen (.done flag)
-#   blue      session actively working
-#   dim blue  session with an idle claude in it
-#   dim       project dir with no session yet (cyan tint = linked worktree)
-#
-# ctrl-/ inside fzf toggles a lazy preview: a live snapshot of the
-# highlighted session's pane, or git branch/log/dirty-files for a dir.
-#
-# Agent choice (see the agent helpers in bin/tmux-claude-lib): Enter builds a
-# new session with the default agent; ctrl-x or Option+Enter (fzf's
-# alt-enter) builds it with the OTHER one — claude vs codex. Both are
-# fzf-scoped keys like ctrl-/ above, not tmux bindings. On a row that already
-# HAS a session all three just switch to it (the session keeps the agent it
-# was built with).
-#
-# Worktree support: if a project directory contains a .bare/ subdir (the
-# legacy bare+worktree layout — see archive/gwclone), its worktree subdirs
-# are enumerated as separate entries. Session names become "<project>_<branch>"
-# so two projects with the same branch name don't collide. (worktrunk-style
-# sibling worktrees like ~/dev/proj.feat-x are plain depth-1 entries.)
+# Invariant: nothing is scanned at keypress time. Row status comes only from
+# caches — ~/.cache/claude-attention/status.tsv, published every ~5s by
+# bin/tmux-claude-statusbar and ignored when stale, plus the attention layer's
+# .done flags — and rows stream into fzf as they are produced, so the picker
+# draws immediately. Anything added here that forks per project dir breaks it.
 
-# Split fzf's --expect output into the globals `fzf_key` (the accepting key,
-# empty for a plain Enter) and `selected` (the chosen row). fzf prints the key
-# on line 1 and the selection on line 2, so real output ALWAYS contains a
-# newline; `$(...)` then strips the trailing one.
-#
-# No newline at all means nothing was accepted, in two shapes: esc/ctrl-c
-# (empty output, fzf exit 130) and — the trap — an accept on a query that
-# matched NO row, where fzf prints just the key line ("ctrl-x\n") and exits 1.
-# Returning 1 for both keeps a bare key name from being taken for a project
-# named `ctrl-x`, and makes plain Enter on an empty match list a no-op, as it
-# was before --expect.
+# Splits fzf's --expect output into the globals `fzf_key` (the accepting key,
+# empty for a plain Enter) and `selected`. Returns 1 when nothing was
+# accepted, which has two shapes: esc/ctrl-c (empty output, fzf exit 130) and
+# — the trap — an accept on a query that matched NO row, where fzf prints just
+# the key line ("ctrl-x\n") and exits 1. Both must return 1, or a bare key
+# name gets taken for a project named `ctrl-x`.
 parse_fzf_expect() {
     local out="$1"
     fzf_key=""
@@ -53,8 +27,7 @@ parse_fzf_expect() {
 }
 
 # Sourced (tests/test-fzf-expect.sh) rather than executed: hand back the
-# helpers above and run none of the picker below. Executed normally,
-# BASH_SOURCE[0] is $0 and this is a no-op.
+# helpers above and run none of the picker below.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 0
 fi
@@ -65,8 +38,8 @@ SHOW_STATUS_INDICATORS=true
 
 ATTN_DIR="$HOME/.cache/claude-attention"
 
-# Row colors (plain ANSI so the terminal theme maps them; fzf --ansi strips
-# them from the output line, so selection parsing stays plain-text).
+# Plain ANSI so the terminal theme maps the colors, and so fzf --ansi strips
+# them back out of the accepted line — selection parsing stays plain text.
 C_RED=$'\033[31m'
 C_GRN=$'\033[32m'
 C_BLU=$'\033[34m'
@@ -75,46 +48,14 @@ C_DIM=$'\033[2m'
 C_CYN=$'\033[2;36m'
 C_RST=$'\033[0m'
 
-# ---- Project directories ----
-# Add entries as "path:depth"
-#   depth 0 = the directory itself is a project
-#   depth 1 = search one level deep for projects inside it
-search_dirs=(
-    "$HOME/dev:1"
-    "$HOME/research:1"
-    "$HOME/dotfiles:0"
-)
-
-# Machine-local override (untracked): may redefine search_dirs entirely.
-# See other/tmux-sessionizer.local.example.
-[[ -f "$HOME/dotfiles/other/tmux-sessionizer.local" ]] && source "$HOME/dotfiles/other/tmux-sessionizer.local"
-# ------------------------------
-
-# Compute the tmux session name for a given project/worktree path.
-# - For a worktree (parent contains .bare/), uses "<project>_<branch>".
-# - Otherwise, uses basename of the path.
-# Dots are translated to underscores (tmux session names don't love dots).
-# Writes the result to the global `session_name` to avoid a subshell fork
-# per call (this runs once per candidate dir in the hot path).
-session_name_for() {
-    local path="$1"
-    local parent="${path%/*}"
-    local base="${path##*/}"
-    local name
-    if [[ -d "$parent/.bare" ]]; then
-        name="${parent##*/}_${base}"
-    else
-        name="$base"
-    fi
-    session_name="${name//./_}"
-}
+# search_dirs, project_dirs, worktree_branch and session_name_for.
+source "$HOME/dotfiles/bin/project-dirs-lib"
 
 # ---- Preview mode (invoked by fzf per highlighted row; lazy, read-only) ----
 if [[ "$1" == "--preview" ]]; then
     line="$2"
     [[ "$line" == "~/"* ]] && line="$HOME/${line#\~/}"
     if [[ "$line" == /* ]]; then
-        # dir row: git overview, plain listing for non-repos
         if git -C "$line" rev-parse --git-dir >/dev/null 2>&1; then
             git -C "$line" -c color.status=always status -sb 2>/dev/null
             echo
@@ -123,19 +64,15 @@ if [[ "$1" == "--preview" ]]; then
             ls -1 "$line" 2>/dev/null
         fi
     else
-        # session row: live snapshot of its active pane ("=name:" = exact
-        # session match, active window — bare "=name" is not a valid pane
-        # target and comes back empty)
+        # "=name:" is an exact session match on the active window; bare
+        # "=name" is not a valid pane target and comes back empty.
         tmux capture-pane -ep -t "=${line}:" 2>/dev/null
     fi
     exit 0
 fi
-# ----------------------------------------------------------------------------
 
-# Agent helpers + new_hub_session. Sourced past the --preview early exit
-# above, so the per-row preview invocations never pay for it; defining
-# functions costs no forks, and the picker needs agent_default for its
-# header line.
+# Agent helpers + new_hub_session. Deliberately sourced BELOW the --preview
+# exit, so the per-row preview invocations never pay for it.
 source "$HOME/dotfiles/bin/tmux-claude-lib"
 
 new_agent=""   # non-empty = the override key picked the other agent
@@ -143,9 +80,8 @@ new_agent=""   # non-empty = the override key picked the other agent
 if [[ $# -eq 1 ]]; then
     selected=$1
 else
-    # One tmux round trip: current session name, then every session stamped
-    # with its MRU key (last_attached, falling back to created for sessions
-    # never attached — headless-spawned hubs would otherwise sort as blank).
+    # One tmux round trip. The MRU key falls back to session_created for
+    # sessions never attached, or a headless-spawned hub sorts as blank.
     tmux_out=$(tmux display-message -p '#S' \; \
         list-sessions -F '#{?session_last_attached,#{session_last_attached},#{session_created}} #{session_name}' 2>/dev/null)
     current_session="${tmux_out%%$'\n'*}"
@@ -153,9 +89,8 @@ else
         sort -rn |
         awk -v skip="$current_session" '$2 != skip {print $2}')
 
-    # Status lists for row colors — read from caches only, never scanned
-    # here. status.tsv is ignored when stale (statusbar not ticking); the
-    # .done flags are event-driven (Stop hook) so they're always current.
+    # status.tsv is ignored when stale (statusbar not ticking); the .done
+    # flags are event-driven (Stop hook), so they need no freshness test.
     perm_list=$'\n'
     work_list=$'\n'
     done_list=$'\n'
@@ -171,8 +106,8 @@ else
                     case "$_status" in
                         permission)   perm_list+="${_name}"$'\n' ;;
                         working)      work_list+="${_name}"$'\n' ;;
-                        # unknown = claude pane whose content didn't classify;
-                        # still "has a claude in it" for the tint's purposes
+                        # unknown = an agent pane that didn't classify; still
+                        # "has an agent in it" as far as the tint cares
                         idle|unknown) idle_list+="${_name}"$'\n' ;;
                     esac
                 done < "$status_cache"
@@ -182,106 +117,122 @@ else
         for _f in "$ATTN_DIR"/*.done; do
             _name="${_f##*/}"
             _name="${_name%.done}"
-            # flags are per pane, "<session>@<pane>.done" — rows are per
-            # session, so strip the pane suffix (legacy pane-less flags
-            # pass through unchanged)
+            # flags are per pane, "<session>@<pane>.done"; rows are per
+            # session, so strip the pane suffix
             done_list+="${_name%@*}"$'\n'
         done
         shopt -u nullglob
     fi
 
-    # Everything below streams straight into fzf so it draws immediately.
+    # Rows are two tab-separated fields, "<key>\t<display>": fzf shows and
+    # matches only the display field (--with-nth 2) but returns the whole
+    # line, and the key — a session name or a dir's ~-shortened path — is
+    # what everything past fzf consumes. Keep colors out of the key field so
+    # slicing it back out needs no ANSI stripping.
     emit_rows() {
-        # Existing sessions first (MRU order), colored by status.
+        # Existing sessions first, in MRU order.
         local sess
         while IFS= read -r sess; do
             [[ -z "$sess" ]] && continue
             if [[ "$perm_list" == *$'\n'"$sess"$'\n'* ]]; then
-                printf '%s%s%s\n' "$C_RED" "$sess" "$C_RST"
+                printf '%s\t%s%s%s\n' "$sess" "$C_RED" "$sess" "$C_RST"
             elif [[ "$done_list" == *$'\n'"$sess"$'\n'* ]]; then
-                printf '%s%s%s\n' "$C_GRN" "$sess" "$C_RST"
+                printf '%s\t%s%s%s\n' "$sess" "$C_GRN" "$sess" "$C_RST"
             elif [[ "$work_list" == *$'\n'"$sess"$'\n'* ]]; then
-                printf '%s%s%s\n' "$C_BLU" "$sess" "$C_RST"
+                printf '%s\t%s%s%s\n' "$sess" "$C_BLU" "$sess" "$C_RST"
             elif [[ "$idle_list" == *$'\n'"$sess"$'\n'* ]]; then
-                printf '%s%s%s\n' "$C_IBL" "$sess" "$C_RST"
+                printf '%s\t%s%s%s\n' "$sess" "$C_IBL" "$sess" "$C_RST"
             else
-                printf '%s\n' "$sess"
+                printf '%s\t%s\n' "$sess" "$sess"
             fi
         done <<< "$existing"
 
-        # Then project dirs not yet opened as sessions.
-        # Shell globs instead of find — no fork, much faster for shallow depth.
-        shopt -s nullglob
-        local entry dir depth cand wt disp
-        local -a raw candidates
-        candidates=()
-        for entry in "${search_dirs[@]}"; do
-            dir="${entry%%:*}"
-            depth="${entry##*:}"
-            if [[ $depth -eq 0 ]]; then
-                raw=("$dir")
-            else
-                raw=("$dir"/*/)
-                raw=("${raw[@]%/}")
-            fi
-            # Expand worktree-layout projects (parent has .bare/) into individual worktrees.
-            for cand in "${raw[@]}"; do
-                if [[ -d "$cand/.bare" ]]; then
-                    for wt in "$cand"/*/; do
-                        wt="${wt%/}"
-                        [[ "${wt##*/}" == ".bare" ]] && continue
-                        candidates+=("$wt")
-                    done
-                else
-                    candidates+=("$cand")
-                fi
-            done
-        done
-        shopt -u nullglob
+        project_dirs
 
-        # Filter out dirs that already have a session (builtin pattern match
-        # against a delimited string — no fork per check), emit ~-shortened
-        # and dimmed; a linked worktree (.git is a file) gets a cyan tint.
+        # Then the project dirs with no session yet. A linked worktree (.git
+        # is a file) renders as "<~repo-path>  <tag>  ⎇ <branch>", where the
+        # repo path is padded to the widest path among ALL dir rows — plain
+        # ones included — so a long plain repo name never runs through the
+        # tag column of the worktree rows around it. Hence two passes: the
+        # first measures, the second prints. Both stay fork-free (pattern
+        # matches against a delimited string, printf -v, `read`).
         # $existing excludes the current session, so add it back here or the
         # dir you're calling from reappears as a "no session yet" row.
         local nl_existing=$'\n'"$current_session"$'\n'"$existing"$'\n'
-        for dir in "${candidates[@]}"; do
+        local dir key repo repo_disp i n repo_w padded tag_padded
+        local -a row_key row_kind row_repo row_tag row_branch
+        n=0
+        repo_w=0
+        for dir in "${project_dirs_out[@]}"; do
             session_name_for "$dir"
-            if [[ "$nl_existing" != *$'\n'"$session_name"$'\n'* ]]; then
-                disp="$dir"
-                [[ "$disp" == "$HOME/"* ]] && disp="~/${disp#"$HOME"/}"
-                if [[ -f "$dir/.git" ]]; then
-                    printf '%s%s%s\n' "$C_CYN" "$disp" "$C_RST"
-                else
-                    printf '%s%s%s\n' "$C_DIM" "$disp" "$C_RST"
-                fi
+            [[ "$nl_existing" != *$'\n'"$session_name"$'\n'* ]] || continue
+            key="$dir"
+            [[ "$key" == "$HOME/"* ]] && key="~/${key#"$HOME"/}"
+            row_key[n]="$key"
+            if [[ -f "$dir/.git" ]]; then
+                worktree_branch "$dir"
+                row_kind[n]=wt
+                row_branch[n]="${worktree_branch_out:-detached}"
+                case "$dir" in
+                    */.claude/worktrees/*)
+                        repo="${dir%%/.claude/worktrees/*}"
+                        row_tag[n]=agent
+                        ;;
+                    *)
+                        # A worktrunk sibling shows its REPO's path (from the
+                        # gitdir pointer), not its own proj.feat-x dir name,
+                        # so every worktree row reads the same way.
+                        repo="${worktree_repo_out:-$dir}"
+                        row_tag[n]=wt
+                        ;;
+                esac
+                repo_disp="$repo"
+                [[ "$repo_disp" == "$HOME/"* ]] && repo_disp="~/${repo_disp#"$HOME"/}"
+                row_repo[n]="$repo_disp"
+                (( ${#repo_disp} > repo_w )) && repo_w=${#repo_disp}
+            else
+                row_kind[n]=dir
+                (( ${#key} > repo_w )) && repo_w=${#key}
             fi
+            n=$(( n + 1 ))
+        done
+        i=0
+        while (( i < n )); do
+            if [[ "${row_kind[i]}" == wt ]]; then
+                printf -v padded '%-*s' "$repo_w" "${row_repo[i]}"
+                printf -v tag_padded '%-5s' "${row_tag[i]}"
+                printf '%s\t%s%s  %s%s%s  ⎇ %s%s\n' "${row_key[i]}" \
+                    "$C_CYN" "$padded" "$C_DIM" "$tag_padded" "$C_CYN" \
+                    "${row_branch[i]}" "$C_RST"
+            else
+                printf '%s\t%s%s%s\n' "${row_key[i]}" "$C_DIM" "${row_key[i]}" "$C_RST"
+            fi
+            i=$(( i + 1 ))
         done
     }
 
-    # --tiebreak=index keeps MRU order among equal matches; --ansi renders
-    # the row colors and strips them from the selected line's output.
-    # --expect makes fzf print the accepting key on its FIRST output line
-    # (empty for a plain Enter), then the selection — that's how the agent
-    # override arrives. fzf 0.74 knows alt-enter but neither shift-enter nor
+    # --tiebreak=index keeps MRU order among equal matches. --expect prints
+    # the accepting key on fzf's FIRST output line, which is how the agent
+    # override arrives; fzf 0.74 knows alt-enter but neither shift-enter nor
     # ctrl-enter, hence ctrl-x as the always-available twin.
     default_agent=$(agent_default)
     other_agent=$(agent_other "$default_agent")
     fzf_out=$(emit_rows | fzf --ansi --tiebreak=index \
+        --delimiter '\t' --with-nth 2 \
         --expect=ctrl-x,alt-enter \
         --header "⏎ new: ${default_agent} · ⌥⏎/^x new: ${other_agent}" \
-        --preview "$HOME/dotfiles/bin/tmux-sessionizer --preview {}" \
+        --preview "$HOME/dotfiles/bin/tmux-sessionizer --preview {1}" \
         --preview-window 'right,55%,hidden' \
         --bind 'ctrl-/:toggle-preview')
 
-    # Nothing accepted (see parse_fzf_expect): esc/ctrl-c, or an accept on a
-    # query that matched no row.
     parse_fzf_expect "$fzf_out" || exit 0
     case "$fzf_key" in
         ctrl-x|alt-enter) new_agent="$other_agent" ;;
     esac
 
-    # Re-expand the ~-shortened display path
+    # Take field 1 (the key) — a no-op when there is no tab.
+    selected="${selected%%$'\t'*}"
+
     [[ "$selected" == "~/"* ]] && selected="$HOME/${selected#\~/}"
 fi
 
@@ -289,7 +240,6 @@ if [[ -z $selected ]]; then
     exit 0
 fi
 
-# If the selection is an existing session name (not a path), use it directly
 if tmux has-session -t="$selected" 2>/dev/null; then
     selected_name="$selected"
 else
@@ -298,15 +248,14 @@ else
 fi
 
 if ! tmux has-session -t="$selected_name" 2>/dev/null; then
-    # standard hub layout (agent, nvim, zsh) — shared with wt-tmux-jump.
-    # Empty new_agent = the default agent (plain Enter, or the one-argument
-    # CLI form).
+    # Empty new_agent = the default agent (plain Enter, or the CLI form).
     new_hub_session "$selected_name" "$selected" "$new_agent"
 fi
 
 if [[ -n $TMUX ]]; then
-    # scope to the client viewing this session (run-shell/neww contexts have
-    # no implicit current client — unscoped switch-client picks arbitrarily)
+    # Scope to the client viewing this session: run-shell/neww contexts have
+    # no implicit current client, and unscoped switch-client picks one at
+    # random.
     current_session=$(tmux display-message -p '#S')
     this_client=$(tmux list-clients -t "=$current_session" -F '#{client_tty}' 2>/dev/null | head -1)
     if [[ -n $this_client ]]; then

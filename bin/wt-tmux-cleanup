@@ -1,20 +1,34 @@
 #!/usr/bin/env bash
 #
-# wt-tmux-cleanup <worktree-path> <repo>
+# wt-tmux-cleanup <worktree-path> <repo> [branch]
 #
-# worktrunk post-merge / post-remove hook: kill the removed worktree's
-# tmux session. If we're currently inside it, switch to the repo's hub
-# session first (creating it if needed) so the client isn't stranded.
-# No-op outside tmux for the switching; still kills the stray session.
+# worktrunk post-merge / post-remove hook: kill the removed worktree's tmux
+# session, first switching the client to the repo's hub session (creating it
+# if needed) when it is sitting in the session about to die. Outside tmux
+# only the switching is skipped; the stray session is still killed.
+#
+# These hooks run AFTER the worktree directory is gone (`wt hook --help`:
+# "the active worktree is gone, so the hook runs in the primary worktree"),
+# so nothing here may recover a name by reading <wt>/.git: an agent
+# worktree's branch would be unrecoverable and the <repo>_<branch> session
+# Ctrl+F created for it would leak. dots/worktrunk.toml therefore passes the
+# removed branch as a 3rd argument, and bin/project-dirs-lib's
+# session_name_for_removed owns what its values (including "HEAD") mean.
 
 set -euo pipefail
 
-path="${1:?usage: wt-tmux-cleanup <worktree-path> <repo>}"
-repo="${2:?usage: wt-tmux-cleanup <worktree-path> <repo>}"
+path="${1:?usage: wt-tmux-cleanup <worktree-path> <repo> [branch]}"
+repo="${2:?usage: wt-tmux-cleanup <worktree-path> <repo> [branch]}"
+branch="${3:-}"
 
-name=$(basename "$path" | tr . _)
-hub=$(echo "$repo" | tr . _)
+source "$HOME/dotfiles/bin/project-dirs-lib"
+
+session_name_for_removed "$repo" "$path" "$branch"
+name="$session_name"
+
 hub_path="$HOME/dev/$repo"
+session_name_for "$hub_path"
+hub="$session_name"
 
 if [[ -n "${TMUX:-}" ]]; then
     current=$(tmux display-message -p '#S' 2>/dev/null || true)

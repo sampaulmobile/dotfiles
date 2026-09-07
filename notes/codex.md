@@ -76,15 +76,12 @@ Verified against codex-cli 0.153.4.
 
 ## Choosing the agent
 
-- **Default**: `claude`. Put a single line `codex` in
-  `other/tmux-agent-default` (private, untracked) to flip it.
-- **Per session**: in the sessionizer (Ctrl+F), on a project that has no
-  session yet, `Enter` uses the default and `ctrl-x` (or Option+Enter)
-  uses the other one. The header line names both. On a project that already
-  has a session, every key just switches to it — a session keeps the agent
-  it was built with.
-- **Check**: `tmux show-options -t <session> @agent` (a plain session name;
-  the `=name` exact-match form comes back empty for options).
+Picking the default and the per-session override is in CLAUDE.md's Agents
+convention. Two things only true here:
+
+- **Check what a session got**: `tmux show-options -t <session> @agent` — a
+  plain session name, since the `=name` exact-match form comes back empty
+  for options.
 - Worktree sessions from `wt switch -c` always get the default agent.
 
 ## What differs from claude in the tooling
@@ -97,13 +94,9 @@ Verified against codex-cli 0.153.4.
   prompt you submit.
 - **`bin/claude-tokens`** (the offline analyzer) still only reads claude
   transcripts.
-- **Rules**: codex has no rules directory. `dots/claude/rules/*` are NOT
-  shared; `~/.codex/AGENTS.md` (i.e. `other/codex/AGENTS.md`) is a
-  hand-written file, seeded from the tracked example.
-- **Skills**: only harness-neutral ones are shared. `feature`, `hq` and
-  `address-review` depend on Claude Code's Agent tool, ListAgents and
-  SendMessage, so they are deliberately left out of
-  `dots/codex/shared-skills`.
+- **Rules and skills**: codex has no rules directory, and only
+  harness-neutral skills are shared — see CLAUDE.md's Agents convention for
+  which, and why.
 
 ## Gotchas found while wiring this up
 
