@@ -1,9 +1,22 @@
 #!/usr/bin/env bash
 
 # Fuzzy find a project directory and create/switch to a tmux session for it.
-# Based on ThePrimeagen's tmux-sessionizer. What the rows, colors and keys
-# mean is in the repo's CLAUDE.md; which directories are candidates and how
-# sessions are named is in bin/project-dirs-lib.
+# Based on ThePrimeagen's tmux-sessionizer. Which directories are candidates
+# and how sessions are named is in bin/project-dirs-lib.
+#
+# Rows: live sessions first, then project dirs with no session yet.
+#   red        session waiting on a permission prompt
+#   green      finished-but-unseen agent
+#   blue       working; dim blue = idle agent
+#   dim        dir with no session (~-shortened path)
+#   cyan       linked worktree, shown as "<~repo-path>  <origin>  ⎇ <branch>":
+#              origin `agent` = harness-made under .claude/worktrees/, `wt` =
+#              worktrunk sibling (the tag doubles as a filter word); a sibling
+#              shows its repo's path, not its own proj.feat-x dir name.
+# Keys: Enter = new session with the default agent (or switch, if the row
+#   already has one); ctrl-x / Option+Enter = the other agent (fzf --expect
+#   keys, named in the header line); ctrl-/ = lazy preview (pane snapshot
+#   for sessions, git status/log for dirs).
 #
 # Invariant: nothing is scanned at keypress time. Row status comes only from
 # caches — ~/.cache/claude-attention/status.tsv, published every ~5s by
