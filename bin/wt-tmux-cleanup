@@ -2,30 +2,18 @@
 #
 # wt-tmux-cleanup <worktree-path> <repo> [branch]
 #
-# worktrunk post-merge / post-remove hook: kill the removed worktree's
-# tmux session. If we're currently inside it, switch to the repo's hub
-# session first (creating it if needed) so the client isn't stranded.
-# No-op outside tmux for the switching; still kills the stray session.
+# worktrunk post-merge / post-remove hook: kill the removed worktree's tmux
+# session, first switching the client to the repo's hub session (creating it
+# if needed) when it is sitting in the session about to die. Outside tmux
+# only the switching is skipped; the stray session is still killed.
 #
-# post-remove/post-merge run AFTER the worktree directory is gone (`wt hook
-# --help`: "the active worktree is gone, so the hook runs in the primary
-# worktree"), so session_name_for "$path" can no longer read <wt>/.git to
-# recover an agent worktree's branch — it would fall back to the basename
-# (<repo>_agent-<id>), missing the <repo>_<branch> name Ctrl+F actually
-# created and leaking that session. dots/worktrunk.toml therefore passes the
-# removed worktree's branch as a 3rd hook argument — worktrunk ALWAYS
-# supplies this word, and for a DETACHED worktree it renders as the literal
-# string "HEAD" (empirical, wt v0.68.0; see .feature/NOTES.md), never empty.
-# bin/project-dirs-lib's session_name_for_removed treats an empty OR "HEAD"
-# branch as "no real branch" and falls back to session_name_for "$path"
-# (the basename rule — the same name Ctrl+F/wt-tmux-jump give a detached
-# worktree, and a worktrunk sibling removal needs no branch anyway); any
-# other value derives the name from repo+branch via session_name_for_branch.
-# "HEAD" is a safe sentinel: `git check-ref-format --branch HEAD` refuses it
-# as a real branch name. wt-tmux-jump is unaffected — post-switch runs with
-# the worktree present. The hub name also goes through session_name_for now
-# (fork-free; was a private `tr . _`) — hub sessions are always plain
-# basenames, same result.
+# These hooks run AFTER the worktree directory is gone (`wt hook --help`:
+# "the active worktree is gone, so the hook runs in the primary worktree"),
+# so nothing here may recover a name by reading <wt>/.git: an agent
+# worktree's branch would be unrecoverable and the <repo>_<branch> session
+# Ctrl+F created for it would leak. dots/worktrunk.toml therefore passes the
+# removed branch as a 3rd argument, and bin/project-dirs-lib's
+# session_name_for_removed owns what its values (including "HEAD") mean.
 
 set -euo pipefail
 

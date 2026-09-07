@@ -269,10 +269,9 @@ summarize_session() {
             $tot.in, $tot.out, $tot.crd, $tot.cwr,
             ($tot.cost * 10000 | round / 10000), $tot.src,
             (if ($inh | length) == 0 then "-" else ($inh | join(",")) end),
-            # cost-accumulator epoch: cost-state is a snapshot of a running
-            # in-process counter, and a resume may start a fresh counter
-            # (new startTime). merge_chains sums max-per-epoch, so two
-            # counters covering different spans never shadow each other.
+            # The cost-accumulator epoch, keyed by the startTime of the
+            # counter that wrote it. merge_chains explains what it is for.
+            # (No apostrophes here: this jq program is single-quoted.)
             (if $cs != null then (($cs.startTime // $sid) | tostring) else "-" end)
           ] | @tsv
     ' 2>/dev/null
@@ -501,12 +500,11 @@ cmd_session() {
              "   api time: \($cs.totalAPIDuration / 60000 * 10 | round / 10)m"
            else empty end)
     ' < "$f"
-    # Chain-aware actual cost: cost-state is a snapshot of an in-process
-    # running counter, and a resume can start a fresh counter (its own
-    # startTime). Actual cost = sum of the max snapshot per counter epoch
-    # across every chain member — a floor (segments that never wrote a
-    # snapshot contribute nothing). A single-file session is the 1-epoch
-    # case; actual_cost also feeds the agent table's unattributed row.
+    # Chain-aware actual cost, by merge_chains' epoch rule: the sum of the
+    # max snapshot per counter epoch across every chain member (a
+    # single-file session is the one-epoch case). It is a floor — segments
+    # that never wrote a snapshot contribute nothing — and it also feeds the
+    # agent table's unattributed row.
     local actual_cost="" actual_epochs="" cost_tsv
     cost_tsv=$({ cat "$f"
                  for anc in $ancestors; do

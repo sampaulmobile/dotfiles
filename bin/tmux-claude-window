@@ -7,17 +7,10 @@
 # the session was built (see new_hub_session in tmux-claude-lib); the window
 # is named after it, and typing the agent's name is what starts it.
 #
-# Toggle (no args, C-Space):
-#   - on the agent window          -> back to your last-used window
-#   - elsewhere in the session     -> to the agent window
-#   - no agent window yet          -> create it (shell + `<agent>`) at the
-#                                     current pane's path
-#
-# Extra (--extra, prefix+C):
-#   always a NEW window at the current pane's directory, named "<agent>+" —
-#   the trailing + is what keeps the toggle's by-name lookup from ever
-#   grabbing it. The attention layer finds agents by tty, so extra windows
-#   land in the statusbar/dashboard/C-y with no extra wiring.
+# --extra names its new window "<agent>+": the trailing + is what keeps the
+# toggle's by-name lookup from ever grabbing it. The attention layer finds
+# agents by tty, so extra windows still reach the statusbar, dashboard and
+# C-y with no wiring of their own.
 #
 # Both start the agent by typing into an initialized shell rather than
 # running it as the window command: other/zshrc.local env (model, TLS, ...)
