@@ -61,14 +61,33 @@ worktree_branch() {
     esac
 }
 
+# session_name_for_branch <repo-name> <branch>
+#   Compute the tmux session name straight from a repo name and a branch —
+#   no filesystem read, no <path> needed. Same naming rule as
+#   session_name_for's agent-worktree case (branch's "/" -> "-", matching
+#   worktrunk's sanitize, then "." -> "_"), kept in this one function so
+#   both callers agree. Writes the global `session_name`. Used directly by
+#   bin/wt-tmux-cleanup's post-remove/post-merge case: those hooks run AFTER
+#   the worktree directory is gone (see session_name_for's agent-worktree
+#   comment below), so there is no <path> left to read a branch out of —
+#   worktrunk passes the branch as a separate hook argument instead.
+session_name_for_branch() {
+    local repo_name="$1"
+    local branch="$2"
+    local name="${repo_name}_${branch//\//-}"
+    session_name="${name//./_}"
+}
+
 # session_name_for <path>
 #   Compute the tmux session name for a project/worktree path. Writes the
 #   global `session_name` (no subshell fork per call — this runs once per
 #   candidate dir on the sessionizer's hot path).
-#   - agent worktree (path under <repo>/.claude/worktrees/<x>): "<repo>_<branch>",
-#     branch's "/" -> "-" (matches worktrunk's sanitize, so an agent worktree
-#     and a `wt switch -c` sibling for the same branch land on the same
-#     session name); detached HEAD falls back to "<repo>_<basename>".
+#   - agent worktree (path under <repo>/.claude/worktrees/<x>): "<repo>_<branch>"
+#     via session_name_for_branch (one home for the naming rule); detached
+#     HEAD falls back to "<repo>_<basename>". NOTE: this filesystem-based
+#     branch lookup only works while the worktree directory still exists —
+#     bin/wt-tmux-cleanup's post-remove/post-merge case runs after it is
+#     gone and calls session_name_for_branch directly instead (see there).
 #   - legacy .bare/ worktree (parent contains .bare/): "<project>_<branch>",
 #     as today.
 #   - anything else (plain project dir, or a worktrunk sibling like
@@ -90,10 +109,10 @@ session_name_for() {
             repo_base="${repo##*/}"
             worktree_branch "$path"
             if [[ -n "$worktree_branch_out" ]]; then
-                name="${repo_base}_${worktree_branch_out//\//-}"
-            else
-                name="${repo_base}_${base}"
+                session_name_for_branch "$repo_base" "$worktree_branch_out"
+                return
             fi
+            name="${repo_base}_${base}"
             ;;
         *)
             if [[ -d "$parent/.bare" ]]; then

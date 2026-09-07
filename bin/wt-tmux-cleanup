@@ -1,26 +1,45 @@
 #!/usr/bin/env bash
 #
-# wt-tmux-cleanup <worktree-path> <repo>
+# wt-tmux-cleanup <worktree-path> <repo> [branch]
 #
 # worktrunk post-merge / post-remove hook: kill the removed worktree's
 # tmux session. If we're currently inside it, switch to the repo's hub
 # session first (creating it if needed) so the client isn't stranded.
 # No-op outside tmux for the switching; still kills the stray session.
-# Worktree session naming matches tmux-sessionizer (bin/project-dirs-lib's
-# session_name_for) — needed so `wt remove` on an agent worktree kills the
-# session Ctrl+F created for it too, not just a `wt switch -c` sibling's.
-# Hub lookup is unchanged: hub sessions are always plain basenames.
+#
+# post-remove/post-merge run AFTER the worktree directory is gone (`wt hook
+# --help`: "the active worktree is gone, so the hook runs in the primary
+# worktree"), so session_name_for "$path" can no longer read <wt>/.git to
+# recover an agent worktree's branch — it would fall back to the basename
+# (<repo>_agent-<id>), missing the <repo>_<branch> name Ctrl+F actually
+# created and leaking that session. dots/worktrunk.toml therefore passes the
+# removed worktree's branch as a 3rd hook argument; when present, this uses
+# bin/project-dirs-lib's session_name_for_branch to derive the name directly
+# from repo+branch (same naming rule, one home), falling back to
+# session_name_for "$path" only when no branch is given (a worktrunk sibling
+# removal, whose name is pure basename and needs no branch anyway).
+# wt-tmux-jump is unaffected — post-switch runs with the worktree present.
+# The hub name also goes through session_name_for now (fork-free; was a
+# private `tr . _`) — hub sessions are always plain basenames, same result.
 
 set -euo pipefail
 
-path="${1:?usage: wt-tmux-cleanup <worktree-path> <repo>}"
-repo="${2:?usage: wt-tmux-cleanup <worktree-path> <repo>}"
+path="${1:?usage: wt-tmux-cleanup <worktree-path> <repo> [branch]}"
+repo="${2:?usage: wt-tmux-cleanup <worktree-path> <repo> [branch]}"
+branch="${3:-}"
 
 source "$HOME/dotfiles/bin/project-dirs-lib"
-session_name_for "$path"
+
+if [[ -n "$branch" ]]; then
+    session_name_for_branch "$repo" "$branch"
+else
+    session_name_for "$path"
+fi
 name="$session_name"
-hub=$(echo "$repo" | tr . _)
+
 hub_path="$HOME/dev/$repo"
+session_name_for "$hub_path"
+hub="$session_name"
 
 if [[ -n "${TMUX:-}" ]]; then
     current=$(tmux display-message -p '#S' 2>/dev/null || true)

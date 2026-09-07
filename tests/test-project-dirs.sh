@@ -146,6 +146,45 @@ else
     bad "plain project dir" "got [$session_name]"
 fi
 
+echo "── session_name_for_branch: repo+branch, no filesystem read"
+
+session_name_for_branch "repo" "feature/x"
+if [[ "$session_name" == "repo_feature-x" ]]; then
+    ok "session_name_for_branch: feature/x -> repo_feature-x"
+else
+    bad "session_name_for_branch: feature/x" "got [$session_name]"
+fi
+
+session_name_for_branch "repo" "release/1.2"
+if [[ "$session_name" == "repo_release-1_2" ]]; then
+    ok "session_name_for_branch: release/1.2 -> repo_release-1_2 (dots in branch too)"
+else
+    bad "session_name_for_branch: release/1.2" "got [$session_name]"
+fi
+
+echo "── session_name_for on a REMOVED path: why wt-tmux-cleanup needs the branch arg"
+# worktrunk's post-remove/post-merge hooks run AFTER the worktree directory
+# is gone, so session_name_for can no longer read <wt>/.git for the branch
+# and falls back to the basename — a DIFFERENT (wrong) name than the one
+# Ctrl+F created for the same worktree while it was alive. This is exactly
+# the blocking bug the branch arg fixes: bin/wt-tmux-cleanup must use
+# session_name_for_branch (above), not session_name_for, once the directory
+# is gone.
+removed="$work/dev/proj1/.claude/worktrees/agent-removed"
+session_name_for "$removed"
+if [[ "$session_name" == "proj1_agent-removed" ]]; then
+    ok "session_name_for on a gone path falls back to <repo>_<basename>"
+else
+    bad "session_name_for on a gone path" "got [$session_name]"
+fi
+
+session_name_for_branch "proj1" "feature/x"
+if [[ "$session_name" == "proj1_feature-x" ]]; then
+    ok "session_name_for_branch on the same worktree gives the Ctrl+F name instead"
+else
+    bad "session_name_for_branch on the same worktree" "got [$session_name]"
+fi
+
 echo
 if (( fail )); then
     echo "FAILED: $fail failed, $pass passed"
