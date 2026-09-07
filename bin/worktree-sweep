@@ -254,6 +254,15 @@ fi
 
 init_liveness
 
+# L4: without lsof, is_live is unconditionally false — every worktree looks
+# not-live, silently disabling the one guard that stops a removal out from
+# under a live agent/editor. Reporting it (as the doctor does) is not enough
+# for a tool that deletes things: refuse --apply outright.
+if [[ "$APPLY" == true ]] && [[ "$LSOF_RAN" == false ]]; then
+    echo "worktree-sweep: --apply needs lsof to protect live worktrees; not found" >&2
+    exit 2
+fi
+
 # Cache exclude list (single source of truth: dots/worktrunk.toml).
 sweep_excludes=()
 while IFS= read -r _ex; do
