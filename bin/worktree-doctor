@@ -33,6 +33,14 @@
 #                                                          a merge this can't
 #                                                          see offline
 #
+# `locked` is shown as a flag and never affects the BUCKET a worktree lands
+# in. It DOES change the printed command: every harness-made agent worktree
+# stays locked after its agent exits, and `wt remove` (like `git worktree
+# remove`) refuses a locked worktree — so a locked MERGED/ABANDONED row's
+# command is prefixed with the unlock it actually needs:
+# `git -C <repo> worktree unlock <path> && wt -C <repo> remove ...`. Still
+# printed only, never executed.
+#
 # Liveness comes from `lsof -d cwd -Fpn` (a live process's cwd), never from
 # git's worktree lock file (whose reason names the *hub session's* pid,
 # which typically outlives the agent) or mtimes; lsof missing -> liveness is
@@ -95,9 +103,82 @@ classify_worktree() {
     echo "SHIPPED?"
 }
 
+# action_for <bucket> <repo> <path> <branch> <locked> — the recommended
+# command, printed verbatim, never executed. A detached worktree (empty
+# branch) must be addressed by PATH, not branch, for `wt remove` (verified
+# against wt v0.68.0's --help). `locked` never changes the bucket, only
+# whether the MERGED/ABANDONED command is prefixed with the `git worktree
+# unlock` it needs (see the header comment) — `wt remove`/`git worktree
+# remove` both refuse a locked worktree.
+action_for() {
+    local bucket="$1" repo="$2" path="$3" branch="$4" locked="${5:-false}"
+    local target unlock_prefix
+    target="${branch:-$path}"
+    unlock_prefix=""
+    if [[ "$locked" == true ]] && [[ "$bucket" == MERGED || "$bucket" == ABANDONED ]]; then
+        unlock_prefix="git -C $repo worktree unlock $path && "
+    fi
+    case "$bucket" in
+        LIVE)      echo "keep — in use" ;;
+        DIRTY)     echo "keep — inspect: git -C $path status" ;;
+        PRUNABLE)  echo "git -C $repo worktree prune" ;;
+        MERGED)    echo "${unlock_prefix}wt -C $repo remove $target  (deletes the merged branch too)" ;;
+        ABANDONED) echo "${unlock_prefix}wt -C $repo remove -D $target  (confirm first — deletes an unmerged branch)" ;;
+        IN-REVIEW) echo "keep — /address-review may need it" ;;
+        PARKED)    echo "keep, surface — ship it or remove it deliberately" ;;
+        *)         echo "keep — remote has it; likely needs a PR or a merge you can't see offline" ;;
+    esac
+}
+
+# parse_porcelain_blocks <repo>
+#   Reads "git worktree list --porcelain" blocks from stdin — blocks of
+#   "worktree <path>" / "HEAD <sha>" / "branch refs/heads/<name>" (or
+#   "detached") / optional "locked <reason>" / optional "prunable <reason>",
+#   separated by blank lines — and calls
+#   on_worktree_block <path> <branch> <locked> <prunable> <wt_head> once per
+#   block, skipping the one whose path is <repo> itself (the main worktree,
+#   always listed first by git) and flushing a trailing block that has no
+#   following blank line/next "worktree" line.
+#   `on_worktree_block` is defined by the caller, not here: the real report
+#   below defines one that does the per-row git/gh derivation and printing;
+#   tests/test-worktree-doctor.sh defines one that just records its
+#   arguments, so this parser can be exercised offline against a here-doc
+#   fixture without git, gh, or the real machine ever being touched.
+parse_porcelain_blocks() {
+    local repo="$1"
+    local path="" branch="" locked=false prunable=false wt_head=""
+    local have_block=false
+
+    _pb_flush() {
+        [[ "$have_block" == true ]] || return 0
+        have_block=false
+        [[ "$path" == "$repo" ]] && return 0
+        on_worktree_block "$path" "$branch" "$locked" "$prunable" "$wt_head"
+    }
+
+    while IFS= read -r line; do
+        case "$line" in
+            "worktree "*)
+                _pb_flush
+                path="${line#worktree }"
+                branch="" locked=false prunable=false wt_head=""
+                have_block=true
+                ;;
+            "HEAD "*)     wt_head="${line#HEAD }" ;;
+            "branch "*)   branch="${line#branch refs/heads/}" ;;
+            detached)     branch="" ;;
+            locked*)      locked=true ;;
+            prunable*)    prunable=true ;;
+            *) : ;;
+        esac
+    done
+    _pb_flush
+}
+
 # Sourced (tests/test-worktree-doctor.sh) rather than executed: hand back
-# usage/classify_worktree above and run none of the report below. Executed
-# normally, BASH_SOURCE[0] is $0 and this is a no-op.
+# usage/classify_worktree/action_for/parse_porcelain_blocks above and run
+# none of the report below. Executed normally, BASH_SOURCE[0] is $0 and this
+# is a no-op.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 0
 fi
@@ -201,29 +282,97 @@ count_bucket() {
     esac
 }
 
-# action_for <bucket> <repo> <path> <branch> — the recommended command,
-# printed verbatim, never executed. A detached worktree (empty branch) must
-# be addressed by PATH, not branch, for `wt remove` (verified against wt
-# v0.68.0's --help).
-action_for() {
-    local bucket="$1" repo="$2" path="$3" branch="$4" target
-    target="${branch:-$path}"
-    case "$bucket" in
-        LIVE)      echo "keep — in use" ;;
-        DIRTY)     echo "keep — inspect: git -C $path status" ;;
-        PRUNABLE)  echo "git -C $repo worktree prune" ;;
-        MERGED)    echo "wt -C $repo remove $target  (deletes the merged branch too)" ;;
-        ABANDONED) echo "wt -C $repo remove -D $target  (confirm first — deletes an unmerged branch)" ;;
-        IN-REVIEW) echo "keep — /address-review may need it" ;;
-        PARKED)    echo "keep, surface — ship it or remove it deliberately" ;;
-        *)         echo "keep — remote has it; likely needs a PR or a merge you can't see offline" ;;
-    esac
-}
-
 shorten() {
     local p="$1"
     [[ "$p" == "$HOME/"* ]] && p="~/${p#"$HOME"/}"
     printf '%s' "$p"
+}
+
+# on_worktree_block <path> <branch> <locked> <prunable> <wt_head>
+#   The per-row derivation + printing that parse_porcelain_blocks calls once
+#   per worktree block (main worktree already excluded). Relies on globals
+#   set by the surrounding per-repo loop below: $repo, $default_ref,
+#   $repo_out (accumulated report text for the current repo).
+on_worktree_block() {
+    local path="$1" branch="$2" locked="$3" prunable="$4" wt_head="$5"
+    local live dirty unpushed merged_local pr_state pr_disp age
+
+    if [[ "$prunable" == true ]]; then
+        live=false; dirty=false; unpushed=false; merged_local=false
+        pr_state="unknown"; pr_disp="pr:unknown"; age="-"
+    else
+        if is_live "$path"; then live=true; else live=false; fi
+
+        # --no-optional-locks: status alone must never write, not even the
+        # stat-cache refresh git opportunistically does on a plain
+        # `status --porcelain` — this tool changes nothing, literally.
+        if [[ -n "$(git --no-optional-locks -C "$path" status --porcelain 2>/dev/null)" ]]; then
+            dirty=true
+        else
+            dirty=false
+        fi
+
+        if [[ -n "$branch" ]]; then
+            if git -C "$repo" rev-parse --verify -q "refs/remotes/origin/$branch" >/dev/null 2>&1; then
+                local ahead
+                ahead=$(git -C "$repo" rev-list --count "origin/$branch..$wt_head" 2>/dev/null)
+                [[ -z "$ahead" ]] && ahead=0
+                if (( ahead > 0 )); then unpushed=true; else unpushed=false; fi
+            else
+                unpushed=true
+            fi
+            if [[ -n "$default_ref" ]] && git -C "$repo" merge-base --is-ancestor "$wt_head" "$default_ref" 2>/dev/null; then
+                merged_local=true
+            else
+                merged_local=false
+            fi
+        else
+            # Detached HEAD: no branch to push or diff against a default.
+            # Deliberately treated as "surface it" (PARKED) rather than
+            # silently reading as SHIPPED? — see NOTES.md.
+            unpushed=true
+            merged_local=false
+        fi
+
+        pr_state="unknown"
+        pr_disp="pr:unknown"
+        if [[ -n "$branch" ]] && [[ "$GH_OK" == true ]]; then
+            local pr_line gh_rc pr_num pr_url
+            pr_line=$(cd "$repo" 2>/dev/null && gh pr list --head "$branch" --state all \
+                --json number,state,url \
+                --jq '(.[0] // empty) | [(.number|tostring), .state, .url] | @tsv' 2>/dev/null)
+            gh_rc=$?
+            if [[ $gh_rc -eq 0 ]]; then
+                if [[ -z "$pr_line" ]]; then
+                    pr_state="none"
+                    pr_disp="no PR"
+                else
+                    IFS=$'\t' read -r pr_num pr_state pr_url <<< "$pr_line"
+                    pr_disp="PR #${pr_num} ${pr_state}"
+                fi
+            fi
+        fi
+
+        age=$(git -C "$path" log -1 --format=%cr 2>/dev/null)
+        [[ -z "$age" ]] && age="-"
+    fi
+
+    local bucket flags
+    bucket=$(classify_worktree "$live" "$dirty" "$prunable" "$pr_state" "$unpushed" "$merged_local")
+    count_bucket "$bucket"
+
+    flags=""
+    [[ "$locked" == true ]] && flags+="locked "
+    [[ "$dirty" == true ]] && flags+="dirty "
+    [[ "$unpushed" == true ]] && flags+="unpushed "
+    flags="${flags% }"
+    [[ -z "$flags" ]] && flags="-"
+
+    repo_out+=$(printf '  %-9s %-28s %-16s %-20s %-14s %s\n' \
+        "$bucket" "${branch:-(detached)}" "$pr_disp" "$flags" "$age" "$(shorten "$path")")
+    repo_out+=$'\n'
+    repo_out+=$(printf '      %s\n' "$(action_for "$bucket" "$repo" "$path" "$branch" "$locked")")
+    repo_out+=$'\n'
 }
 
 # Guarded on element count, not just "declared" — see the note above the
@@ -233,115 +382,10 @@ for repo in "${repos[@]}"; do
     default_ref=$(default_ref_for "$repo")
     repo_out=""
 
-    # git worktree list --porcelain: blocks of "worktree <path>" / "HEAD
-    # <sha>" / "branch refs/heads/<name>" (or "detached") / optional
-    # "locked <reason>" / optional "prunable <reason>", separated by blank
-    # lines. Read via process substitution (not a pipe into the loop) so
-    # the counters above survive past the loop — bash runs `cmd | while`
-    # in a subshell, `< <(cmd)` does not.
-    path="" branch="" locked=false prunable=false wt_head=""
-    have_block=false
-
-    flush_block() {
-        [[ "$have_block" == true ]] || return 0
-        [[ "$path" == "$repo" ]] && { have_block=false; return 0; }  # main worktree
-
-        local live dirty unpushed merged_local pr_state pr_disp age
-
-        if [[ "$prunable" == true ]]; then
-            live=false; dirty=false; unpushed=false; merged_local=false
-            pr_state="unknown"; pr_disp="pr:unknown"; age="-"
-        else
-            if is_live "$path"; then live=true; else live=false; fi
-
-            if [[ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]]; then
-                dirty=true
-            else
-                dirty=false
-            fi
-
-            if [[ -n "$branch" ]]; then
-                if git -C "$repo" rev-parse --verify -q "refs/remotes/origin/$branch" >/dev/null 2>&1; then
-                    local ahead
-                    ahead=$(git -C "$repo" rev-list --count "origin/$branch..$wt_head" 2>/dev/null)
-                    [[ -z "$ahead" ]] && ahead=0
-                    if (( ahead > 0 )); then unpushed=true; else unpushed=false; fi
-                else
-                    unpushed=true
-                fi
-                if [[ -n "$default_ref" ]] && git -C "$repo" merge-base --is-ancestor "$wt_head" "$default_ref" 2>/dev/null; then
-                    merged_local=true
-                else
-                    merged_local=false
-                fi
-            else
-                # Detached HEAD: no branch to push or diff against a
-                # default. Deliberately treated as "surface it" (PARKED)
-                # rather than silently reading as SHIPPED? — see NOTES.md.
-                unpushed=true
-                merged_local=false
-            fi
-
-            pr_state="unknown"
-            pr_disp="pr:unknown"
-            if [[ -n "$branch" ]] && [[ "$GH_OK" == true ]]; then
-                local pr_line gh_rc pr_num pr_url
-                pr_line=$(cd "$repo" 2>/dev/null && gh pr list --head "$branch" --state all \
-                    --json number,state,url \
-                    --jq '(.[0] // empty) | [(.number|tostring), .state, .url] | @tsv' 2>/dev/null)
-                gh_rc=$?
-                if [[ $gh_rc -eq 0 ]]; then
-                    if [[ -z "$pr_line" ]]; then
-                        pr_state="none"
-                        pr_disp="no PR"
-                    else
-                        IFS=$'\t' read -r pr_num pr_state pr_url <<< "$pr_line"
-                        pr_disp="PR #${pr_num} ${pr_state}"
-                    fi
-                fi
-            fi
-
-            age=$(git -C "$path" log -1 --format=%cr 2>/dev/null)
-            [[ -z "$age" ]] && age="-"
-        fi
-
-        local bucket flags
-        bucket=$(classify_worktree "$live" "$dirty" "$prunable" "$pr_state" "$unpushed" "$merged_local")
-        count_bucket "$bucket"
-
-        flags=""
-        [[ "$locked" == true ]] && flags+="locked "
-        [[ "$dirty" == true ]] && flags+="dirty "
-        [[ "$unpushed" == true ]] && flags+="unpushed "
-        flags="${flags% }"
-        [[ -z "$flags" ]] && flags="-"
-
-        repo_out+=$(printf '  %-9s %-28s %-16s %-20s %-14s %s\n' \
-            "$bucket" "${branch:-(detached)}" "$pr_disp" "$flags" "$age" "$(shorten "$path")")
-        repo_out+=$'\n'
-        repo_out+=$(printf '      %s\n' "$(action_for "$bucket" "$repo" "$path" "$branch")")
-        repo_out+=$'\n'
-
-        have_block=false
-    }
-
-    while IFS= read -r line; do
-        case "$line" in
-            "worktree "*)
-                flush_block
-                path="${line#worktree }"
-                branch="" locked=false prunable=false wt_head=""
-                have_block=true
-                ;;
-            "HEAD "*)     wt_head="${line#HEAD }" ;;
-            "branch "*)   branch="${line#branch refs/heads/}" ;;
-            detached)     branch="" ;;
-            locked*)      locked=true ;;
-            prunable*)    prunable=true ;;
-            *) : ;;
-        esac
-    done < <(git -C "$repo" worktree list --porcelain 2>/dev/null)
-    flush_block
+    # Read via process substitution (not a pipe into a while loop) so the
+    # counters above survive past this call — bash runs `cmd | while` in a
+    # subshell, `< <(cmd)` does not.
+    parse_porcelain_blocks "$repo" < <(git -C "$repo" worktree list --porcelain 2>/dev/null)
 
     if [[ -n "$repo_out" ]]; then
         printf '\n== %s\n' "$(shorten "$repo")"
