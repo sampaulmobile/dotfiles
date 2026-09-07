@@ -196,11 +196,10 @@ fi
 echo "── session_name_for on a REMOVED path: why wt-tmux-cleanup needs the branch arg"
 # worktrunk's post-remove/post-merge hooks run AFTER the worktree directory
 # is gone, so session_name_for can no longer read <wt>/.git for the branch
-# and falls back to the basename — a DIFFERENT (wrong) name than the one
-# Ctrl+F created for the same worktree while it was alive. This is exactly
-# the blocking bug the branch arg fixes: bin/wt-tmux-cleanup must use
-# session_name_for_branch (above), not session_name_for, once the directory
-# is gone.
+# and falls back to the basename — a DIFFERENT name from the one Ctrl+F
+# created for that worktree while it was alive, which would leak the
+# session. Hence the rule these two cases pin: once the directory is gone,
+# bin/wt-tmux-cleanup must use session_name_for_branch, not session_name_for.
 removed="$work/dev/proj1/.claude/worktrees/agent-removed"
 session_name_for "$removed"
 if [[ "$session_name" == "proj1_agent-removed" ]]; then
@@ -219,9 +218,9 @@ fi
 echo "── session_name_for_removed: worktrunk always passes a 3rd word; HEAD means detached"
 # worktrunk's post-remove/post-merge ALWAYS supply a 3rd hook argument, and
 # for a detached worktree that argument renders as the literal string "HEAD"
-# (empirical, wt v0.68.0 — see .feature/NOTES.md), never empty. Both empty
-# and "HEAD" must fall back to the path-basename rule (session_name_for);
-# anything else is a real branch and goes through session_name_for_branch.
+# (empirical, wt v0.68.0), never empty. Both empty and "HEAD" must fall back
+# to the path-basename rule (session_name_for); anything else is a real
+# branch and goes through session_name_for_branch.
 gone="$work/repo/.claude/worktrees/agent-x"
 
 session_name_for_removed "repo" "$gone" "feature/x"
