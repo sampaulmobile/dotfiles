@@ -6,13 +6,19 @@
 # tmux session. If we're currently inside it, switch to the repo's hub
 # session first (creating it if needed) so the client isn't stranded.
 # No-op outside tmux for the switching; still kills the stray session.
+# Worktree session naming matches tmux-sessionizer (bin/project-dirs-lib's
+# session_name_for) — needed so `wt remove` on an agent worktree kills the
+# session Ctrl+F created for it too, not just a `wt switch -c` sibling's.
+# Hub lookup is unchanged: hub sessions are always plain basenames.
 
 set -euo pipefail
 
 path="${1:?usage: wt-tmux-cleanup <worktree-path> <repo>}"
 repo="${2:?usage: wt-tmux-cleanup <worktree-path> <repo>}"
 
-name=$(basename "$path" | tr . _)
+source "$HOME/dotfiles/bin/project-dirs-lib"
+session_name_for "$path"
+name="$session_name"
 hub=$(echo "$repo" | tr . _)
 hub_path="$HOME/dev/$repo"
 
