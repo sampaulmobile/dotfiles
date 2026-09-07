@@ -17,7 +17,12 @@ agent, at token cost, on every visit — so a comment must pay for itself.
   places, one of them is a duplicate — delete it.
 - **Never point at ephemeral files.** Pipeline state (`.feature/`), scratch
   dirs, session notes and chat transcripts do not exist for the next reader.
-  If the fact matters, write the fact; otherwise write nothing.
+  If the fact matters, write the fact; otherwise write nothing. A pointer to
+  a COMMITTED doc (a workplan, a design doc) is fine when it carries the why.
+- **A comment inside a quoted program is code.** A `#` line inside a
+  single-quoted `jq`/`awk` program or a heredoc is string content to the
+  shell: an apostrophe ends the quote, and the program's meaning can change.
+  Leave those alone, or re-run the script after touching them.
 - **Guard comments are load-bearing — treat deletion as a code change.** A
   comment explaining why a seemingly redundant check exists is the only thing
   stopping the next "simplify" pass from reintroducing the bug. Remove one
@@ -25,7 +30,10 @@ agent, at token cost, on every visit — so a comment must pay for itself.
   so in the commit.
 - **Size guide.** Function comment: 1–3 lines, longer only for a gotcha.
   File header: purpose plus constraints. CLAUDE.md entries: what a session
-  needs to operate the thing, not how it was built. When a paragraph reads
+  needs to operate or safely change the thing — invariants, where things
+  live, the commands — not how it was built. Reference a USER reads on screen
+  (a tool's columns, its key list, output formats, thresholds) lives in the
+  tool's `--help` or header; CLAUDE.md points at it. When a paragraph reads
   like a PR description, it belongs in git history, not in the repo.
 - **Applies to reviews too.** A reviewer flags comment noise, duplicated
   facts and rotted references the same as any other defect; "the code is
