@@ -99,6 +99,7 @@ transition).
 
 ## Conventions
 
+- Branch names: `<type>/<kebab-slug>` with `type` ∈ `feat`, `fix`, `chore`, `docs` — the same prefixes as commit types. `/feature` reads this line when it renames its worktree branch; older branches predate it.
 - zshrc loads brew first, then auto-launches tmux. The outer shell skips everything after the tmux block (`&& return`). The inner shell (inside tmux) loads the full config.
 - Platform-specific zshrc: `zshrc` for macOS, `zshrc_linux` for Linux.
 - GHA runners run locally — never add `[safe] directory` to the global gitconfig. Set it in the runner's local `.git/config` instead.
