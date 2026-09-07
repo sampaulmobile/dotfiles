@@ -5,8 +5,9 @@
 # and in usage() below; the bucket precedence is classify_worktree's order.
 #
 # It changes NOTHING: every git/gh call here is a read, and `wt` is only ever
-# printed as the recommended fix, never executed. Sweeping is a separate,
-# later operation — keep this one report-only.
+# printed as the recommended fix, never executed. Acting on the report is
+# bin/worktree-sweep's job (it sources the derivation + classification here);
+# keep this one report-only.
 #
 # Liveness comes from `lsof -d cwd -Fpn` (a live process's cwd), never from
 # git's worktree lock file (whose reason names the *hub session's* pid, which
@@ -136,44 +137,29 @@ parse_porcelain_blocks() {
     _pb_flush
 }
 
-# Sourced (tests/test-worktree-doctor.sh) rather than executed: hand back the
-# pure functions above and run none of the report below.
-if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
-    return 0
-fi
+# ---- liveness + fact derivation (shared with bin/worktree-sweep) ----
+# These live ABOVE the source guard so the sweeper, which must classify a
+# worktree exactly as this report does before it deletes anything, sources
+# the identical machinery instead of keeping a second copy that could drift.
+# They read/write globals the caller owns: init_liveness fills live_paths;
+# derive_worktree_facts reads $repo, $default_ref and $GH_OK and writes the
+# f_* result globals below.
 
-# ---- args ----
-OFFLINE=false
-SHOW_ALL=false
-for arg in "$@"; do
-    case "$arg" in
-        --offline) OFFLINE=true ;;
-        --all) SHOW_ALL=true ;;
-        -h|--help) usage; exit 0 ;;
-        *)
-            echo "worktree-doctor: unknown argument: $arg" >&2
-            usage >&2
-            exit 2
-            ;;
-    esac
-done
-
-GH_OK=false
-if [[ "$OFFLINE" == false ]] && command -v gh >/dev/null 2>&1; then
-    GH_OK=true
-fi
-
-# ---- liveness: one lsof, up front ----
+# init_liveness — fill live_paths (one cwd per line) from a single lsof and
+# set LSOF_RAN. Without lsof, live_paths stays empty and is_live is always
+# false (every worktree treated as not-live; the caller's footer says so).
 LSOF_RAN=false
 live_paths=$'\n'
-if command -v lsof >/dev/null 2>&1; then
-    LSOF_RAN=true
-    while IFS= read -r _line; do
-        case "$_line" in
-            n*) live_paths+="${_line#n}"$'\n' ;;
-        esac
-    done < <(lsof -d cwd -Fpn 2>/dev/null)
-fi
+init_liveness() {
+    if command -v lsof >/dev/null 2>&1; then
+        LSOF_RAN=true
+        while IFS= read -r _line; do
+            case "$_line" in
+                n*) live_paths+="${_line#n}"$'\n' ;;
+            esac
+        done < <(lsof -d cwd -Fpn 2>/dev/null)
+    fi
+}
 
 # is_live <path> — true if some live cwd equals or is under <path>.
 is_live() {
@@ -206,6 +192,107 @@ default_ref_for() {
     fi
     printf ''
 }
+
+# derive_worktree_facts <path> <branch> <prunable> <wt_head>
+#   Compute the per-worktree facts classify_worktree needs, into the globals
+#   f_live f_dirty f_unpushed f_merged_local f_pr_state f_pr_disp f_age.
+#   Reads $repo, $default_ref and $GH_OK from the caller. A prunable block
+#   short-circuits to the "nothing to inspect" defaults (its gitdir is gone).
+derive_worktree_facts() {
+    local path="$1" branch="$2" prunable="$3" wt_head="$4"
+
+    if [[ "$prunable" == true ]]; then
+        f_live=false; f_dirty=false; f_unpushed=false; f_merged_local=false
+        f_pr_state="unknown"; f_pr_disp="pr:unknown"; f_age="-"
+        return
+    fi
+
+    if is_live "$path"; then f_live=true; else f_live=false; fi
+
+    # --no-optional-locks: not even the stat-cache refresh git does
+    # opportunistically on a plain `status --porcelain` is allowed here.
+    if [[ -n "$(git --no-optional-locks -C "$path" status --porcelain 2>/dev/null)" ]]; then
+        f_dirty=true
+    else
+        f_dirty=false
+    fi
+
+    if [[ -n "$branch" ]]; then
+        if git -C "$repo" rev-parse --verify -q "refs/remotes/origin/$branch" >/dev/null 2>&1; then
+            local ahead
+            ahead=$(git -C "$repo" rev-list --count "origin/$branch..$wt_head" 2>/dev/null)
+            [[ -z "$ahead" ]] && ahead=0
+            if (( ahead > 0 )); then f_unpushed=true; else f_unpushed=false; fi
+        else
+            f_unpushed=true
+        fi
+        if [[ -n "$default_ref" ]] && git -C "$repo" merge-base --is-ancestor "$wt_head" "$default_ref" 2>/dev/null; then
+            f_merged_local=true
+        else
+            f_merged_local=false
+        fi
+    else
+        # Detached HEAD has no branch to push or diff against a default.
+        # Deliberately reported as PARKED ("surface it") rather than
+        # SHIPPED?, which would read as "the remote has this" — it may
+        # not, and there is no branch to check.
+        f_unpushed=true
+        f_merged_local=false
+    fi
+
+    f_pr_state="unknown"
+    f_pr_disp="pr:unknown"
+    if [[ -n "$branch" ]] && [[ "$GH_OK" == true ]]; then
+        local pr_line gh_rc pr_num pr_url
+        pr_line=$(cd "$repo" 2>/dev/null && gh pr list --head "$branch" --state all \
+            --json number,state,url \
+            --jq '(.[0] // empty) | [(.number|tostring), .state, .url] | @tsv' 2>/dev/null)
+        gh_rc=$?
+        if [[ $gh_rc -eq 0 ]]; then
+            if [[ -z "$pr_line" ]]; then
+                f_pr_state="none"
+                f_pr_disp="no PR"
+            else
+                IFS=$'\t' read -r pr_num f_pr_state pr_url <<< "$pr_line"
+                f_pr_disp="PR #${pr_num} ${f_pr_state}"
+            fi
+        fi
+    fi
+
+    f_age=$(git -C "$path" log -1 --format=%cr 2>/dev/null)
+    [[ -z "$f_age" ]] && f_age="-"
+}
+
+# Sourced (tests/test-worktree-doctor.sh, bin/worktree-sweep) rather than
+# executed: hand back the pure + shared functions above and run none of the
+# report below.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
+
+# ---- args ----
+OFFLINE=false
+SHOW_ALL=false
+for arg in "$@"; do
+    case "$arg" in
+        --offline) OFFLINE=true ;;
+        --all) SHOW_ALL=true ;;
+        -h|--help) usage; exit 0 ;;
+        *)
+            echo "worktree-doctor: unknown argument: $arg" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+GH_OK=false
+if [[ "$OFFLINE" == false ]] && command -v gh >/dev/null 2>&1; then
+    GH_OK=true
+fi
+
+# ---- liveness: one lsof, up front ----
+init_liveness
 
 # shellcheck source=/dev/null
 source "$DOTFILES/bin/project-dirs-lib"
@@ -248,85 +335,27 @@ shorten() {
 
 # on_worktree_block <path> <branch> <locked> <prunable> <wt_head>
 #   The real per-row derivation and printing for parse_porcelain_blocks.
-#   Depends on globals the per-repo loop below sets: $repo, $default_ref and
-#   $repo_out (the current repo's accumulated report text).
+#   Derivation is derive_worktree_facts (shared with the sweeper); this just
+#   classifies and formats. Depends on globals the per-repo loop below sets:
+#   $repo, $default_ref and $repo_out (the current repo's accumulated text).
 on_worktree_block() {
     local path="$1" branch="$2" locked="$3" prunable="$4" wt_head="$5"
-    local live dirty unpushed merged_local pr_state pr_disp age
 
-    if [[ "$prunable" == true ]]; then
-        live=false; dirty=false; unpushed=false; merged_local=false
-        pr_state="unknown"; pr_disp="pr:unknown"; age="-"
-    else
-        if is_live "$path"; then live=true; else live=false; fi
-
-        # --no-optional-locks: not even the stat-cache refresh git does
-        # opportunistically on a plain `status --porcelain` is allowed here.
-        if [[ -n "$(git --no-optional-locks -C "$path" status --porcelain 2>/dev/null)" ]]; then
-            dirty=true
-        else
-            dirty=false
-        fi
-
-        if [[ -n "$branch" ]]; then
-            if git -C "$repo" rev-parse --verify -q "refs/remotes/origin/$branch" >/dev/null 2>&1; then
-                local ahead
-                ahead=$(git -C "$repo" rev-list --count "origin/$branch..$wt_head" 2>/dev/null)
-                [[ -z "$ahead" ]] && ahead=0
-                if (( ahead > 0 )); then unpushed=true; else unpushed=false; fi
-            else
-                unpushed=true
-            fi
-            if [[ -n "$default_ref" ]] && git -C "$repo" merge-base --is-ancestor "$wt_head" "$default_ref" 2>/dev/null; then
-                merged_local=true
-            else
-                merged_local=false
-            fi
-        else
-            # Detached HEAD has no branch to push or diff against a default.
-            # Deliberately reported as PARKED ("surface it") rather than
-            # SHIPPED?, which would read as "the remote has this" — it may
-            # not, and there is no branch to check.
-            unpushed=true
-            merged_local=false
-        fi
-
-        pr_state="unknown"
-        pr_disp="pr:unknown"
-        if [[ -n "$branch" ]] && [[ "$GH_OK" == true ]]; then
-            local pr_line gh_rc pr_num pr_url
-            pr_line=$(cd "$repo" 2>/dev/null && gh pr list --head "$branch" --state all \
-                --json number,state,url \
-                --jq '(.[0] // empty) | [(.number|tostring), .state, .url] | @tsv' 2>/dev/null)
-            gh_rc=$?
-            if [[ $gh_rc -eq 0 ]]; then
-                if [[ -z "$pr_line" ]]; then
-                    pr_state="none"
-                    pr_disp="no PR"
-                else
-                    IFS=$'\t' read -r pr_num pr_state pr_url <<< "$pr_line"
-                    pr_disp="PR #${pr_num} ${pr_state}"
-                fi
-            fi
-        fi
-
-        age=$(git -C "$path" log -1 --format=%cr 2>/dev/null)
-        [[ -z "$age" ]] && age="-"
-    fi
+    derive_worktree_facts "$path" "$branch" "$prunable" "$wt_head"
 
     local bucket flags
-    bucket=$(classify_worktree "$live" "$dirty" "$prunable" "$pr_state" "$unpushed" "$merged_local")
+    bucket=$(classify_worktree "$f_live" "$f_dirty" "$prunable" "$f_pr_state" "$f_unpushed" "$f_merged_local")
     count_bucket "$bucket"
 
     flags=""
     [[ "$locked" == true ]] && flags+="locked "
-    [[ "$dirty" == true ]] && flags+="dirty "
-    [[ "$unpushed" == true ]] && flags+="unpushed "
+    [[ "$f_dirty" == true ]] && flags+="dirty "
+    [[ "$f_unpushed" == true ]] && flags+="unpushed "
     flags="${flags% }"
     [[ -z "$flags" ]] && flags="-"
 
     repo_out+=$(printf '  %-9s %-28s %-16s %-20s %-14s %s\n' \
-        "$bucket" "${branch:-(detached)}" "$pr_disp" "$flags" "$age" "$(shorten "$path")")
+        "$bucket" "${branch:-(detached)}" "$f_pr_disp" "$flags" "$f_age" "$(shorten "$path")")
     repo_out+=$'\n'
     repo_out+=$(printf '      %s\n' "$(action_for "$bucket" "$repo" "$path" "$branch" "$locked")")
     repo_out+=$'\n'

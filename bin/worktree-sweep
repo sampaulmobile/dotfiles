@@ -1,0 +1,303 @@
+#!/usr/bin/env bash
+# worktree-sweep — remove the worktrees bin/worktree-doctor buckets as MERGED,
+# but only after proving no unsaved data lives in them. Dry-run by default:
+# it changes NOTHING until --apply. The doctor is the report; this is the one
+# tool that acts on it.
+#
+# Whose worktrees, and "merged": IDENTICAL to the doctor — this SOURCES
+# bin/worktree-doctor for parse_porcelain_blocks, derive_worktree_facts and
+# classify_worktree, so a squash merge (invisible to plain git, seen only via
+# gh) is caught here exactly as the doctor catches it, and the LIVE/DIRTY/
+# PRUNABLE precedence that protects an in-use or dirty worktree applies before
+# anything is a removal candidate. Only the MERGED bucket is ever swept;
+# ABANDONED (unmerged, needs -D), PARKED, IN-REVIEW and SHIPPED? are never
+# touched, and PRUNABLE is left to `git worktree prune`.
+#
+# The extra guard the doctor doesn't need (it never deletes): a MERGED
+# worktree's committed work is safe on the default branch, but its GITIGNORED
+# files are not in git at all, and `git worktree remove` (hence `wt remove`)
+# deletes them with the directory — no --force, no warning (verified against
+# git 2.x). copy-ignored seeded most of them FROM the hub, so a file identical
+# to the hub's copy, or a regenerable cache (the copy-ignored exclude list),
+# loses nothing on removal. Anything else — a .env the agent wrote fresh, a
+# populated local DB, downloaded fixtures, a copied-in file since edited — is
+# worktree-unique data: the worktree is SKIPPED and the files listed, unless
+# --force says to remove it anyway.
+set -uo pipefail
+
+DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+
+usage() {
+    cat <<'EOF'
+usage: worktree-sweep [--apply] [--force] [--offline]
+
+Remove worktrees that worktree-doctor buckets as MERGED, guarding against the
+loss of worktree-unique gitignored data. Dry-run by default.
+
+  --apply     actually remove (default: dry-run — only print what would happen)
+  --force     also remove MERGED worktrees that hold at-risk gitignored files
+              (the guard's skips); LIVE/DIRTY/unmerged are still never touched
+  --offline   skip gh (a squash-merged worktree then looks unmerged and is
+              left alone — the safe direction)
+
+Run it once with no flags, read the plan, then re-run with --apply.
+Exit 0 on a clean run; 2 on a removal failure under --apply.
+EOF
+}
+
+# ---- the gitignored-data guard (pure; unit-tested) ----
+
+# parse_copy_ignored_excludes <toml-path>
+#   Print, one per line, the regenerable-cache dir names from
+#   worktrunk.toml's [step.copy-ignored] exclude array — the SINGLE source of
+#   truth for "copy-ignored never copied this in, so it is safe to drop". Not
+#   copied here: kept read from the toml so the two cannot drift. Tolerates
+#   inline or multi-line arrays; prints nothing if the section/key is absent
+#   (the guard then falls back to pure content comparison — more skips, never
+#   an unsafe removal).
+parse_copy_ignored_excludes() {
+    local toml="$1" line in_section=false collecting=false rest tok
+    [[ -f "$toml" ]] || return 0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        case "$line" in
+            *'[step.copy-ignored]'*) in_section=true; continue ;;
+            \[*) in_section=false; collecting=false; continue ;;
+        esac
+        [[ "$in_section" == true ]] || continue
+        if [[ "$collecting" == false && "$line" == *exclude*=*\[* ]]; then
+            collecting=true
+        fi
+        [[ "$collecting" == true ]] || continue
+        rest="$line"
+        while [[ "$rest" =~ \"([^\"]*)\" ]]; do
+            tok="${BASH_REMATCH[1]}"
+            printf '%s\n' "$tok"
+            rest="${rest#*\"$tok\"}"
+        done
+        [[ "$line" == *\]* ]] && collecting=false
+    done < "$toml"
+}
+
+# _seg_is_cache <relpath> — true if any path segment of <relpath> is one of
+# the regenerable-cache names in the global sweep_excludes array.
+_seg_is_cache() {
+    local rel="${1%/}" seg ex
+    (( ${#sweep_excludes[@]} )) || return 1
+    while [[ -n "$rel" ]]; do
+        seg="${rel##*/}"
+        for ex in "${sweep_excludes[@]}"; do
+            [[ "$seg" == "$ex" ]] && return 0
+        done
+        [[ "$rel" == */* ]] || break
+        rel="${rel%/*}"
+    done
+    return 1
+}
+
+# classify_ignored_file <relpath> <wt> <hub>
+#   Verdict for one gitignored entry (as `git ls-files --directory` prints it,
+#   so a fully-ignored dir arrives collapsed with a trailing slash):
+#     safe-cache  a regenerable cache (segment in sweep_excludes) — rebuilds
+#     safe-copy   a plain file byte-identical to the hub's copy — hub keeps it
+#     at-risk     everything else: worktree-unique, or a copied-in file since
+#                 edited, or an ignored DIRECTORY whose contents can't be
+#                 verified file-by-file (surfaced for a human, never dropped
+#                 silently)
+classify_ignored_file() {
+    local rel="$1" wt="$2" hub="$3"
+    if _seg_is_cache "$rel"; then
+        echo "safe-cache"; return
+    fi
+    if [[ "$rel" == */ ]]; then
+        echo "at-risk"; return
+    fi
+    if [[ -f "$hub/$rel" ]] && cmp -s "$wt/$rel" "$hub/$rel"; then
+        echo "safe-copy"; return
+    fi
+    echo "at-risk"
+}
+
+# worktree_ignored_at_risk <wt> <hub>
+#   Print each at-risk gitignored entry in <wt> (relative path), one per line;
+#   empty output means the worktree carries no unsaved data and is safe to
+#   remove. --directory collapses whole ignored dirs (node_modules/, .venv/)
+#   into one entry so a big cache is one cheap segment check, never a walk.
+worktree_ignored_at_risk() {
+    local wt="$1" hub="$2" rel
+    while IFS= read -r rel; do
+        [[ -z "$rel" ]] && continue
+        [[ "$(classify_ignored_file "$rel" "$wt" "$hub")" == at-risk ]] && printf '%s\n' "$rel"
+    done < <(git -C "$wt" ls-files --others --ignored --exclude-standard --directory 2>/dev/null)
+}
+
+# Sourced (tests/test-worktree-sweep.sh) rather than executed: hand back the
+# guard functions above and run none of the sweep below.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
+
+# ---- args ----
+APPLY=false
+FORCE=false
+OFFLINE=false
+for arg in "$@"; do
+    case "$arg" in
+        --apply) APPLY=true ;;
+        --force) FORCE=true ;;
+        --offline) OFFLINE=true ;;
+        -h|--help) usage; exit 0 ;;
+        *)
+            echo "worktree-sweep: unknown argument: $arg" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+# The doctor supplies the enumeration, the fact derivation and the bucket
+# rule; sourcing it (its BASH_SOURCE guard stops before its own report) is
+# what keeps "merged" identical between the report and this actor.
+# shellcheck source=/dev/null
+source "$DOTFILES/bin/worktree-doctor"
+
+# gh consulted unless --offline: without it a squash merge looks unmerged and
+# is left alone (the safe direction), so offline sweeps only the merges plain
+# git can prove via merge-base.
+GH_OK=false
+if [[ "$OFFLINE" == false ]] && command -v gh >/dev/null 2>&1; then
+    GH_OK=true
+fi
+
+if [[ "$APPLY" == true ]] && ! command -v wt >/dev/null 2>&1; then
+    echo "worktree-sweep: --apply needs wt on PATH; not found" >&2
+    exit 2
+fi
+
+init_liveness
+
+# Cache exclude list (single source of truth: dots/worktrunk.toml).
+sweep_excludes=()
+while IFS= read -r _ex; do
+    [[ -n "$_ex" ]] && sweep_excludes+=("$_ex")
+done < <(parse_copy_ignored_excludes "$DOTFILES/dots/worktrunk.toml")
+
+# shellcheck source=/dev/null
+source "$DOTFILES/bin/project-dirs-lib"
+project_dirs
+
+repos=()
+repos_seen=$'\n'
+if (( ${#project_dirs_out[@]} )); then
+    for _cand in "${project_dirs_out[@]}"; do
+        [[ -d "$_cand/.git" ]] || continue
+        [[ "$repos_seen" == *$'\n'"$_cand"$'\n'* ]] && continue
+        repos_seen+="$_cand"$'\n'
+        repos+=("$_cand")
+    done
+fi
+
+CNT_REMOVE=0 CNT_SKIP=0 CNT_FAIL=0
+
+shorten() {
+    local p="$1"
+    [[ "$p" == "$HOME/"* ]] && p="~/${p#"$HOME"/}"
+    printf '%s' "$p"
+}
+
+# remove_worktree <repo> <path> <branch> <locked> — the actual removal (only
+# reached in --apply). Unlock first if locked (wt/git refuse a locked
+# worktree); target by branch, or by path when detached. --foreground so the
+# removal and its tmux-cleanup hook finish before the next row. No -f: the
+# guard already required a clean tree, so git removes the (safe) ignored files
+# on its own; -f would defeat the dirty check.
+remove_worktree() {
+    local repo="$1" path="$2" branch="$3" locked="$4" target
+    target="${branch:-$path}"
+    if [[ "$locked" == true ]]; then
+        git -C "$repo" worktree unlock "$path" 2>/dev/null || true
+    fi
+    wt -C "$repo" remove --foreground "$target"
+}
+
+# on_worktree_block <path> <branch> <locked> <prunable> <wt_head>
+#   parse_porcelain_blocks calls this per worktree. Derive facts and classify
+#   exactly as the doctor does; act only on MERGED. Appends its lines to the
+#   global $repo_out and updates the counters directly — parse_porcelain_blocks
+#   is fed via process substitution (not a pipe), so this runs in the main
+#   shell and both survive. Under --apply the removal happens HERE, inline.
+on_worktree_block() {
+    local path="$1" branch="$2" locked="$3" prunable="$4" wt_head="$5"
+    local bucket at_risk n rel
+
+    derive_worktree_facts "$path" "$branch" "$prunable" "$wt_head"
+    bucket=$(classify_worktree "$f_live" "$f_dirty" "$prunable" "$f_pr_state" "$f_unpushed" "$f_merged_local")
+    [[ "$bucket" == MERGED ]] || return 0
+
+    at_risk=$(worktree_ignored_at_risk "$path" "$repo")
+
+    if [[ -n "$at_risk" ]] && [[ "$FORCE" == false ]]; then
+        n=$(printf '%s\n' "$at_risk" | grep -c .)
+        CNT_SKIP=$((CNT_SKIP + 1))
+        repo_out+=$(printf '  SKIP    %-24s %-16s %s\n' "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path")")
+        repo_out+=$'\n'
+        repo_out+=$(printf '      merged, but %s at-risk gitignored file(s) — inspect, or --force to remove anyway:\n' "$n")
+        repo_out+=$'\n'
+        while IFS= read -r rel; do
+            [[ -z "$rel" ]] && continue
+            repo_out+=$(printf '        %s\n' "$rel")
+            repo_out+=$'\n'
+        done <<< "$at_risk"
+        return 0
+    fi
+
+    CNT_REMOVE=$((CNT_REMOVE + 1))
+    if [[ -n "$at_risk" ]]; then
+        repo_out+=$(printf '  REMOVE  %-24s %-16s %s   (--force: dropping at-risk files)\n' \
+            "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path")")
+    else
+        repo_out+=$(printf '  REMOVE  %-24s %-16s %s\n' "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path")")
+    fi
+    repo_out+=$'\n'
+
+    if [[ "$APPLY" == true ]]; then
+        if remove_worktree "$repo" "$path" "$branch" "$locked"; then
+            repo_out+=$(printf '      removed\n')
+        else
+            CNT_FAIL=$((CNT_FAIL + 1))
+            repo_out+=$(printf '      FAILED to remove (left in place)\n')
+        fi
+    else
+        repo_out+=$(printf '      would run: wt -C %s remove --foreground %s\n' "$(shorten "$repo")" "${branch:-$path}")
+    fi
+    repo_out+=$'\n'
+}
+
+if (( ${#repos[@]} )); then
+for repo in "${repos[@]}"; do
+    default_ref=$(default_ref_for "$repo")
+    repo_out=""
+
+    # Process substitution (not a pipe): on_worktree_block must run in this
+    # shell so its counters and, under --apply, its removals take effect here.
+    parse_porcelain_blocks "$repo" < <(git -C "$repo" worktree list --porcelain 2>/dev/null)
+
+    if [[ -n "$repo_out" ]]; then
+        printf '\n== %s\n' "$(shorten "$repo")"
+        printf '%s' "$repo_out"
+    fi
+done
+fi
+
+echo
+echo "-- summary --"
+if [[ "$APPLY" == true ]]; then
+    printf 'removed:%d  skipped(at-risk):%d  failed:%d\n' "$CNT_REMOVE" "$CNT_SKIP" "$CNT_FAIL"
+    (( CNT_FAIL > 0 )) && exit 2
+else
+    printf 'would-remove:%d  skipped(at-risk):%d\n' "$CNT_REMOVE" "$CNT_SKIP"
+    if (( CNT_REMOVE > 0 )); then
+        echo "dry-run — re-run with --apply to remove"
+    else
+        echo "dry-run — nothing to sweep"
+    fi
+fi
