@@ -310,3 +310,29 @@ with the fallback that covers it if wrong.
   (step 7) may therefore be blocked from inside the worktree; if so the
   implementer records it in `.feature/NOTES.md` and the PR body asks the hub
   to run `bin/worktree-doctor` once after merge instead of faking a result.
+
+## Amendments (round 2, after review round 1)
+
+Recorded here so the PR body carries them; both are deliberate.
+
+1. **`wt-tmux-cleanup` gets the branch from worktrunk.** The review found
+   that worktrunk's `post-remove`/`post-merge` hooks run AFTER the worktree
+   directory is gone (`wt hook --help`: "the active worktree is gone, so the
+   hook runs in the primary worktree"), so `session_name_for <path>` can no
+   longer read `<wt>/.git` and falls back to `<repo>_agent-<id>` — the exact
+   session leak step 3 set out to fix. Fix: `dots/worktrunk.toml` passes
+   `{{ branch }}` as a third argument to `wt-tmux-cleanup` (post-remove and
+   post-merge), and the lib grows `session_name_for_branch <repo-name>
+   <branch>` (the same `/`→`-` then `.`→`_` rule, one home) which cleanup
+   uses when the third argument is present, falling back to
+   `session_name_for "$path"` when absent. `wt-tmux-jump` is unaffected
+   (post-switch runs with the worktree present).
+2. **Locked rows prefix the printed command with an unlock.** The design
+   said `locked` is "shown as a flag, never used for decisions". That still
+   holds for BUCKET decisions. But `wt remove` (verified against the wt
+   binary) refuses a locked worktree, and every harness-made agent worktree
+   stays locked after its agent exits — so the copy-paste command for the
+   rows this tool exists for would fail as printed. Amendment: when a
+   MERGED/ABANDONED row is `locked`, the printed action is
+   `git -C <repo> worktree unlock <path> && wt -C <repo> remove ...`. The
+   bucket itself is unchanged. Still printed only, never executed.
