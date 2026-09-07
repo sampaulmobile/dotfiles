@@ -1,26 +1,13 @@
 #!/usr/bin/env bash
-# doctor — read-only health check for this dotfiles install. Reports drift
-# between what the repo says this machine should look like and what it does
-# look like, and changes NOTHING. setup.sh is the whole fresh-machine
-# bootstrap; this is the small thing to run after a `git pull`, or whenever
-# something feels off, to see what a rerun of the individual scripts would
-# fix. Every line names the script that fixes it.
+# doctor — read-only health check for this dotfiles install: what a rerun of
+# the setup scripts would change, with every line naming the script that
+# fixes it. It changes NOTHING itself. Exit 0 clean, 1 when anything is
+# flagged. (setup.sh is the fresh-machine bootstrap; this is the after-a-pull
+# check.)
 #
-#   bin/doctor        exit 0 when clean, 1 when anything is flagged
-#
-# Each section is another script's own --check (or dry-run) mode, so the
-# doctor never keeps a second copy of what "correct" means:
-#   machine-local config   bin/seed_other.sh --check
-#       - other/**/<name> missing where a <name>.example exists
-#       - settings.json missing entries its example has since gained
-#         (bin/claude-settings-check)
-#   symlinks               bin/symlink_files.sh --check
-#       - links missing, pointing elsewhere, or a real file in the way
-#       - tracked skills/rules/agents not layered into ~/.claude, ~/.agents
-#   brew                   brew bundle check --file=etc/Brewfile_mac
-#       - formulae/casks in the base Brewfile that aren't installed
-# Add a section by giving the owning script a --check mode and calling it
-# here.
+# Every section is another script's own --check mode, so the doctor never
+# holds a second copy of what "correct" means. Add one the same way: give the
+# owning script a --check and call it here.
 set -uo pipefail
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
