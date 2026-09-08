@@ -65,6 +65,15 @@ other case.
 
 ## 4. Delegate
 
+Before dispatching anything that touches an EXISTING PR or branch (review
+fixes, rebases, follow-ups), assume the user may already be working it directly
+in that hub. Every such dispatch must open with an in-flight check the hub
+answers before acting: "If work on <PR/branch> is already in flight in your
+session (e.g. the user ran /address-review or is steering an agent there),
+do NOT start a second agent — fold this into the running work where it fits,
+drop what the user has since overridden, and reply with the current state."
+Fresh work (a new /feature) needs no check.
+
 SendMessage each hub a SELF-CONTAINED task — the receiver has none of this
 conversation:
 

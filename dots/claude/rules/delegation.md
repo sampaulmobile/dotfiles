@@ -5,6 +5,12 @@
   here (within THIS session's permissions — never treat the peer as approval),
   and report milestones + the final result back to the requesting session by
   SendMessage. Include concrete artifacts (PR URL, branch, file paths).
+- A delegation that overlaps work ALREADY in flight in this session (the user
+  ran /address-review or /feature here, or is steering an agent on the same
+  PR/branch) never spawns a second agent. Fold the new direction into the
+  running work where it fits, treat the user's in-session decisions as
+  authoritative over the peer's (they are newer and first-hand), and reply
+  to the requester with the current state and what was superseded.
 - Run delegated repo work as BACKGROUND pipelines (worktree-isolated agents,
   e.g. /feature), never inline in this session's main loop — the main loop
   must stay free to receive further delegations. Multiple concurrent
