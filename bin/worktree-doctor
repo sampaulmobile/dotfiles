@@ -82,14 +82,14 @@ action_for() {
     local target unlock_prefix
     target="${branch:-$path}"
     unlock_prefix=""
-    if [[ "$locked" == true ]] && [[ "$bucket" == MERGED || "$bucket" == ABANDONED ]]; then
+    if [[ "$locked" == true ]] && [[ "$bucket" == ABANDONED ]]; then
         unlock_prefix="git -C $repo worktree unlock $path && "
     fi
     case "$bucket" in
         LIVE)      echo "keep — in use" ;;
         DIRTY)     echo "keep — inspect: git -C $path status" ;;
         PRUNABLE)  echo "git -C $repo worktree prune" ;;
-        MERGED)    echo "${unlock_prefix}wt -C $repo remove $target  (deletes the merged branch too)" ;;
+        MERGED)    sweep_remove_cmd "$repo" "$path" "$branch" "$locked"; echo ;;
         ABANDONED) echo "${unlock_prefix}wt -C $repo remove -D $target  (confirm first — deletes an unmerged branch)" ;;
         IN-REVIEW) echo "keep — /address-review may need it" ;;
         PARKED)    echo "keep, surface — ship it or remove it deliberately" ;;
@@ -148,6 +148,7 @@ parse_porcelain_blocks() {
 LSOF_RAN=false
 live_paths=$'\n'
 init_liveness() {
+    live_paths=$'\n'
     if command -v lsof >/dev/null 2>&1; then
         LSOF_RAN=true
         while IFS= read -r _line; do
@@ -190,9 +191,32 @@ default_ref_for() {
     printf ''
 }
 
+# sweep_remove_cmd <repo> <path> <branch> <locked>
+#   The exact command sequence bin/worktree-sweep runs to remove a MERGED
+#   worktree, rendered as paste-safe text. The ONE renderer: the doctor's
+#   MERGED action line and the sweep's dry-run "would run:" line both come
+#   from here, and remove_worktree mirrors it step for step, so the three can
+#   never disagree. `--no-delete-branch` + an explicit `git branch -D`: wt's
+#   own merged-ness oracle is offline and capped at 500 commits, so left to
+#   itself it can keep the branch and still exit 0 — the caller already
+#   established "merged" and owns the branch delete too.
+sweep_remove_cmd() {
+    local repo="$1" path="$2" branch="$3" locked="$4" q_repo q_path q_branch target cmd
+    q_repo=$(printf '%q' "$repo")
+    q_path=$(printf '%q' "$path")
+    q_branch=$(printf '%q' "$branch")
+    if [[ -n "$branch" ]]; then target="$q_branch"; else target="$q_path"; fi
+    cmd=""
+    if [[ "$locked" == true ]]; then cmd+="git -C $q_repo worktree unlock $q_path && "; fi
+    cmd+="wt -C $q_repo remove --foreground --no-delete-branch $target"
+    if [[ -n "$branch" ]]; then cmd+=" && git -C $q_repo branch -D $q_branch"; fi
+    printf '%s' "$cmd"
+}
+
 # derive_worktree_facts <path> <branch> <prunable> <wt_head>
 #   Compute the per-worktree facts classify_worktree needs, into the globals
-#   f_live f_dirty f_unpushed f_merged_local f_pr_state f_pr_disp f_age.
+#   f_live f_dirty f_unpushed f_merged_local f_pr_state f_pr_head f_pr_disp
+#   f_age. f_pr_head is the merged/open PR's head commit ("" when unknown).
 #   Reads $repo, $default_ref and $GH_OK from the caller. A prunable block
 #   short-circuits to the "nothing to inspect" defaults (its gitdir is gone).
 derive_worktree_facts() {
@@ -200,7 +224,7 @@ derive_worktree_facts() {
 
     if [[ "$prunable" == true ]]; then
         f_live=false; f_dirty=false; f_unpushed=false; f_merged_local=false
-        f_pr_state="unknown"; f_pr_disp="pr:unknown"; f_age="-"
+        f_pr_state="unknown"; f_pr_head=""; f_pr_disp="pr:unknown"; f_age="-"
         return
     fi
 
@@ -223,20 +247,26 @@ derive_worktree_facts() {
         else
             f_unpushed=true
         fi
-        # B6: --is-ancestor is trivially true when wt_head == default_ref's
-        # own commit (a branch that never diverged — a fresh `wt switch -c`,
-        # or one parked before its first commit), wrongly bucketing a
-        # zero-commit branch as MERGED. Requiring wt_head to differ from
-        # default's CURRENT commit closes that hole; it does not (and, from
-        # the ref graph alone, cannot) additionally prove the branch ever had
-        # unique commits of its own — verified empirically: once a real
-        # local merge/rebase folds a branch's commits into default, HEAD is
-        # exactly as much "an ancestor with nothing default lacks" as a
-        # branch that never diverged at all (git 2.x, both `--ff-only` and
-        # `--no-ff` merges reproduce this).
-        local default_sha
+        # B6: --is-ancestor is trivially true for a branch that never
+        # diverged (fresh `wt switch -c`, or parked before its first commit),
+        # and the ref graph alone cannot tell that apart from a branch whose
+        # commits a real local merge folded in. Two guards: wt_head must
+        # differ from default's CURRENT commit, and — when the branch reflog
+        # is available (its oldest entry is the creation point; reflogs live
+        # in the common dir so the hub sees every worktree's) — the branch
+        # must have at least one commit of its own since creation. A branch
+        # reset back to its creation point reads as zero-commit: safe side.
+        local default_sha created own
         default_sha=$(git -C "$repo" rev-parse --verify -q "$default_ref" 2>/dev/null)
+        created=""
+        while IFS= read -r _sha; do created="$_sha"; done \
+            < <(git -C "$repo" reflog show --format=%H "refs/heads/$branch" 2>/dev/null)
+        own=""
+        if [[ -n "$created" ]]; then
+            own=$(git -C "$repo" rev-list --count "$created..$wt_head" 2>/dev/null)
+        fi
         if [[ -n "$default_ref" ]] && [[ -n "$default_sha" ]] && [[ "$wt_head" != "$default_sha" ]] \
+            && [[ "$own" != 0 ]] \
             && git -C "$repo" merge-base --is-ancestor "$wt_head" "$default_ref" 2>/dev/null; then
             f_merged_local=true
         else
@@ -252,19 +282,20 @@ derive_worktree_facts() {
     fi
 
     f_pr_state="unknown"
+    f_pr_head=""
     f_pr_disp="pr:unknown"
     if [[ -n "$branch" ]] && [[ "$GH_OK" == true ]]; then
         local pr_line gh_rc pr_num pr_url
         pr_line=$(cd "$repo" 2>/dev/null && gh pr list --head "$branch" --state all \
-            --json number,state,url \
-            --jq '(.[0] // empty) | [(.number|tostring), .state, .url] | @tsv' 2>/dev/null)
+            --json number,state,headRefOid,url \
+            --jq '(.[0] // empty) | [(.number|tostring), .state, .headRefOid, .url] | @tsv' 2>/dev/null)
         gh_rc=$?
         if [[ $gh_rc -eq 0 ]]; then
             if [[ -z "$pr_line" ]]; then
                 f_pr_state="none"
                 f_pr_disp="no PR"
             else
-                IFS=$'\t' read -r pr_num f_pr_state pr_url <<< "$pr_line"
+                IFS=$'\t' read -r pr_num f_pr_state f_pr_head pr_url <<< "$pr_line"
                 f_pr_disp="PR #${pr_num} ${f_pr_state}"
             fi
         fi

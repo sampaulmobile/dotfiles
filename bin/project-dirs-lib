@@ -182,6 +182,8 @@ project_dirs() {
     project_dirs_out=()
     local entry dir depth cand sib
 
+    # bash 3.2 + `set -u`: "${arr[@]}" on a ZERO-element array is "unbound".
+    (( ${#search_dirs[@]} )) || return 0
     shopt -s nullglob
     for entry in "${search_dirs[@]}"; do
         dir="${entry%%:*}"

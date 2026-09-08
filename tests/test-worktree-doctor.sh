@@ -99,10 +99,10 @@ action_for_() {
 }
 
 echo "── action_for: locked prefixes MERGED/ABANDONED with an unlock, nothing else"
-action_for_ "merged, unlocked -> plain wt remove" MERGED false \
-    "wt -C /repo remove branchname  (deletes the merged branch too)"
-action_for_ "merged, locked -> unlock && wt remove" MERGED true \
-    "git -C /repo worktree unlock /repo/wt && wt -C /repo remove branchname  (deletes the merged branch too)"
+action_for_ "merged, unlocked -> the sweep's exact remove + branch delete" MERGED false \
+    "wt -C /repo remove --foreground --no-delete-branch branchname && git -C /repo branch -D branchname"
+action_for_ "merged, locked -> unlock && the same" MERGED true \
+    "git -C /repo worktree unlock /repo/wt && wt -C /repo remove --foreground --no-delete-branch branchname && git -C /repo branch -D branchname"
 action_for_ "abandoned, unlocked -> plain wt remove -D" ABANDONED false \
     "wt -C /repo remove -D branchname  (confirm first — deletes an unmerged branch)"
 action_for_ "abandoned, locked -> unlock && wt remove -D" ABANDONED true \
@@ -205,6 +205,19 @@ if [[ "$f_merged_local" == true ]]; then
     pass=$(( pass + 1 ))
 else
     printf '  FAIL %s\n       got f_merged_local=%s want true\n' "genuinely merged branch" "$f_merged_local"
+    fail=$(( fail + 1 ))
+fi
+
+# main has moved on (the merge commit); a branch created back at "one" with
+# no commits of its own is an ancestor of main AND differs from main's current
+# commit — only its reflog (creation point == HEAD) says it never had work.
+git -C "$wd" branch stale "$zero_sha"
+derive_worktree_facts "$wd" "stale" false "$zero_sha"
+if [[ "$f_merged_local" == false ]]; then
+    printf '  ok   %s\n' "zero-commit branch whose base default has since advanced -> not merged_local (reflog)"
+    pass=$(( pass + 1 ))
+else
+    printf '  FAIL %s\n       got f_merged_local=%s want false\n' "zero-commit branch, default advanced" "$f_merged_local"
     fail=$(( fail + 1 ))
 fi
 

@@ -81,6 +81,7 @@ parse_copy_ignored_excludes() {
     [[ -f "$toml" ]] || return 0
     while IFS= read -r raw || [[ -n "$raw" ]]; do
         line="$(_toml_strip_comment "$raw")"
+        line="${line#"${line%%[![:space:]]*}"}"
         case "$line" in
             '[step.copy-ignored]'*) in_section=true; continue ;;
             \[*) in_section=false; collecting=false; continue ;;
@@ -212,15 +213,23 @@ worktree_ignored_at_risk() {
 }
 
 # sweep_is_removable <bucket> <unpushed>
-#   True only for a MERGED bucket whose worktree has no local-only commits.
-#   classify_worktree can call a worktree MERGED (via gh's pr_state or a local
-#   ancestor check) while it ALSO carries commits made after that merge
-#   point (f_unpushed=true) — removing it would orphan those commits on a
-#   branch nothing lists (B3). Every other bucket is never removable here
-#   regardless of unpushed (the sweep only ever acts on MERGED).
+#   sweep_is_removable <bucket> <unpushed> [<pr_state> <pr_head> <wt_head>]
+#   True only for a MERGED bucket whose worktree carries nothing the merge
+#   did not (B3): classify_worktree calls a worktree MERGED via gh or a local
+#   ancestor check even when it has commits made AFTER the merge point —
+#   removing it would orphan them on a branch nothing lists. With a merged
+#   PR whose head is known, the test is exact: the worktree must sit on that
+#   head. Otherwise it falls back to "no commits ahead of origin/<branch>",
+#   which also refuses when origin/<branch> is gone (pruned after merge) —
+#   deliberately, since then nothing can vouch for the local commits.
 sweep_is_removable() {
-    local bucket="$1" unpushed="$2"
-    [[ "$bucket" == MERGED && "$unpushed" != true ]]
+    local bucket="$1" unpushed="$2" pr_state="${3:-}" pr_head="${4:-}" wt_head="${5:-}"
+    [[ "$bucket" == MERGED ]] || return 1
+    if [[ "$pr_state" == MERGED && -n "$pr_head" && -n "$wt_head" ]]; then
+        [[ "$pr_head" == "$wt_head" ]]
+        return
+    fi
+    [[ "$unpushed" != true ]]
 }
 
 # sweep_would_kill_own_session <repo> <path> <branch>
@@ -242,20 +251,6 @@ sweep_would_kill_own_session() {
     repo_name="${repo##*/}"
     session_name_for_removed "$repo_name" "$path" "$branch"
     [[ "$cur_session" == "$session_name" ]]
-}
-
-# sweep_remove_cmd <repo> <path> <branch> <locked>
-#   Render the exact command sequence remove_worktree runs, as text — the
-#   ONE place that knows it, so the dry-run "would run:" line can never drift
-#   from what --apply actually does (L1).
-sweep_remove_cmd() {
-    local repo="$1" path="$2" branch="$3" locked="$4" target cmd
-    target="${branch:-$path}"
-    cmd=""
-    [[ "$locked" == true ]] && cmd+="git -C $repo worktree unlock $path && "
-    cmd+="wt -C $repo remove --foreground --no-delete-branch $target"
-    [[ -n "$branch" ]] && cmd+=" && git -C $repo branch -D $branch"
-    printf '%s' "$cmd"
 }
 
 # Sourced (tests/test-worktree-sweep.sh) rather than executed: hand back the
@@ -364,6 +359,7 @@ remove_worktree() {
     local repo="$1" path="$2" branch="$3" locked="$4" target unlocked=false
     target="${branch:-$path}"
     REMOVE_FAIL_NOTE=""
+    REMOVE_NOTE=""
     if [[ "$locked" == true ]]; then
         if git -C "$repo" worktree unlock "$path" 2>/dev/null; then
             unlocked=true
@@ -373,8 +369,8 @@ remove_worktree() {
         [[ "$unlocked" == true ]] && REMOVE_FAIL_NOTE=" (worktree was unlocked before this failure and is left unlocked)"
         return 1
     fi
-    if [[ -n "$branch" ]]; then
-        git -C "$repo" branch -D "$branch" >/dev/null 2>&1
+    if [[ -n "$branch" ]] && ! git -C "$repo" branch -D "$branch" >/dev/null 2>&1; then
+        REMOVE_NOTE="; branch $branch KEPT (git branch -D failed — delete it by hand)"
     fi
     return 0
 }
@@ -395,11 +391,15 @@ on_worktree_block() {
 
     # B3: a MERGED bucket with local-only commits (made after the merge
     # point) is never removable — surface it, never delete it.
-    if ! sweep_is_removable "$bucket" "$f_unpushed"; then
+    if ! sweep_is_removable "$bucket" "$f_unpushed" "$f_pr_state" "$f_pr_head" "$wt_head"; then
         CNT_SKIP=$((CNT_SKIP + 1))
         repo_out+=$(printf '  SKIP    %-24s %-16s %s\n' "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path")")
         repo_out+=$'\n'
-        repo_out+=$(printf '      merged upstream, but this worktree has local commits not on the merged branch — needs manual review, never auto-removed\n')
+        if [[ "$f_pr_state" == MERGED && -n "$f_pr_head" ]]; then
+            repo_out+=$(printf '      merged upstream, but this worktree is not at the merged PR'"'"'s head commit — needs manual review, never auto-removed\n')
+        else
+            repo_out+=$(printf '      merged, but no origin/%s to vouch for its commits (missing, or local commits ahead of it) — needs manual review, never auto-removed\n' "${branch:-HEAD}")
+        fi
         repo_out+=$'\n'
         return 0
     fi
@@ -423,7 +423,7 @@ on_worktree_block() {
 
     # P3: never start a removal whose background post-remove hook would kill
     # the tmux session running this very sweep.
-    if [[ "$APPLY" == true ]] && sweep_would_kill_own_session "$repo" "$path" "$branch"; then
+    if sweep_would_kill_own_session "$repo" "$path" "$branch"; then
         CNT_SKIP=$((CNT_SKIP + 1))
         repo_out+=$(printf '  SKIP    %-24s %-16s %s\n' "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path")")
         repo_out+=$'\n'
@@ -458,7 +458,7 @@ on_worktree_block() {
 
     if [[ "$APPLY" == true ]]; then
         if remove_worktree "$repo" "$path" "$branch" "$locked"; then
-            repo_out+=$(printf '      removed\n')
+            repo_out+=$(printf '      removed%s\n' "$REMOVE_NOTE")
         else
             CNT_FAIL=$((CNT_FAIL + 1))
             repo_out+=$(printf '      FAILED to remove (left in place)%s\n' "$REMOVE_FAIL_NOTE")
@@ -488,9 +488,9 @@ fi
 echo
 echo "-- summary --"
 if [[ "$APPLY" == true ]]; then
-    printf 'removed:%d  skipped(at-risk):%d  failed:%d\n' "$CNT_REMOVE" "$CNT_SKIP" "$CNT_FAIL"
+    printf 'removed:%d  skipped:%d  failed:%d\n' "$CNT_REMOVE" "$CNT_SKIP" "$CNT_FAIL"
 else
-    printf 'would-remove:%d  skipped(at-risk):%d\n' "$CNT_REMOVE" "$CNT_SKIP"
+    printf 'would-remove:%d  skipped:%d\n' "$CNT_REMOVE" "$CNT_SKIP"
     if (( CNT_REMOVE > 0 )); then
         echo "dry-run — re-run with --apply to remove"
     else

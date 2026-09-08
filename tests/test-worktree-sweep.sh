@@ -41,6 +41,10 @@ repo=$(dirname "$here")
 
 # shellcheck source=/dev/null
 source "$repo/bin/worktree-sweep"
+# sweep_remove_cmd lives in the doctor (one renderer for both tools); the sweep
+# only sources it past its own guard, so the test sources it directly.
+# shellcheck source=/dev/null
+source "$repo/bin/worktree-doctor"
 
 pass=0
 fail=0
@@ -123,6 +127,15 @@ if [[ "$got" == "node_modules,.venv," ]]; then
     ok "commented-out header ignored; trailing comment's quoted words never harvested"
 else
     bad "commented exclude line" "got [$got] want [node_modules,.venv,]"
+fi
+
+indented="$tmp/indented.toml"
+printf '  [step.copy-ignored]\n  exclude = ["dist"]\n' > "$indented"
+got=$(parse_copy_ignored_excludes "$indented" | tr '\n' ',')
+if [[ "$got" == "dist," ]]; then
+    ok "indented table header (legal TOML) still matched"
+else
+    bad "indented header" "got [$got] want [dist,]"
 fi
 
 echo "── classify_ignored_file: cache / copied-in / at-risk"
@@ -247,6 +260,44 @@ if ! sweep_is_removable PARKED false; then
 else
     bad "PARKED bucket" "expected NOT removable"
 fi
+if sweep_is_removable MERGED true MERGED abc123 abc123; then
+    ok "merged PR, worktree AT the PR head -> removable even with origin/<branch> gone"
+else
+    bad "MERGED at PR head" "expected removable"
+fi
+if ! sweep_is_removable MERGED false MERGED abc123 def456; then
+    ok "merged PR, worktree NOT at the PR head -> NOT removable even when nothing is unpushed"
+else
+    bad "MERGED off PR head" "expected NOT removable"
+fi
+if sweep_is_removable MERGED false MERGED "" def456; then
+    ok "merged PR but head unknown -> falls back to the unpushed rule"
+else
+    bad "MERGED unknown head" "expected removable via unpushed rule"
+fi
+
+echo "── sweep_would_kill_own_session (P3): only the session named after the worktree"
+# shellcheck source=/dev/null
+source "$repo/bin/project-dirs-lib"
+tmux() { printf '%s\n' "$STUB_SESSION"; }
+session_name_for_branch myrepo feat/x
+p3_name="$session_name"
+if TMUX=stub STUB_SESSION="$p3_name" sweep_would_kill_own_session /r/myrepo /r/myrepo.feat-x feat/x; then
+    ok "current session is the worktree's own -> detected"
+else
+    bad "P3 same session" "expected detection for session [$p3_name]"
+fi
+if ! TMUX=stub STUB_SESSION=elsewhere sweep_would_kill_own_session /r/myrepo /r/myrepo.feat-x feat/x; then
+    ok "current session is another -> not detected"
+else
+    bad "P3 other session" "expected no detection"
+fi
+if ! TMUX= STUB_SESSION="$p3_name" sweep_would_kill_own_session /r/myrepo /r/myrepo.feat-x feat/x; then
+    ok "outside tmux -> not detected"
+else
+    bad "P3 no tmux" "expected no detection"
+fi
+unset -f tmux
 
 echo "── sweep_remove_cmd (L1): dry-run rendering matches what remove_worktree runs"
 got=$(sweep_remove_cmd /repo /repo/wt branchname false)
@@ -270,19 +321,23 @@ if [[ "$got" == "$want" ]]; then
 else
     bad "sweep_remove_cmd detached" "got [$got] want [$want]"
 fi
+got=$(sweep_remove_cmd "/my repo" "/my repo/wt x" "" true)
+want='git -C /my\ repo worktree unlock /my\ repo/wt\ x && wt -C /my\ repo remove --foreground --no-delete-branch /my\ repo/wt\ x'
+if [[ "$got" == "$want" ]]; then
+    ok "paths with spaces are shell-quoted (paste-safe)"
+else
+    bad "sweep_remove_cmd quoting" "got [$got] want [$want]"
+fi
 
 echo "── B5: a clean --apply run (no removals, no failures) exits 0"
 if ! command -v wt >/dev/null 2>&1; then
     ok "skipped (wt not on PATH)"
+elif ! command -v lsof >/dev/null 2>&1; then
+    ok "skipped (lsof not on PATH — --apply refuses to run without it)"
 else
-    # A single nonexistent-path entry, not an empty array: bin/project-dirs-lib's
-    # project_dirs() indexes search_dirs[@] unguarded by element count (unlike
-    # every array it hands back), which bash 3.2 treats as unbound under
-    # `set -u` when the array has zero elements — a real repo's search_dirs is
-    # never empty, so that landmine is pre-existing and out of this round's
-    # scope; sidestep it rather than trip it.
+    # No projects at all: the run goes straight to the summary/exit path.
     b5_conf="$tmp/b5-search-dirs.sh"
-    printf 'search_dirs=("%s/no-such-project:0")\n' "$tmp" > "$b5_conf"
+    printf 'search_dirs=()\n' > "$b5_conf"
     b5_out=$(PROJECT_DIRS_LOCAL="$b5_conf" HOME="$tmp" bash "$repo/bin/worktree-sweep" --apply --offline 2>&1)
     b5_rc=$?
     if [[ $b5_rc -eq 0 ]]; then
