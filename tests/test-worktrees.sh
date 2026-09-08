@@ -104,6 +104,15 @@ action_for_ "merged, unlocked -> points at the sweep verb (the actor)" MERGED fa
 action_for_ "merged, locked -> same (the sweep unlocks itself)" MERGED true \
     "worktrees sweep --apply  (removes every MERGED row; dry-run without --apply, -v shows each command)"
 
+echo "── where_for: agent / wt tag, else the shortened path"
+for probe in "/r/proj/.claude/worktrees/agent-1|agent" "/r/proj.feat-x|wt" "/r/elsewhere/proj|/r/elsewhere/proj"; do
+    if [[ "$(where_for "${probe%%|*}" /r/proj)" == "${probe##*|}" ]]; then
+        printf '  ok   %s -> %s\n' "${probe%%|*}" "${probe##*|}"; pass=$(( pass + 1 ))
+    else
+        printf '  FAIL %s got [%s] want [%s]\n' "${probe%%|*}" "$(where_for "${probe%%|*}" /r/proj)" "${probe##*|}"; fail=$(( fail + 1 ))
+    fi
+done
+
 echo "── shorten: repo-relative inside the repo, ~-shortened elsewhere"
 if [[ "$(shorten /r/proj/.claude/worktrees/agent-1 /r/proj)" == ".claude/worktrees/agent-1" ]]; then
     printf '  ok   %s\n' "path under the repo -> relative to it"; pass=$(( pass + 1 ))

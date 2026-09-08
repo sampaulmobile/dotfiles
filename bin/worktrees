@@ -194,6 +194,20 @@ shorten() {
     printf '%s' "$p"
 }
 
+# where_for <path> <repo> — the WHERE column: `agent` for a harness-made
+# worktree under <repo>/.claude/worktrees/, `wt` for a worktrunk sibling
+# (<repo>.<branch> next to the hub), else the shortened path. The agent id
+# and the sibling dir name carry nothing the branch column doesn't; -v prints
+# the exact path in the command.
+where_for() {
+    local p="$1" repo="$2"
+    case "$p" in
+        "$repo"/.claude/worktrees/*) printf 'agent' ;;
+        "$repo".*)                   printf 'wt' ;;
+        *)                           shorten "$p" "$repo" ;;
+    esac
+}
+
 # classify_worktree <live> <dirty> <prunable> <pr_state> <unpushed> <merged_local>
 #   live/dirty/prunable/unpushed/merged_local: "true" or "false".
 #   pr_state: one of MERGED, CLOSED, OPEN, none, unknown.
@@ -331,6 +345,57 @@ is_live() {
     return 1
 }
 
+# load_pr_cache <repo> — one `gh pr list` for the whole repo into PR_CACHE
+# (TSV: headRefName number state headRefOid url, newest first), replacing a
+# network call per worktree (0.5s each). PR_CACHE_COMPLETE is true when the
+# list came back under its limit, i.e. it holds every PR of the repo and a
+# branch missing from it has none; a truncated list keeps the per-branch
+# lookup as the fallback for misses. Loaded lazily, on the first worktree
+# that needs it — most repos have no extra worktrees and must cost no call.
+PR_CACHE=""
+PR_CACHE_REPO=""
+PR_CACHE_OK=false
+PR_CACHE_COMPLETE=false
+PR_CACHE_LIMIT=200
+PR_PREFETCH_DIR=""
+_pr_list() {
+    cd "$1" 2>/dev/null && gh pr list --state all --limit "$PR_CACHE_LIMIT" \
+        --json number,state,headRefName,headRefOid,url \
+        --jq '.[] | [.headRefName, (.number|tostring), .state, .headRefOid, .url] | @tsv' 2>/dev/null
+}
+# prefetch_pr_lists <repo>... — run _pr_list for every given repo at once
+# (one background gh per repo, results in PR_PREFETCH_DIR keyed by path);
+# load_pr_cache picks a prefetched result up instead of calling gh itself.
+prefetch_pr_lists() {
+    local r key
+    [[ "$GH_OK" == true ]] && (( $# )) || return 0
+    PR_PREFETCH_DIR=$(mktemp -d "${TMPDIR:-/tmp}/worktrees-pr.XXXXXX") || { PR_PREFETCH_DIR=""; return 0; }
+    for r in "$@"; do
+        key="${r//\//_}"
+        ( _pr_list "$r" > "$PR_PREFETCH_DIR/$key"; echo $? > "$PR_PREFETCH_DIR/$key.rc" ) &
+    done
+    wait
+}
+load_pr_cache() {
+    local repo="$1" n key rc
+    [[ "$PR_CACHE_REPO" == "$repo" ]] && return 0
+    PR_CACHE=""; PR_CACHE_REPO="$repo"; PR_CACHE_OK=false; PR_CACHE_COMPLETE=false
+    [[ "$GH_OK" == true ]] || return 0
+    key="${repo//\//_}"
+    if [[ -n "$PR_PREFETCH_DIR" && -f "$PR_PREFETCH_DIR/$key.rc" ]]; then
+        rc=$(<"$PR_PREFETCH_DIR/$key.rc")
+        [[ "$rc" == 0 ]] || return 0
+        PR_CACHE=$(<"$PR_PREFETCH_DIR/$key")
+    else
+        PR_CACHE=$(_pr_list "$repo") || return 0
+    fi
+    PR_CACHE_OK=true
+    n=0
+    while IFS= read -r _l; do [[ -n "$_l" ]] && n=$((n + 1)); done <<< "$PR_CACHE"
+    (( n < PR_CACHE_LIMIT )) && PR_CACHE_COMPLETE=true
+    return 0
+}
+
 # default_ref_for <repo> — the default-branch commit-ish to compare worktree
 # HEADs against: origin/HEAD's symbolic ref, falling back to a local
 # main/master. Empty when a repo has neither (merged_local then reports
@@ -443,11 +508,24 @@ derive_worktree_facts() {
     f_pr_head=""
     f_pr_disp="pr:unknown"
     if [[ -n "$branch" ]] && [[ "$GH_OK" == true ]]; then
-        local pr_line gh_rc pr_num pr_url
-        pr_line=$(cd "$repo" 2>/dev/null && gh pr list --head "$branch" --state all \
-            --json number,state,headRefOid,url \
-            --jq '(.[0] // empty) | [(.number|tostring), .state, .headRefOid, .url] | @tsv' 2>/dev/null)
-        gh_rc=$?
+        local pr_line="" gh_rc=0 pr_num pr_url _head _l hit=false
+        load_pr_cache "$repo"
+        if [[ "$PR_CACHE_OK" == true ]]; then
+            while IFS= read -r _l; do
+                _head="${_l%%$'\t'*}"
+                if [[ "$_head" == "$branch" ]]; then
+                    pr_line="${_l#*$'\t'}"
+                    hit=true
+                    break
+                fi
+            done <<< "$PR_CACHE"
+        fi
+        if [[ "$hit" == false && "$PR_CACHE_COMPLETE" == false ]]; then
+            pr_line=$(cd "$repo" 2>/dev/null && gh pr list --head "$branch" --state all \
+                --json number,state,headRefOid,url \
+                --jq '(.[0] // empty) | [(.number|tostring), .state, .headRefOid, .url] | @tsv' 2>/dev/null)
+            gh_rc=$?
+        fi
         if [[ $gh_rc -eq 0 ]]; then
             if [[ -z "$pr_line" ]]; then
                 f_pr_state="none"
@@ -801,7 +879,7 @@ report_row() {
     if [[ "$VERBOSE" == true ]]; then
         detail="      $(action_for "$bucket" "$repo" "$path" "$branch" "$locked")"
     fi
-    rows_add "$bucket" "${branch:-(detached)}" "$f_pr_disp" "$flags" "$f_age" "$(shorten "$path" "$repo")" "$detail"
+    rows_add "$bucket" "${branch:-(detached)}" "$f_pr_disp" "$flags" "$f_age" "$(where_for "$path" "$repo")" "$detail"
 }
 
 # sweep_row <path> <branch> <locked> <prunable> <wt_head>
@@ -825,7 +903,7 @@ sweep_row() {
         else
             detail="      merged, but no origin/${branch:-HEAD} to vouch for its commits (missing, or local commits ahead of it) — needs manual review, never auto-removed"
         fi
-        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path" "$repo")" "" "" "$detail"
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" "$detail"
         return 0
     fi
 
@@ -839,14 +917,14 @@ sweep_row() {
             [[ -z "$rel" ]] && continue
             detail+=$'\n'"        $rel"
         done <<< "$at_risk"
-        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path" "$repo")" "" "" "$detail"
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" "$detail"
         return 0
     fi
 
     # The post-remove hook would kill the session this sweep runs in.
     if sweep_would_kill_own_session "$repo" "$path" "$branch"; then
         CNT_SKIP=$((CNT_SKIP + 1))
-        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path" "$repo")" "" "" \
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" \
             "      merged, but removing it would kill the tmux session this sweep is running in — run it from elsewhere"
         return 0
     fi
@@ -857,7 +935,7 @@ sweep_row() {
         init_liveness
         if is_live "$path"; then
             CNT_SKIP=$((CNT_SKIP + 1))
-            rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path" "$repo")" "" "" \
+            rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" \
                 "      merged, but became live just before removal (re-checked) — left in place"
             return 0
         fi
@@ -878,7 +956,7 @@ sweep_row() {
     elif [[ "$VERBOSE" == true ]]; then
         detail+="${detail:+$nl}      would run: $(sweep_remove_cmd "$repo" "$path" "$branch" "$locked")"
     fi
-    rows_add REMOVE "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path" "$repo")" "" "" "$detail"
+    rows_add REMOVE "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" "$detail"
 }
 
 on_worktree_block() {
@@ -888,6 +966,14 @@ on_worktree_block() {
 # Guarded on element count, not just "declared" — see the note above the
 # same guard around project_dirs_out.
 if (( ${#repos[@]} )); then
+# Only repos with a linked worktree ever need PR state; fetch their lists in
+# parallel up front (the serial cost was one gh round-trip per such repo).
+_with_wts=()
+for repo in "${repos[@]}"; do
+    _n=$(git -C "$repo" worktree list --porcelain 2>/dev/null | grep -c '^worktree ')
+    (( _n > 1 )) && _with_wts+=("$repo")
+done
+if (( ${#_with_wts[@]} )); then prefetch_pr_lists "${_with_wts[@]}"; fi
 rows_reset
 for repo in "${repos[@]}"; do
     default_ref=$(default_ref_for "$repo")
@@ -897,6 +983,7 @@ for repo in "${repos[@]}"; do
     parse_porcelain_blocks "$repo" < <(git -C "$repo" worktree list --porcelain 2>/dev/null)
 done
 if [[ "$MODE" == sweep ]]; then rows_render 6; else rows_render 9 "$SHOW_ALL"; fi
+[[ -n "$PR_PREFETCH_DIR" ]] && rm -rf "$PR_PREFETCH_DIR"
 fi
 
 echo
