@@ -21,10 +21,14 @@ DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 
 usage() {
     cat <<'EOF'
-usage: worktree-doctor [--offline] [--all]
+usage: worktree-doctor [--offline] [--all] [-v|--verbose]
 
   --offline   skip gh entirely (every worktree's PR state -> pr:unknown)
   --all       also print repos with no extra worktrees (one "clean" line)
+  -v          print, under each row, the command that would act on it
+
+Rows are grouped: MERGED, ABANDONED, PRUNABLE (act), then PARKED, SHIPPED?
+(surface), then DIRTY, IN-REVIEW, LIVE (in progress).
 
 Read-only. Exit 0 when nothing is removable, 1 when at least one worktree
 is MERGED, ABANDONED or PRUNABLE.
@@ -53,6 +57,83 @@ paint() {
     local padded
     padded=$(printf "%-${2}s" "$1")
     printf '%s%s%s' "$(bucket_color "$1")" "$padded" "$C_RESET"
+}
+
+# ---- row buffer: every row collected first, printed once at the end ----
+# Both tools add rows here while parsing and print them in one pass, so
+# column widths fit the content ACROSS repos and rows group by label in the
+# order below (act-on-these first, then surface, then in-progress). A row's
+# detail is pre-indented text printed beneath it, "" for none — the CALLER
+# decides whether a detail is attached (e.g. only under -v).
+BUCKET_ORDER="MERGED ABANDONED PRUNABLE PARKED SHIPPED? DIRTY IN-REVIEW LIVE REMOVE SKIP"
+row_n=0
+rows_reset() {
+    row_n=0
+    row_repo=() row_label=() row_c1=() row_c2=() row_c3=() row_c4=() row_c5=() row_detail=()
+}
+# rows_add <label> <c1> <c2> <c3> <c4> <c5> <detail>   (unused columns: "";
+# the repo is the caller's $repo)
+rows_add() {
+    row_repo[row_n]="$repo"; row_label[row_n]="$1"
+    row_c1[row_n]="$2"; row_c2[row_n]="$3"; row_c3[row_n]="$4"
+    row_c4[row_n]="$5"; row_c5[row_n]="$6"; row_detail[row_n]="$7"
+    row_n=$((row_n + 1))
+}
+_row_cell() {
+    case "$1" in
+        0) cell="${row_c1[$2]}" ;; 1) cell="${row_c2[$2]}" ;; 2) cell="${row_c3[$2]}" ;;
+        3) cell="${row_c4[$2]}" ;; 4) cell="${row_c5[$2]}" ;;
+    esac
+}
+# rows_render <label-width> [<show-clean>] — print every repo in $repos
+# order: a `== repo` header, then its rows grouped by BUCKET_ORDER. A repo
+# with no rows is silent unless <show-clean> is true (then "clean").
+rows_render() {
+    local lw="$1" show_clean="${2:-false}" i c b w cell r have line
+    local -a widths=(0 0 0 0 0)
+    for ((i = 0; i < row_n; i++)); do
+        for c in 0 1 2 3 4; do
+            _row_cell "$c" "$i"
+            if (( ${#cell} > widths[c] )); then widths[c]=${#cell}; fi
+        done
+    done
+    local last=0
+    for c in 0 1 2 3 4; do if (( widths[c] )); then last=$c; fi; done
+    (( ${#repos[@]} )) || return 0
+    for r in "${repos[@]}"; do
+        have=false
+        for ((i = 0; i < row_n; i++)); do
+            if [[ "${row_repo[i]}" == "$r" ]]; then have=true; break; fi
+        done
+        if [[ "$have" == false ]]; then
+            if [[ "$show_clean" == true ]]; then
+                printf '\n== %s\n' "$(shorten "$r")"
+                echo "  clean"
+            fi
+            continue
+        fi
+        printf '\n== %s\n' "$(shorten "$r")"
+        for b in $BUCKET_ORDER; do
+            for ((i = 0; i < row_n; i++)); do
+                [[ "${row_repo[i]}" == "$r" && "${row_label[i]}" == "$b" ]] || continue
+                line="  $(paint "$b" "$lw")"
+                for c in 0 1 2 3 4; do
+                    w=${widths[c]}
+                    (( w )) || continue
+                    _row_cell "$c" "$i"
+                    if (( c == last )); then
+                        line+="  $cell"
+                    else
+                        line+=$(printf "  %-${w}s" "$cell")
+                    fi
+                done
+                printf '%s\n' "$line"
+                if [[ -n "${row_detail[i]}" ]]; then
+                    printf '%s\n' "${row_detail[i]}"
+                fi
+            done
+        done
+    done
 }
 
 # shorten <path> [<repo>] — <path> relative to <repo> when it is inside it
@@ -346,11 +427,13 @@ fi
 
 # ---- args ----
 OFFLINE=false
+VERBOSE=false
 SHOW_ALL=false
 for arg in "$@"; do
     case "$arg" in
         --offline) OFFLINE=true ;;
         --all) SHOW_ALL=true ;;
+        -v|--verbose) VERBOSE=true ;;
         -h|--help) usage; exit 0 ;;
         *)
             echo "worktree-doctor: unknown argument: $arg" >&2
@@ -404,8 +487,8 @@ count_bucket() {
 # on_worktree_block <path> <branch> <locked> <prunable> <wt_head>
 #   The real per-row derivation and printing for parse_porcelain_blocks.
 #   Derivation is derive_worktree_facts (shared with the sweeper); this just
-#   classifies and formats. Depends on globals the per-repo loop below sets:
-#   $repo, $default_ref and $repo_out (the current repo's accumulated text).
+#   classifies and buffers a row. Depends on globals the per-repo loop below
+#   sets: $repo and $default_ref.
 on_worktree_block() {
     local path="$1" branch="$2" locked="$3" prunable="$4" wt_head="$5"
 
@@ -422,33 +505,26 @@ on_worktree_block() {
     flags="${flags% }"
     [[ -z "$flags" ]] && flags="-"
 
-    repo_out+=$(printf '  %s %-28s %-16s %-20s %-14s %s\n' \
-        "$(paint "$bucket" 9)" "${branch:-(detached)}" "$f_pr_disp" "$flags" "$f_age" "$(shorten "$path" "$repo")")
-    repo_out+=$'\n'
-    repo_out+=$(printf '      %s\n' "$(action_for "$bucket" "$repo" "$path" "$branch" "$locked")")
-    repo_out+=$'\n'
+    local detail=""
+    if [[ "$VERBOSE" == true ]]; then
+        detail="      $(action_for "$bucket" "$repo" "$path" "$branch" "$locked")"
+    fi
+    rows_add "$bucket" "${branch:-(detached)}" "$f_pr_disp" "$flags" "$f_age" "$(shorten "$path" "$repo")" "$detail"
 }
 
 # Guarded on element count, not just "declared" — see the note above the
 # same guard around project_dirs_out.
 if (( ${#repos[@]} )); then
+rows_reset
 for repo in "${repos[@]}"; do
     default_ref=$(default_ref_for "$repo")
-    repo_out=""
 
     # Read via process substitution (not a pipe into a while loop) so the
     # counters above survive past this call — bash runs `cmd | while` in a
     # subshell, `< <(cmd)` does not.
     parse_porcelain_blocks "$repo" < <(git -C "$repo" worktree list --porcelain 2>/dev/null)
-
-    if [[ -n "$repo_out" ]]; then
-        printf '\n== %s\n' "$(shorten "$repo")"
-        printf '%s' "$repo_out"
-    elif [[ "$SHOW_ALL" == true ]]; then
-        printf '\n== %s\n' "$(shorten "$repo")"
-        echo "  clean"
-    fi
 done
+rows_render 9 "$SHOW_ALL"
 fi
 
 echo

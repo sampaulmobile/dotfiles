@@ -28,6 +28,8 @@ loss of worktree-unique gitignored data. Dry-run by default.
               left alone — the safe direction)
   -v          print, under each REMOVE row, the exact command --apply runs
 
+REMOVE rows first, then SKIP rows (each with the reason it was skipped).
+
 Run it once with no flags, read the plan, then re-run with --apply.
 Exit 0 on a clean run; 2 on a removal failure under --apply.
 EOF
@@ -318,11 +320,12 @@ remove_worktree() {
 
 # on_worktree_block <path> <branch> <locked> <prunable> <wt_head>
 #   Per-worktree callback of parse_porcelain_blocks; acts only on MERGED.
-#   Appends to $repo_out and bumps the counters in THIS shell — the caller is
-#   fed by process substitution, not a pipe, so both survive.
+#   Buffers a row and bumps the counters in THIS shell — the caller is fed by
+#   process substitution, not a pipe, so both survive. Under --apply the
+#   removal happens here; only the printing is deferred.
 on_worktree_block() {
     local path="$1" branch="$2" locked="$3" prunable="$4" wt_head="$5"
-    local bucket at_risk n rel
+    local bucket at_risk n rel detail nl=$'\n'
 
     derive_worktree_facts "$path" "$branch" "$prunable" "$wt_head"
     bucket=$(classify_worktree "$f_live" "$f_dirty" "$prunable" "$f_pr_state" "$f_unpushed" "$f_merged_local")
@@ -331,14 +334,12 @@ on_worktree_block() {
     # Removable only if the worktree carries nothing the merge did not.
     if ! sweep_is_removable "$bucket" "$f_unpushed" "$f_pr_state" "$f_pr_head" "$wt_head"; then
         CNT_SKIP=$((CNT_SKIP + 1))
-        repo_out+=$(printf '  %s%-24s %-16s %s\n' "$(paint SKIP 8)" "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path" "$repo")")
-        repo_out+=$'\n'
         if [[ "$f_pr_state" == MERGED && -n "$f_pr_head" ]]; then
-            repo_out+=$(printf '      merged upstream, but this worktree is not at the merged PR'"'"'s head commit — needs manual review, never auto-removed\n')
+            detail="      merged upstream, but this worktree is not at the merged PR's head commit — needs manual review, never auto-removed"
         else
-            repo_out+=$(printf '      merged, but no origin/%s to vouch for its commits (missing, or local commits ahead of it) — needs manual review, never auto-removed\n' "${branch:-HEAD}")
+            detail="      merged, but no origin/${branch:-HEAD} to vouch for its commits (missing, or local commits ahead of it) — needs manual review, never auto-removed"
         fi
-        repo_out+=$'\n'
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path" "$repo")" "" "" "$detail"
         return 0
     fi
 
@@ -347,25 +348,20 @@ on_worktree_block() {
     if [[ -n "$at_risk" ]] && [[ "$FORCE" == false ]]; then
         n=$(printf '%s\n' "$at_risk" | grep -c .)
         CNT_SKIP=$((CNT_SKIP + 1))
-        repo_out+=$(printf '  %s%-24s %-16s %s\n' "$(paint SKIP 8)" "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path" "$repo")")
-        repo_out+=$'\n'
-        repo_out+=$(printf '      merged, but %s at-risk gitignored file(s) — inspect, or --force to remove anyway:\n' "$n")
-        repo_out+=$'\n'
+        detail="      merged, but $n at-risk gitignored file(s) — inspect, or --force to remove anyway:"
         while IFS= read -r rel; do
             [[ -z "$rel" ]] && continue
-            repo_out+=$(printf '        %s\n' "$rel")
-            repo_out+=$'\n'
+            detail+=$'\n'"        $rel"
         done <<< "$at_risk"
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path" "$repo")" "" "" "$detail"
         return 0
     fi
 
     # The post-remove hook would kill the session this sweep runs in.
     if sweep_would_kill_own_session "$repo" "$path" "$branch"; then
         CNT_SKIP=$((CNT_SKIP + 1))
-        repo_out+=$(printf '  %s%-24s %-16s %s\n' "$(paint SKIP 8)" "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path" "$repo")")
-        repo_out+=$'\n'
-        repo_out+=$(printf '      merged, but removing it would kill the tmux session this sweep is running in — run it from elsewhere\n')
-        repo_out+=$'\n'
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path" "$repo")" "" "" \
+            "      merged, but removing it would kill the tmux session this sweep is running in — run it from elsewhere"
         return 0
     fi
 
@@ -375,50 +371,40 @@ on_worktree_block() {
         init_liveness
         if is_live "$path"; then
             CNT_SKIP=$((CNT_SKIP + 1))
-            repo_out+=$(printf '  %s%-24s %-16s %s\n' "$(paint SKIP 8)" "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path" "$repo")")
-            repo_out+=$'\n'
-            repo_out+=$(printf '      merged, but became live just before removal (re-checked) — left in place\n')
-            repo_out+=$'\n'
+            rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path" "$repo")" "" "" \
+                "      merged, but became live just before removal (re-checked) — left in place"
             return 0
         fi
     fi
 
     CNT_REMOVE=$((CNT_REMOVE + 1))
+    detail=""
     if [[ -n "$at_risk" ]]; then
-        repo_out+=$(printf '  %s%-24s %-16s %s   (--force: dropping at-risk files)\n' \
-            "$(paint REMOVE 8)" "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path" "$repo")")
-    else
-        repo_out+=$(printf '  %s%-24s %-16s %s\n' "$(paint REMOVE 8)" "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path" "$repo")")
+        detail="      --force: dropping at-risk gitignored files"
     fi
-    repo_out+=$'\n'
-
     if [[ "$APPLY" == true ]]; then
         if remove_worktree "$repo" "$path" "$branch" "$locked"; then
-            repo_out+=$(printf '      removed%s\n' "$REMOVE_NOTE")
+            detail+="${detail:+$nl}      removed$REMOVE_NOTE"
         else
             CNT_FAIL=$((CNT_FAIL + 1))
-            repo_out+=$(printf '      %s to remove (left in place)%s\n' "$(paint FAILED 6)" "$REMOVE_FAIL_NOTE")
+            detail+="${detail:+$nl}      $(paint FAILED 6) to remove (left in place)$REMOVE_FAIL_NOTE"
         fi
     elif [[ "$VERBOSE" == true ]]; then
-        repo_out+=$(printf '      would run: %s\n' "$(sweep_remove_cmd "$repo" "$path" "$branch" "$locked")")
+        detail+="${detail:+$nl}      would run: $(sweep_remove_cmd "$repo" "$path" "$branch" "$locked")"
     fi
-    [[ "$APPLY" == true || "$VERBOSE" == true ]] && repo_out+=$'\n'
+    rows_add REMOVE "${branch:-(detached)}" "$f_pr_disp" "$(shorten "$path" "$repo")" "" "" "$detail"
 }
 
 if (( ${#repos[@]} )); then
+rows_reset
 for repo in "${repos[@]}"; do
     default_ref=$(default_ref_for "$repo")
-    repo_out=""
 
     # Process substitution (not a pipe): on_worktree_block must run in this
     # shell so its counters and, under --apply, its removals take effect here.
     parse_porcelain_blocks "$repo" < <(git -C "$repo" worktree list --porcelain 2>/dev/null)
-
-    if [[ -n "$repo_out" ]]; then
-        printf '\n== %s\n' "$(shorten "$repo")"
-        printf '%s' "$repo_out"
-    fi
 done
+rows_render 6
 fi
 
 echo
