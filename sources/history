@@ -1,7 +1,6 @@
 # ===== HISTORY =====
 
 HISTFILE=$HOME/.zsh_history
-RG_HISTFILE=$HOME/.zsh_history
 
 # if were running in docker (dev)
 if [ ! -z "$DOCKER_DEV" ]; then
@@ -9,7 +8,6 @@ if [ ! -z "$DOCKER_DEV" ]; then
     [ ! -d $hist_dir ] && mkdir $hist_dir
 
     HISTFILE="$hist_dir/.zsh_history"
-    RG_HISTFILE="$hist_dir/.zsh_history"
 fi
 
 if [ -d "$HOME/dropbox/!public" ]; then
@@ -18,7 +16,6 @@ if [ -d "$HOME/dropbox/!public" ]; then
 
     HOSTNAME_SHORT=$(hostname -s)
     HISTFILE="${hist_dir}/$(date -u +%Y-%m-%d.%H.%M.%S)_${HOSTNAME_SHORT}_$$"
-    RG_HISTFILE=$NOT_PUBLIC/history/*
 fi
 
 HISTSIZE=100000
@@ -27,7 +24,7 @@ SAVEHIST=100000
 # Overwrite ZSH's history to show timestamps
 alias history='fc -i -l 1'
 
-# save duplicates (for fzf-history ranking)
+# keep dupes in the flat $HISTFILE fallback (harmless; atuin does its own ranking)
 unsetopt HIST_IGNORE_DUPS
 unsetopt HIST_EXPIRE_DUPS_FIRST
 # setopt HIST_IGNORE_ALL_DUPS
@@ -49,15 +46,9 @@ setopt HIST_NO_STORE
 # setopt EXTENDED_HISTORY
 
 
-function history-fzf() {
-  BUFFER=$(rg -e "^[^#]" -N --no-filename $RG_HISTFILE |
-    LC_ALL='C' sed -E 's/^\: [0-9]+\:[0-9]\;//g' | LC_ALL='C' sort |
-    LC_ALL='C' uniq -c | LC_ALL='C' sort |
-    fzf +s --tac +m -n1..,.. --tiebreak=index --toggle-sort=ctrl-r |
-    sed -E "s/ *[0-9]+ *//")
-  CURSOR=$#BUFFER
-
-  zle reset-prompt
-}
-zle -N history-fzf
-bindkey '^r' history-fzf
+# atuin owns Ctrl+R. --disable-up-arrow leaves zsh's native up-arrow alone;
+# atuin takes only ^R. The flat $HISTFILE above is kept as atuin's import
+# source and a plaintext fallback.
+if command -v atuin &>/dev/null; then
+    eval "$(atuin init zsh --disable-up-arrow)"
+fi

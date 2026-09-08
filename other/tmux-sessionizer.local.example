@@ -1,5 +1,5 @@
 # Machine-local project dirs, sourced by bin/project-dirs-lib (shared by
-# bin/tmux-sessionizer and bin/worktree-doctor) after the defaults, so
+# bin/tmux-sessionizer and bin/worktrees) after the defaults, so
 # redefining search_dirs here replaces them entirely.
 # To use: cp tmux-sessionizer.local.example tmux-sessionizer.local && edit.
 #
