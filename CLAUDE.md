@@ -38,6 +38,7 @@ before pushing.
 | `dots/starship.toml` | `~/.config/starship.toml` | Prompt theme |
 | `dots/ghostty` | `~/.config/ghostty` | Terminal config |
 | `dots/nvim` | `~/.config/nvim` | LazyVim |
+| `dots/atuin.toml` | `~/.config/atuin/config.toml` | Shell history + Ctrl+R fuzzy search (sqlite, local-only, no sync) |
 
 ## Tmux Keybindings
 
