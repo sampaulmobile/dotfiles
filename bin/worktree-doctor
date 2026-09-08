@@ -45,7 +45,7 @@ fi
 bucket_color() {
     [[ -n "$C_RESET" ]] || return 0
     case "$1" in
-        MERGED|REMOVE)               printf '\033[32m' ;;
+        MERGED|REMOVE|removed|would-remove) printf '\033[32m' ;;
         PARKED|SKIP|ABANDONED|PRUNABLE) printf '\033[33m' ;;
         DIRTY|FAILED)                printf '\033[31m' ;;
         LIVE)                        printf '\033[34m' ;;
@@ -134,6 +134,33 @@ rows_render() {
             done
         done
     done
+}
+
+# count_cell <label> <n> — "LABEL:n" for the summary line, in the bucket's
+# color when n > 0 and dim when 0, so the non-zero buckets stand out.
+count_cell() {
+    if (( $2 > 0 )); then
+        printf '%s%s:%d%s' "$(bucket_color "$1")" "$1" "$2" "$C_RESET"
+    elif [[ -n "$C_RESET" ]]; then
+        printf '\033[2m%s:%d%s' "$1" "$2" "$C_RESET"
+    else
+        printf '%s:%d' "$1" "$2"
+    fi
+}
+
+# source_warnings — one line per data source the run had to do without.
+# Silent when both gh and lsof ran: a healthy run needs no footer.
+source_warnings() {
+    if [[ "$GH_OK" != true ]]; then
+        if [[ "${OFFLINE:-false}" == true ]]; then
+            echo "note: gh skipped (--offline) — PR state unknown, squash merges look unmerged"
+        else
+            echo "warning: gh not found — PR state unknown, squash merges look unmerged"
+        fi
+    fi
+    if [[ "$LSOF_RAN" != true ]]; then
+        echo "warning: lsof not found — liveness unknown, nothing can be LIVE"
+    fi
 }
 
 # shorten <path> [<repo>] — <path> relative to <repo> when it is inside it
@@ -528,27 +555,16 @@ rows_render 9 "$SHOW_ALL"
 fi
 
 echo
-echo "-- summary --"
-printf 'LIVE:%d  DIRTY:%d  PRUNABLE:%d  MERGED:%d  ABANDONED:%d  IN-REVIEW:%d  PARKED:%d  SHIPPED?:%d\n' \
-    "$CNT_LIVE" "$CNT_DIRTY" "$CNT_PRUNABLE" "$CNT_MERGED" "$CNT_ABANDONED" \
-    "$CNT_INREVIEW" "$CNT_PARKED" "$CNT_SHIPPED"
-if [[ "$GH_OK" == true ]]; then
-    echo "gh consulted: yes (some per-row lookups may still show pr:unknown on failure)"
-elif [[ "$OFFLINE" == true ]]; then
-    echo "gh consulted: no (--offline)"
-else
-    echo "gh consulted: no (gh not found — every row shows pr:unknown)"
-fi
-if [[ "$LSOF_RAN" == true ]]; then
-    echo "lsof consulted: yes"
-else
-    echo "lsof consulted: no (lsof not found — liveness unknown, treated as not-live)"
-fi
+printf '%s  %s  %s  %s  %s  %s  %s  %s\n' \
+    "$(count_cell MERGED "$CNT_MERGED")" "$(count_cell ABANDONED "$CNT_ABANDONED")" \
+    "$(count_cell PRUNABLE "$CNT_PRUNABLE")" "$(count_cell PARKED "$CNT_PARKED")" \
+    "$(count_cell 'SHIPPED?' "$CNT_SHIPPED")" "$(count_cell DIRTY "$CNT_DIRTY")" \
+    "$(count_cell IN-REVIEW "$CNT_INREVIEW")" "$(count_cell LIVE "$CNT_LIVE")"
+source_warnings
 
+# Exit 1 = something to act on (MERGED/ABANDONED/PRUNABLE), same convention
+# as bin/doctor.
 if (( CNT_MERGED > 0 || CNT_ABANDONED > 0 || CNT_PRUNABLE > 0 )); then
-    echo
-    echo "worktree-doctor: removable worktrees found (see MERGED/ABANDONED/PRUNABLE above)"
     exit 1
 fi
-echo
-echo "worktree-doctor: nothing removable"
+exit 0

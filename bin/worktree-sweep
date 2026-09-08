@@ -408,22 +408,17 @@ rows_render 6
 fi
 
 echo
-echo "-- summary --"
 if [[ "$APPLY" == true ]]; then
-    printf 'removed:%d  skipped:%d  failed:%d\n' "$CNT_REMOVE" "$CNT_SKIP" "$CNT_FAIL"
+    printf '%s  %s  %s\n' "$(count_cell removed "$CNT_REMOVE")" "$(count_cell SKIP "$CNT_SKIP")" "$(count_cell FAILED "$CNT_FAIL")"
 else
-    printf 'would-remove:%d  skipped:%d\n' "$CNT_REMOVE" "$CNT_SKIP"
+    printf '%s  %s\n' "$(count_cell would-remove "$CNT_REMOVE")" "$(count_cell SKIP "$CNT_SKIP")"
     if (( CNT_REMOVE > 0 )); then
         echo "dry-run — re-run with --apply to remove"
     else
         echo "dry-run — nothing to sweep"
     fi
 fi
-if [[ "$LSOF_RAN" == true ]]; then
-    echo "lsof consulted: yes"
-else
-    echo "lsof consulted: no (lsof not found — liveness unknown, treated as not-live)"
-fi
+source_warnings
 
 # `(( CNT_FAIL > 0 )) && exit 2` as the last statement leaks the arithmetic's
 # false status (1) as the script's exit code when CNT_FAIL is 0 (bash 3.2 and
