@@ -1,0 +1,27 @@
+# Atuin shell-history config. atuin records commands into a sqlite DB
+# (~/.local/share/atuin, append-only + multi-session safe) and owns Ctrl+R.
+# Wired up in sources/history via `atuin init zsh --disable-up-arrow`.
+#
+# LOCAL ONLY: sync is disabled. atuin never syncs unless you `atuin login`;
+# these keys make that explicit. Command history can contain secrets, so
+# nothing here leaves the machine.
+auto_sync = false
+update_check = false
+
+## Search UX
+search_mode = "fuzzy"        # fuzzy = fzf-style operators: 'exact ^prefix suffix$ !negate |or
+filter_mode = "global"       # scope each Ctrl+R STARTS in
+workspaces = true            # REQUIRED for the Workspace filter to exist at all
+                             # (defaults false). Even on, Workspace only appears
+                             # in the Ctrl+R cycle while inside a git repo.
+style = "compact"            # auto | full | compact
+inline_height = 20           # don't take the whole screen
+invert = true                # search bar at TOP, list downward (old fzf --reverse feel)
+show_preview = true
+enter_accept = false         # Enter FILLS the line to edit; it does not run it
+
+## Which scopes Ctrl+R cycles through. GOTCHA: `filters` is a [search]-table
+## key — placed at the top level, atuin silently ignores it and cycles all four
+## defaults. Trimmed here to Global <-> Workspace(current git repo).
+[search]
+filters = ["global", "workspace"]
