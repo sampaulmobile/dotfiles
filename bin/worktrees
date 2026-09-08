@@ -28,17 +28,20 @@ DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 
 usage() {
     cat <<'EOF'
-usage: worktrees [--offline] [--all] [-v]                   report (read-only)
-       worktrees sweep [--apply] [--force] [--offline] [-v]  remove MERGED worktrees
+usage: worktrees [--all] [--offline] [-v]                   report (read-only)
+       worktrees sweep [--all] [--apply] [--force] [--offline] [-v]
 
-Report: every worktree of every project bin/project-dirs-lib knows about,
-bucketed LIVE / DIRTY / PRUNABLE / MERGED / ABANDONED / IN-REVIEW / PARKED /
+Scope: inside a git repo (hub or worktree), that repo only; anywhere else,
+every project bin/project-dirs-lib knows about. --all forces every project,
+and in the report also lists the clean ones.
+
+Report: every worktree of the repos in scope, bucketed LIVE / DIRTY / PRUNABLE / MERGED / ABANDONED / IN-REVIEW / PARKED /
 SHIPPED? (first match wins). Rows are grouped: MERGED, ABANDONED, PRUNABLE
 (act), then PARKED, SHIPPED? (surface), then DIRTY, IN-REVIEW, LIVE (in
 progress). Exit 0 when nothing is removable, 1 when at least one worktree is
 MERGED, ABANDONED or PRUNABLE.
   --offline   skip gh entirely (every worktree's PR state -> pr:unknown)
-  --all       also print repos with no extra worktrees (one "clean" line)
+  --all       every project, clean ones included (one "clean" line each)
   -v          print, under each row, the command that would act on it
 
 sweep: remove the MERGED worktrees, guarding against the loss of
@@ -167,9 +170,17 @@ count_cell() {
     fi
 }
 
-# source_warnings — one line per data source the run had to do without.
-# Silent when both gh and lsof ran: a healthy run needs no footer.
+# source_warnings — the scope when narrowed to one repo, then one line per
+# data source the run had to do without. Silent otherwise: a healthy
+# everything-run needs no footer.
 source_warnings() {
+    if [[ -n "${SCOPED:-}" ]]; then
+        if [[ -n "$C_RESET" ]]; then
+            printf '\033[2mscope: %s  (--all for every project)%s\n' "$(shorten "$SCOPED")" "$C_RESET"
+        else
+            printf 'scope: %s  (--all for every project)\n' "$(shorten "$SCOPED")"
+        fi
+    fi
     if [[ "$GH_OK" != true ]]; then
         if [[ "${OFFLINE:-false}" == true ]]; then
             echo "note: gh skipped (--offline) — PR state unknown, squash merges look unmerged"
@@ -775,9 +786,7 @@ for arg in "$@"; do
         --offline) OFFLINE=true ;;
         -v|--verbose) VERBOSE=true ;;
         -h|--help) usage; exit 0 ;;
-        --all)
-            [[ "$MODE" == report ]] || { echo "worktrees: --all is a report flag" >&2; exit 2; }
-            SHOW_ALL=true ;;
+        --all) SHOW_ALL=true ;;
         --apply)
             [[ "$MODE" == sweep ]] || { echo "worktrees: --apply needs the sweep verb: worktrees sweep --apply" >&2; exit 2; }
             APPLY=true ;;
@@ -827,9 +836,18 @@ project_dirs
 
 repos=()
 repos_seen=$'\n'
+# Scope: the repo the cwd is in (a worktree resolves to its hub through the
+# common git dir), unless --all or the cwd is in no repo. Everything the tool
+# needs is per repo, so the other two dozen projects must cost nothing.
+SCOPED=""
+_cwd_common=$(git rev-parse --git-common-dir 2>/dev/null)
+if [[ "$SHOW_ALL" == false && -n "$_cwd_common" ]]; then
+    _cwd_common=$(cd "$_cwd_common" 2>/dev/null && pwd -P)
+    SCOPED="${_cwd_common%/.git}"
+    repos=("$SCOPED")
 # Guarded on element count, not just "declared": bash 3.2 treats
 # "${arr[@]}" on a zero-element array as unbound under `set -u`.
-if (( ${#project_dirs_out[@]} )); then
+elif (( ${#project_dirs_out[@]} )); then
     for _cand in "${project_dirs_out[@]}"; do
         [[ -d "$_cand/.git" ]] || continue
         [[ "$repos_seen" == *$'\n'"$_cand"$'\n'* ]] && continue
