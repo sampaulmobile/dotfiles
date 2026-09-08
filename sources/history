@@ -46,13 +46,9 @@ setopt HIST_NO_STORE
 # setopt EXTENDED_HISTORY
 
 
-# ===== atuin — sqlite-backed history + Ctrl+R (replaces the old fzf picker) =====
-# atuin records into ~/.local/share/atuin (append-only, so a stray
-# truncation can't wipe history the way the flat file could) and binds
-# Ctrl+R to its fuzzy search. Config: ~/.config/atuin/config.toml (local
-# only, no sync). --disable-up-arrow keeps zsh's native up-arrow — atuin
-# takes only Ctrl+R. The flat $HISTFILE above stays as a plaintext fallback
-# and as atuin's import source.
+# atuin owns Ctrl+R. --disable-up-arrow leaves zsh's native up-arrow alone;
+# atuin takes only ^R. The flat $HISTFILE above is kept as atuin's import
+# source and a plaintext fallback.
 if command -v atuin &>/dev/null; then
     eval "$(atuin init zsh --disable-up-arrow)"
 fi
