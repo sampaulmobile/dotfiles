@@ -167,10 +167,8 @@ rows_render() {
                         line+=$(printf "  %-${w}s" "$cell")
                     fi
                 done
-                # Trim trailing spaces: a row whose last column is empty (a
-                # REMOVE row under the SKIP reason column) would else end in
-                # padding. Only plain spaces trail — colour codes sit at the
-                # start (the painted label), never the end.
+                # Strip trailing padding (a REMOVE row's empty reason column).
+                # Safe: colour codes sit at the line start, never the end.
                 line="${line%"${line##*[![:space:]]}"}"
                 printf '%s\n' "$line"
                 if [[ -n "${row_detail[i]}" ]]; then
@@ -728,12 +726,10 @@ worktree_ignored_at_risk() {
 }
 
 # summarize_at_risk   (stdin: at-risk paths, one per line)
-#   Collapse the raw at-risk list to one line per top-level component, with a
-#   file count — the default SKIP detail, so a worktree with 200 per-run
-#   data-test/ files reads as `data-test/  (198 files)` instead of 198 lines.
-#   A path with no `/` (a repo-root file, or the fail-closed placeholder) is
-#   printed verbatim. Order is first appearance. `-v` bypasses this and dumps
-#   every path (see sweep_row). Indented to sit under the SKIP header.
+#   Collapse to one line per top-level component with a file count, so a
+#   worktree's 200 per-run data-test/ files read as `data-test/ (198 files)`,
+#   not 198 lines. A path with no `/` (a repo-root file, or the fail-closed
+#   placeholder) is printed verbatim. sweep_row's -v path dumps every path raw.
 summarize_at_risk() {
     awk -F/ '
         !/./ { next }
@@ -959,10 +955,6 @@ sweep_row() {
     bucket=$(classify_worktree "$f_live" "$f_dirty" "$prunable" "$f_pr_state" "$f_unpushed" "$f_merged_local")
     [[ "$bucket" == MERGED ]] || return 0
 
-    # A SKIP carries its reason as a short rightmost column (the WHY sits on the
-    # row, after where); only the at-risk case adds indented detail below (the
-    # per-dir file summary). What -v/--force do about each is in --help.
-
     # Removable only if the worktree carries nothing the merge did not.
     if ! sweep_is_removable "$bucket" "$f_unpushed" "$f_pr_state" "$f_pr_head" "$wt_head"; then
         CNT_SKIP=$((CNT_SKIP + 1))
@@ -979,9 +971,6 @@ sweep_row() {
 
     if [[ -n "$at_risk" ]] && [[ "$FORCE" == false ]]; then
         CNT_SKIP=$((CNT_SKIP + 1))
-        # Below the row: one line per top-level component with a count (a
-        # worktree's 200 per-run data-test/ files would otherwise bury the
-        # output). -v dumps every path instead.
         if [[ "$VERBOSE" == true ]]; then
             listing=$(printf '%s\n' "$at_risk" | grep . | sed 's/^/        /')
         else
