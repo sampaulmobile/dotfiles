@@ -746,14 +746,15 @@ summarize_at_risk() {
     '
 }
 
-# sweep_is_removable <bucket> <unpushed> [<pr_state> <pr_head> <wt_head>]
-#   MERGED is removable only if the worktree carries nothing the merge did
-#   not: with a merged PR whose head is known, wt_head must equal it;
-#   otherwise no commits ahead of origin/<branch> — and a missing
-#   origin/<branch> refuses too, since nothing then vouches for local commits.
+# sweep_is_removable <bucket> <unpushed> [<pr_state> <pr_head> <wt_head> <merged_local>]
+#   MERGED is removable when nothing unique would be lost, proven any of three
+#   ways: merged_local (contained in the default ref), a merged PR at wt_head,
+#   or a branch not ahead of origin/<branch>. merged_local is checked first —
+#   it vouches even past a PR-head mismatch or a missing origin/<branch>.
 sweep_is_removable() {
-    local bucket="$1" unpushed="$2" pr_state="${3:-}" pr_head="${4:-}" wt_head="${5:-}"
+    local bucket="$1" unpushed="$2" pr_state="${3:-}" pr_head="${4:-}" wt_head="${5:-}" merged_local="${6:-}"
     [[ "$bucket" == MERGED ]] || return 1
+    [[ "$merged_local" == true ]] && return 0
     if [[ "$pr_state" == MERGED && -n "$pr_head" && -n "$wt_head" ]]; then
         [[ "$pr_head" == "$wt_head" ]]
         return
@@ -956,7 +957,7 @@ sweep_row() {
     [[ "$bucket" == MERGED ]] || return 0
 
     # Removable only if the worktree carries nothing the merge did not.
-    if ! sweep_is_removable "$bucket" "$f_unpushed" "$f_pr_state" "$f_pr_head" "$wt_head"; then
+    if ! sweep_is_removable "$bucket" "$f_unpushed" "$f_pr_state" "$f_pr_head" "$wt_head" "$f_merged_local"; then
         CNT_SKIP=$((CNT_SKIP + 1))
         if [[ "$f_pr_state" == MERGED && -n "$f_pr_head" ]]; then
             reason="merged, not at PR head"

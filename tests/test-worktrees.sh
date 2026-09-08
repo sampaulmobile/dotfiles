@@ -532,6 +532,23 @@ if sweep_is_removable MERGED false MERGED "" def456; then
 else
     bad "MERGED unknown head" "expected removable via unpushed rule"
 fi
+# merged_local (6th arg): contained in the local default ref vouches on its
+# own — an unpushed branch name over commits already in main is a stale label.
+if sweep_is_removable MERGED true none "" abc123 true; then
+    ok "merged_local=true, unpushed, no PR -> removable (contained in main)"
+else
+    bad "MERGED merged_local unpushed" "expected removable"
+fi
+if sweep_is_removable MERGED false MERGED abc123 def456 true; then
+    ok "merged_local=true overrides a PR-head mismatch -> removable"
+else
+    bad "MERGED merged_local past PR-head mismatch" "expected removable"
+fi
+if ! sweep_is_removable MERGED true none "" abc123 false; then
+    ok "merged_local=false, unpushed, no PR -> NOT removable (unchanged)"
+else
+    bad "MERGED not-merged_local unpushed" "expected NOT removable"
+fi
 
 echo "── sweep_would_kill_own_session (P3): only the session named after the worktree"
 # shellcheck source=/dev/null
