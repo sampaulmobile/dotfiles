@@ -313,14 +313,11 @@ get_pane_status() {
     classify_pane_status "$raw" "${2:-claude}"
 }
 
-# scan_claude_sessions
+# scan_agent_panes
 #   Scans every pane owned by a live agent process — any window of any
-#   session — and prints one line per session that has at least one:
-#   "<session>\t<status>\t<pane>". Status is the worst across the session's
-#   agent panes (permission > working > idle > unknown) and pane is the id
-#   of the one exhibiting it ("-" when unknown, first-seen wins on a tie),
-#   which is what lets C-y land on the prompt itself rather than on the
-#   session's current window while the prompt blocks in another.
+#   session — and prints one line per such pane:
+#   "<session>\t<pane>\t<window>\t<agent>\t<status>", status being
+#   classify_pane_status's permission | working | idle | unknown.
 #
 #   Two tmux round trips regardless of session count: one list-panes -a,
 #   then one batched capture of ONLY the panes whose tty belongs to an agent
@@ -329,28 +326,26 @@ get_pane_status() {
 #   positive impossible: a non-agent pane's text is never read at all.
 #
 #   Panes are addressed by #{pane_id} (immune to renumbering) and the
-#   separator line carries the session name AND the agent, so blocks stay
+#   separator line carries the session, window and agent, so blocks stay
 #   self-labeled and correctly classified even if a pane disappears between
 #   the two round trips — its capture is simply empty -> "unknown", and the
 #   next call self-heals.
-#   Used by tmux-claude-statusbar (counts + status.tsv) and
-#   tmux-claude-attention's jump (C-y permission targets).
-scan_claude_sessions() {
+scan_agent_panes() {
     local map rest
     map=$(_agent_tty_map) || return 0
 
     local pane_list
-    pane_list=$(tmux list-panes -a -F $'#{session_name}\t#{pane_id}\t#{pane_tty}' 2>/dev/null)
+    pane_list=$(tmux list-panes -a -F $'#{session_name}\t#{pane_id}\t#{window_id}\t#{pane_tty}' 2>/dev/null)
     [[ -z "$pane_list" ]] && return 0
 
-    # agent panes only, as "session\tpane_id\tagent"
+    # agent panes only, as "session\tpane_id\twindow_id\tagent"
     local -a targets=()
-    local sname pid ptty
-    while IFS=$'\t' read -r sname pid ptty; do
+    local sname pid wid ptty
+    while IFS=$'\t' read -r sname pid wid ptty; do
         [[ -z "$pid" ]] && continue
         rest="${map#*$'\n'"${ptty#/dev/}"$'\t'}"
         [[ "$rest" == "$map" ]] && continue
-        targets+=("${sname}"$'\t'"${pid}"$'\t'"${rest%%$'\n'*}")
+        targets+=("${sname}"$'\t'"${pid}"$'\t'"${wid}"$'\t'"${rest%%$'\n'*}")
     done <<< "$pane_list"
     (( ${#targets[@]} == 0 )) && return 0
 
@@ -358,25 +353,18 @@ scan_claude_sessions() {
     # split a block early.
     local sep="@@CLAUDE-SCAN-$$-${RANDOM}@@"
     local -a args=()
-    local entry tsess tpane tagent
+    local entry tpane
     for entry in "${targets[@]}"; do
-        tsess="${entry%%$'\t'*}"
         rest="${entry#*$'\t'}"
         tpane="${rest%%$'\t'*}"
-        tagent="${rest#*$'\t'}"
         # The pane id rides the separator line WITHOUT its %: display -p
         # format-expands the message and strftime eats "%2..."; the parse
         # below puts the % back.
-        args+=(capture-pane -t "$tpane" -p -S -30 \; display-message -p "${sep}${tsess}"$'\t'"${tpane#%}"$'\t'"${tagent}" \;)
+        args+=(capture-pane -t "$tpane" -p -S -30 \; display-message -p "${sep}${entry%%$'\t'*}"$'\t'"${tpane#%}"$'\t'"${rest#*$'\t'}" \;)
     done
     local combined
     combined=$(tmux "${args[@]}" 2>/dev/null)
 
-    # Aggregate per session with delimited strings and a first-seen order
-    # array (bash 3.2 has no associative arrays). Each status set holds
-    # "session\tpane" so the pane behind a session's worst status survives.
-    local perm_s=$'\n' work_s=$'\n' idle_s=$'\n' seen=$'\n'
-    local -a order=()
     local block="" line name pane agent st
     while IFS= read -r line; do
         if [[ "$line" == "$sep"* ]]; then
@@ -384,26 +372,46 @@ scan_claude_sessions() {
             name="${entry%%$'\t'*}"
             rest="${entry#*$'\t'}"
             pane="%${rest%%$'\t'*}"
+            rest="${rest#*$'\t'}"
             agent="${rest#*$'\t'}"
             st=$(classify_pane_status "$block" "$agent")
-            case "$st" in
-                permission) perm_s+="${name}"$'\t'"${pane}"$'\n' ;;
-                working)    work_s+="${name}"$'\t'"${pane}"$'\n' ;;
-                idle)       idle_s+="${name}"$'\t'"${pane}"$'\n' ;;
-            esac
-            if [[ "$seen" != *$'\n'"${name}"$'\n'* ]]; then
-                seen+="${name}"$'\n'
-                order+=("$name")
-            fi
+            printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$pane" "${rest%%$'\t'*}" "$agent" "$st"
             block=""
         else
             block+="$line"$'\n'
         fi
     done <<< "$combined"
+}
+
+# aggregate_session_status <pane-lines>
+#   Folds scan_agent_panes output into one line per session:
+#   "<session>\t<status>\t<pane>". Status is the worst across the session's
+#   agent panes (permission > working > idle > unknown) and pane is the id
+#   of the one exhibiting it ("-" when unknown, first-seen wins on a tie),
+#   which is what lets C-y land on the prompt itself rather than on the
+#   session's current window while the prompt blocks in another.
+aggregate_session_status() {
+    # Delimited strings and a first-seen order array (bash 3.2 has no
+    # associative arrays). Each status set holds "session\tpane" so the pane
+    # behind a session's worst status survives.
+    local perm_s=$'\n' work_s=$'\n' idle_s=$'\n' seen=$'\n'
+    local -a order=()
+    local name pane _w _a st rest
+    while IFS=$'\t' read -r name pane _w _a st; do
+        [[ -z "$name" ]] && continue
+        case "$st" in
+            permission) perm_s+="${name}"$'\t'"${pane}"$'\n' ;;
+            working)    work_s+="${name}"$'\t'"${pane}"$'\n' ;;
+            idle)       idle_s+="${name}"$'\t'"${pane}"$'\n' ;;
+        esac
+        if [[ "$seen" != *$'\n'"${name}"$'\n'* ]]; then
+            seen+="${name}"$'\n'
+            order+=("$name")
+        fi
+    done <<< "$1"
 
     # First "session\t" entry in each set wins. Prefix stripping rather than
     # command substitution: the statusbar runs this whole scan in ~200ms.
-    local rest
     for name in "${order[@]}"; do
         st="unknown"
         pane="-"
@@ -415,6 +423,45 @@ scan_claude_sessions() {
             st="idle"; pane="${rest%%$'\n'*}"
         fi
         printf '%s\t%s\t%s\n' "$name" "$st" "$pane"
+    done
+}
+
+# scan_claude_sessions
+#   scan_agent_panes folded per session by aggregate_session_status.
+scan_claude_sessions() {
+    aggregate_session_status "$(scan_agent_panes)"
+}
+
+# window_status_from_panes <pane-lines> <done-panes>
+#   Folds scan_agent_panes output per window, merging the attention layer's
+#   flagged panes (one "%N" per line): "<window>\t<status>", status being
+#   permission > working > done > idle. Unknown counts as idle: an agent
+#   process does live there.
+window_status_from_panes() {
+    local done_s=$'\n'"${2}"$'\n'
+    local perm_s=$'\n' work_s=$'\n' dn_s=$'\n' seen=$'\n'
+    local -a order=()
+    local _n pane win _a st
+    while IFS=$'\t' read -r _n pane win _a st; do
+        [[ -z "$win" ]] && continue
+        case "$st" in
+            permission) perm_s+="${win}"$'\n' ;;
+            working)    work_s+="${win}"$'\n' ;;
+        esac
+        [[ "$done_s" == *$'\n'"${pane}"$'\n'* ]] && dn_s+="${win}"$'\n'
+        if [[ "$seen" != *$'\n'"${win}"$'\n'* ]]; then
+            seen+="${win}"$'\n'
+            order+=("$win")
+        fi
+    done <<< "$1"
+
+    for win in "${order[@]}"; do
+        if [[ "$perm_s" == *$'\n'"${win}"$'\n'* ]]; then st="permission"
+        elif [[ "$work_s" == *$'\n'"${win}"$'\n'* ]]; then st="working"
+        elif [[ "$dn_s" == *$'\n'"${win}"$'\n'* ]]; then st="done"
+        else st="idle"
+        fi
+        printf '%s\t%s\n' "$win" "$st"
     done
 }
 

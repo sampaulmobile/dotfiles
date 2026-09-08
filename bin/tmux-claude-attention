@@ -72,8 +72,8 @@ cmd_flag_done() {
     # the pane that finished. Nothing to flag without one.
     [[ -z "${TMUX_PANE:-}" ]] && exit 0
 
-    local session wactive
-    IFS=$'\t' read -r session wactive < <(tmux display -pt "$TMUX_PANE" $'#{session_name}\t#{window_active}' 2>/dev/null)
+    local session wactive cur
+    IFS=$'\t' read -r session wactive cur < <(tmux display -pt "$TMUX_PANE" $'#{session_name}\t#{window_active}\t#{@agent_status}' 2>/dev/null)
     [[ -z "$session" ]] && exit 0
 
     # Suppress the flag only when THIS pane is on screen: its window is the
@@ -87,6 +87,13 @@ cmd_flag_done() {
 
     mkdir -p "$FLAG_DIR"
     touch "$(flag_path "$session" "$TMUX_PANE")"
+
+    # A still-busy sibling agent pane in the same window outranks the flag
+    # (window_status_from_panes precedence), so leave those alone.
+    case "$cur" in
+        permission|working) ;;
+        *) tmux set-option -wq -t "$TMUX_PANE" @agent_status done 2>/dev/null ;;
+    esac
 }
 
 cmd_clear() {
@@ -110,10 +117,12 @@ cmd_clear() {
     # session (nvim titles its window after the repo dir, so a hub session
     # "dotfiles" has a window "dotfiles" — and the wrong window's flags got
     # cleared). "=name:" is unambiguously that session's current window.
-    local pane
-    for pane in $(tmux list-panes -t "=${session}:" -F '#{pane_id}' 2>/dev/null); do
+    local pane cur
+    while IFS=$'\t' read -r pane cur; do
+        [[ -z "$pane" ]] && continue
         rm -f "$(flag_path "$session" "$pane")"
-    done
+    done < <(tmux list-panes -t "=${session}:" -F $'#{pane_id}\t#{@agent_status}' 2>/dev/null)
+    [[ "$cur" == "done" ]] && tmux set-option -wq -t "=${session}:" @agent_status idle 2>/dev/null
 }
 
 cmd_list() {
@@ -177,7 +186,12 @@ cmd_jump() {
             # after this select-window.
             tmux select-window -t "$pane" 2>/dev/null \
                 && tmux select-pane -t "$pane" 2>/dev/null
-            rm -f "$(flag_path "$target" "$pane")"
+            local f
+            f=$(flag_path "$target" "$pane")
+            if [[ -e "$f" ]]; then
+                rm -f "$f"
+                tmux set-option -wq -t "$pane" @agent_status idle 2>/dev/null
+            fi
         fi
     }
 

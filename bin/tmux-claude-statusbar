@@ -8,20 +8,22 @@
 #   ✅ done       — panes finished but unseen (bin/tmux-claude-attention)
 #   ●  working    — sessions actively streaming output
 #
-# The scan is tmux-claude-lib's scan_claude_sessions. 🔴/● count per session
-# (a session with two working claudes is one ●); ✅ counts per pane, since
-# each flag is an independent "go look at this".
+# The scan is tmux-claude-lib's scan_agent_panes. 🔴/● count per session (a
+# session with two working claudes is one ●); ✅ counts per pane, since each
+# flag is an independent "go look at this".
 #
-# Side effect: publishes per-session status to
-# ~/.cache/claude-attention/status.tsv ("<session>\t<status>\t<pane>", the
-# pane being the one exhibiting the worst status), rewritten atomically
-# every tick. tmux-sessionizer reads it instead of scanning panes itself.
+# Side effects, every tick: ~/.cache/claude-attention/status.tsv (per-session
+# "<session>\t<status>\t<pane>", the pane being the one exhibiting the worst
+# status, rewritten atomically) for the sessionizer, and the @agent_status
+# window option for the tab tint in dots/tmux.conf — deltas only, so a steady
+# state writes nothing.
 
 source ~/dotfiles/bin/tmux-claude-lib
 
 STATUS_DIR="$HOME/.cache/claude-attention"
 
-status_lines=$(scan_claude_sessions)
+pane_lines=$(scan_agent_panes)
+status_lines=$(aggregate_session_status "$pane_lines")
 
 permission_count=0
 working_count=0
@@ -43,7 +45,21 @@ if { [[ -z "$status_lines" ]] || printf '%s\n' "$status_lines"; } > "${STATUS_DI
     mv -f "${STATUS_DIR}/.status.$$.tmp" "${STATUS_DIR}/status.tsv"
 fi
 
-done_count=$(~/dotfiles/bin/tmux-claude-attention list 2>/dev/null | grep -c .)
+done_list=$(~/dotfiles/bin/tmux-claude-attention list 2>/dev/null)
+done_count=$(printf '%s' "$done_list" | grep -c .)
+
+want=$'\n'$(window_status_from_panes "$pane_lines" "$(printf '%s\n' "$done_list" | cut -f2)")$'\n'
+opt_args=()
+while IFS=$'\t' read -r _wid _cur; do
+    [[ -z "$_wid" ]] && continue
+    _rest="${want#*$'\n'"${_wid}"$'\t'}"
+    if [[ "$_rest" == "$want" ]]; then
+        [[ -n "$_cur" ]] && opt_args+=(set-option -wqu -t "$_wid" @agent_status \;)
+    elif [[ "${_rest%%$'\n'*}" != "$_cur" ]]; then
+        opt_args+=(set-option -wq -t "$_wid" @agent_status "${_rest%%$'\n'*}" \;)
+    fi
+done < <(tmux list-windows -a -F $'#{window_id}\t#{@agent_status}' 2>/dev/null)
+(( ${#opt_args[@]} > 0 )) && tmux "${opt_args[@]}" 2>/dev/null
 
 out=""
 (( permission_count > 0 )) && out+="🔴${permission_count} "
