@@ -167,6 +167,11 @@ rows_render() {
                         line+=$(printf "  %-${w}s" "$cell")
                     fi
                 done
+                # Trim trailing spaces: a row whose last column is empty (a
+                # REMOVE row under the SKIP reason column) would else end in
+                # padding. Only plain spaces trail — colour codes sit at the
+                # start (the painted label), never the end.
+                line="${line%"${line##*[![:space:]]}"}"
                 printf '%s\n' "$line"
                 if [[ -n "${row_detail[i]}" ]]; then
                     printf '%s\n' "${row_detail[i]}"
@@ -948,50 +953,48 @@ report_row() {
 #   happens here; only the printing is deferred.
 sweep_row() {
     local path="$1" branch="$2" locked="$3" prunable="$4" wt_head="$5"
-    local bucket at_risk n rel detail nl=$'\n'
+    local bucket at_risk detail listing reason nl=$'\n'
 
     derive_worktree_facts "$path" "$branch" "$prunable" "$wt_head"
     bucket=$(classify_worktree "$f_live" "$f_dirty" "$prunable" "$f_pr_state" "$f_unpushed" "$f_merged_local")
     [[ "$bucket" == MERGED ]] || return 0
 
+    # A SKIP carries its reason as a short rightmost column (the WHY sits on the
+    # row, after where); only the at-risk case adds indented detail below (the
+    # per-dir file summary). What -v/--force do about each is in --help.
+
     # Removable only if the worktree carries nothing the merge did not.
     if ! sweep_is_removable "$bucket" "$f_unpushed" "$f_pr_state" "$f_pr_head" "$wt_head"; then
         CNT_SKIP=$((CNT_SKIP + 1))
         if [[ "$f_pr_state" == MERGED && -n "$f_pr_head" ]]; then
-            detail="      merged upstream, but this worktree is not at the merged PR's head commit — needs manual review, never auto-removed"
+            reason="merged, not at PR head"
         else
-            detail="      merged, but no origin/${branch:-HEAD} to vouch for its commits (missing, or local commits ahead of it) — needs manual review, never auto-removed"
+            reason="merged, unpushed (no remote)"
         fi
-        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" "$detail"
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "$reason" "" ""
         return 0
     fi
 
     at_risk=$(worktree_ignored_at_risk "$path" "$repo")
 
     if [[ -n "$at_risk" ]] && [[ "$FORCE" == false ]]; then
-        n=$(printf '%s\n' "$at_risk" | grep -c .)
         CNT_SKIP=$((CNT_SKIP + 1))
-        # Default: one line per top-level component with a count (a worktree's
-        # 200 per-run data-test/ files would otherwise bury the output). -v
-        # dumps every path.
-        local listing
+        # Below the row: one line per top-level component with a count (a
+        # worktree's 200 per-run data-test/ files would otherwise bury the
+        # output). -v dumps every path instead.
         if [[ "$VERBOSE" == true ]]; then
-            detail="      merged, but $n at-risk gitignored file(s) — inspect, or --force to remove anyway:"
             listing=$(printf '%s\n' "$at_risk" | grep . | sed 's/^/        /')
         else
-            detail="      merged, but $n at-risk gitignored file(s) — -v to list, or --force to remove anyway:"
             listing=$(printf '%s\n' "$at_risk" | summarize_at_risk)
         fi
-        detail+=$'\n'"$listing"
-        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" "$detail"
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, has gitignored data" "" "$listing"
         return 0
     fi
 
     # The post-remove hook would kill the session this sweep runs in.
     if sweep_would_kill_own_session "$repo" "$path" "$branch"; then
         CNT_SKIP=$((CNT_SKIP + 1))
-        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" \
-            "      merged, but removing it would kill the tmux session this sweep is running in — run it from elsewhere"
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, in this session" "" ""
         return 0
     fi
 
@@ -1001,8 +1004,7 @@ sweep_row() {
         init_liveness
         if is_live "$path"; then
             CNT_SKIP=$((CNT_SKIP + 1))
-            rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" \
-                "      merged, but became live just before removal (re-checked) — left in place"
+            rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, now live" "" ""
             return 0
         fi
     fi
