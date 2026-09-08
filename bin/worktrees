@@ -94,12 +94,14 @@ rows_reset() {
     row_n=0
     row_repo=() row_label=() row_c1=() row_c2=() row_c3=() row_c4=() row_c5=() row_detail=()
 }
-# rows_add <label> <c1> <c2> <c3> <c4> <c5> <detail>   (unused columns: "";
-# the repo is the caller's $repo)
+# rows_add <label> <c1> <c2> <c3> <c4> <c5> <detail> <sortkey>   (unused
+# columns: ""; the repo is the caller's $repo). <sortkey> is the age epoch,
+# a hidden key rows_render sorts each bucket by; not a displayed column.
 rows_add() {
     row_repo[row_n]="$repo"; row_label[row_n]="$1"
     row_c1[row_n]="$2"; row_c2[row_n]="$3"; row_c3[row_n]="$4"
     row_c4[row_n]="$5"; row_c5[row_n]="$6"; row_detail[row_n]="$7"
+    row_sortkey[row_n]="${8:-0}"
     row_n=$((row_n + 1))
 }
 _row_cell() {
@@ -137,8 +139,21 @@ rows_render() {
         fi
         printf '\n== %s\n' "$(shorten "$r")"
         for b in $BUCKET_ORDER; do
-            for ((i = 0; i < row_n; i++)); do
-                [[ "${row_repo[i]}" == "$r" && "${row_label[i]}" == "$b" ]] || continue
+            # Within a bucket, newest commit first (age epoch, desc); ties keep
+            # original order (index asc) so the ordering is deterministic.
+            local -a order=()
+            while IFS= read -r i; do
+                [[ -n "$i" ]] && order+=("$i")
+            done < <(
+                for ((i = 0; i < row_n; i++)); do
+                    [[ "${row_repo[i]}" == "$r" && "${row_label[i]}" == "$b" ]] || continue
+                    printf '%s\t%s\n' "${row_sortkey[i]:-0}" "$i"
+                done | sort -t"$(printf '\t')" -k1,1nr -k2,2n | cut -f2
+            )
+            # Element-count guard: "${arr[@]}" on an empty array is unbound
+            # under `set -u` on bash 3.2 (see the repos guard below).
+            (( ${#order[@]} )) || continue
+            for i in "${order[@]}"; do
                 line="  $(paint "$b" "$lw")"
                 for c in 0 1 2 3 4; do
                     w=${widths[c]}
@@ -457,6 +472,7 @@ derive_worktree_facts() {
     if [[ "$prunable" == true ]]; then
         f_live=false; f_dirty=false; f_unpushed=false; f_merged_local=false
         f_pr_state="unknown"; f_pr_head=""; f_pr_disp="pr:unknown"; f_age="-"
+        f_age_epoch=0
         return
     fi
 
@@ -546,6 +562,10 @@ derive_worktree_facts() {
 
     f_age=$(git -C "$path" log -1 --format=%cr 2>/dev/null)
     [[ -z "$f_age" ]] && f_age="-"
+    # Sort key for the age column: %cr ("7 weeks ago") is unsortable, so keep
+    # the commit's epoch alongside it. 0 when there is no commit to read.
+    f_age_epoch=$(git -C "$path" log -1 --format=%ct 2>/dev/null)
+    [[ -z "$f_age_epoch" ]] && f_age_epoch=0
 }
 
 # Sourced (tests/test-worktrees.sh) rather than executed: hand back the pure
@@ -893,7 +913,7 @@ report_row() {
     if [[ "$VERBOSE" == true ]]; then
         detail="      $(action_for "$bucket" "$repo" "$path" "$branch" "$locked")"
     fi
-    rows_add "$bucket" "${branch:-(detached)}" "$f_pr_disp" "$flags" "$f_age" "$(where_for "$path" "$repo")" "$detail"
+    rows_add "$bucket" "${branch:-(detached)}" "$f_pr_disp" "$flags" "$f_age" "$(where_for "$path" "$repo")" "$detail" "$f_age_epoch"
 }
 
 # sweep_row <path> <branch> <locked> <prunable> <wt_head>
