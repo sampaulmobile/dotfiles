@@ -185,6 +185,29 @@ else
     fail=$(( fail + 1 ))
 fi
 
+echo "── summarize_at_risk: collapse to one line per top-level component"
+# 3 data-test files + a root file + a two-file dir -> a data-test count line,
+# the bare root file verbatim, and a logs count line; order = first appearance.
+sar_in=$'data-test/a/users.yaml\ndata-test/b/users.yaml\ndata-test/c/x.json\n.env\nlogs/app.jsonl\nlogs/err.log'
+sar_want=$'        data-test/  (3 files)\n        .env\n        logs/  (2 files)'
+sar_got=$(printf '%s\n' "$sar_in" | summarize_at_risk)
+if [[ "$sar_got" == "$sar_want" ]]; then
+    printf '  ok   %s\n' "3 data-test + a root file + a 2-file dir -> 3 collapsed lines"
+    pass=$(( pass + 1 ))
+else
+    printf '  FAIL %s\n       want:\n%s\n       got:\n%s\n' "summarize_at_risk collapse" "$sar_want" "$sar_got"
+    fail=$(( fail + 1 ))
+fi
+# A blank line is dropped; a single file under a dir still reads "(1 file)".
+sar_got2=$(printf '%s\n' $'data/only.yaml\n\n' | summarize_at_risk)
+if [[ "$sar_got2" == "        data/  (1 file)" ]]; then
+    printf '  ok   %s\n' "blank line dropped; singular 'file'"
+    pass=$(( pass + 1 ))
+else
+    printf '  FAIL %s\n       got [%s]\n' "summarize_at_risk singular/blank" "$sar_got2"
+    fail=$(( fail + 1 ))
+fi
+
 echo "── derive_worktree_facts: f_merged_local (B6)"
 dtmp=$(mktemp -d "${TMPDIR:-/tmp}/test-worktrees.XXXXXX") || exit 1
 trap 'rm -rf "$dtmp"' EXIT
