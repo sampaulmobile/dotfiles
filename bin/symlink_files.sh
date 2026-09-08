@@ -212,6 +212,12 @@ link $dir/starship.toml ~/.config/starship.toml
 ensure_dir ~/.config/worktrunk
 link $dir/worktrunk.toml ~/.config/worktrunk/config.toml
 
+# ===== atuin =====
+# atuin does not self-write config.toml (unlike claude's settings.json), so
+# a plain file link is safe.
+ensure_dir ~/.config/atuin
+link $dir/atuin.toml ~/.config/atuin/config.toml
+
 # ===== neovim (LazyVim config) =====
 link $dir/nvim ~/.config/nvim
 
