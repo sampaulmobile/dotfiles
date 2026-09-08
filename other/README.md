@@ -10,7 +10,7 @@ tracked — the real files are gitignored and never leave the machine.
 | `zshrc.local` | sourced at the end of `~/.zshrc` | env vars, extra PATH, anything shell |
 | `aliases.local` | sourced by `~/.zshrc` after shared aliases | machine/work-specific aliases & functions |
 | `gitconfig.local` | `[include]` in `~/.gitconfig` | per-machine git identity/overrides |
-| `tmux-sessionizer.local` | sourced by `bin/project-dirs-lib` (used by `bin/tmux-sessionizer` and `bin/worktree-doctor`) | override `search_dirs` |
+| `tmux-sessionizer.local` | sourced by `bin/project-dirs-lib` (used by `bin/tmux-sessionizer` and `bin/worktrees`) | override `search_dirs` |
 | `claude/settings.json` | file-symlinked to `~/.claude/settings.json` | Claude Code settings (seeded from the .example) |
 | `claude/skills/`, `claude/rules/`, `claude/agents/` | dir-symlinked to `~/.claude/{skills,rules,agents}` | private Claude skills/rules/agents, plus per-item links to the tracked generic set (see below) |
 | `codex/config.toml` | file-symlinked to `~/.codex/config.toml` | Codex settings, seeded from the .example — codex writes its own `[projects]` trust entries here |

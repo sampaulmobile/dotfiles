@@ -1,0 +1,1036 @@
+#!/usr/bin/env bash
+# worktrees — every worktree of every project bin/project-dirs-lib knows
+# about, as one bucketed table (the report, read-only), plus `sweep`, the one
+# verb that acts on it: remove the MERGED bucket, dry-run until --apply. One
+# program so the report and the sweep can never disagree on "merged"; the
+# buckets and flags are in usage() below, the precedence is classify_worktree's
+# order.
+#
+# The report changes NOTHING: every git/gh call is a read and `wt` is only
+# printed. Removal needs both the `sweep` verb and --apply — a read-only mode
+# never grows a deleting flag.
+#
+# Liveness comes from `lsof -d cwd -Fpn` (a live process's cwd), never from
+# git's worktree lock file (whose reason names the *hub session's* pid, which
+# typically outlives the agent) and never from mtimes. PR state comes from
+# `gh`, never `git branch --merged` — a squash merge looks unmerged to plain
+# git; gh missing/unauthenticated/offline degrades a row to pr:unknown, never
+# fatal.
+#
+# The sweep's extra guard: `git worktree remove` deletes a worktree's
+# GITIGNORED files along with the directory, no warning (git 2.x). A file is
+# safe to lose only if it is a regenerable cache (the copy-ignored exclude
+# list) or byte-identical to the hub's copy; anything else is worktree-unique
+# data — the worktree is SKIPPED and the files listed, unless --force.
+set -uo pipefail
+
+DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+
+usage() {
+    cat <<'EOF'
+usage: worktrees [--all] [--offline] [-v]                   report (read-only)
+       worktrees sweep [--all] [--apply] [--force] [--offline] [-v]
+
+Scope: inside a git repo (hub or worktree), that repo only; anywhere else,
+every project bin/project-dirs-lib knows about. --all forces every project,
+and in the report also lists the clean ones.
+
+Report: every worktree of the repos in scope, bucketed LIVE / DIRTY / PRUNABLE / MERGED / ABANDONED / IN-REVIEW / PARKED /
+SHIPPED? (first match wins). Rows are grouped: MERGED, ABANDONED, PRUNABLE
+(act), then PARKED, SHIPPED? (surface), then DIRTY, IN-REVIEW, LIVE (in
+progress). Exit 0 when nothing is removable, 1 when at least one worktree is
+MERGED, ABANDONED or PRUNABLE.
+  --offline   skip gh entirely (every worktree's PR state -> pr:unknown)
+  --all       every project, clean ones included (one "clean" line each)
+  -v          print, under each row, the command that would act on it
+
+sweep: remove the MERGED worktrees, guarding against the loss of
+worktree-unique gitignored data. Dry-run by default: REMOVE rows first, then
+SKIP rows, each with the reason it was skipped. Exit 0 on a clean run; 2 on a
+removal failure under --apply.
+  --apply     actually remove (default: dry-run — only print what would happen)
+  --force     also remove MERGED worktrees that hold at-risk gitignored files
+              (the guard's skips); LIVE/DIRTY/unmerged are still never touched
+  --offline   skip gh (a squash-merged worktree then looks unmerged and is
+              left alone — the safe direction)
+  -v          print, under each REMOVE row, the exact command --apply runs
+EOF
+}
+
+# Colors only when stdout is a terminal and NO_COLOR is unset — piped/test
+# output stays plain. Both modes color the bucket word alone (row labels,
+# not icons), so alignment is padded first and wrapped after.
+C_RESET=""
+if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; then
+    C_RESET=$'\033[0m'
+fi
+bucket_color() {
+    [[ -n "$C_RESET" ]] || return 0
+    case "$1" in
+        MERGED|REMOVE|removed|would-remove) printf '\033[32m' ;;
+        PARKED|SKIP|ABANDONED|PRUNABLE) printf '\033[33m' ;;
+        DIRTY|FAILED)                printf '\033[31m' ;;
+        LIVE)                        printf '\033[34m' ;;
+        IN-REVIEW)                   printf '\033[36m' ;;
+        SHIPPED?)                    printf '\033[35m' ;;
+    esac
+}
+# paint <label> <width> — <label> left-padded to <width>, colored by bucket.
+paint() {
+    local padded
+    padded=$(printf "%-${2}s" "$1")
+    printf '%s%s%s' "$(bucket_color "$1")" "$padded" "$C_RESET"
+}
+
+# ---- row buffer: every row collected first, printed once at the end ----
+# Both modes add rows here while parsing and print them in one pass, so
+# column widths fit the content ACROSS repos and rows group by label in the
+# order below (act-on-these first, then surface, then in-progress). A row's
+# detail is pre-indented text printed beneath it, "" for none — the CALLER
+# decides whether a detail is attached (e.g. only under -v).
+BUCKET_ORDER="MERGED ABANDONED PRUNABLE PARKED SHIPPED? DIRTY IN-REVIEW LIVE REMOVE SKIP"
+row_n=0
+rows_reset() {
+    row_n=0
+    row_repo=() row_label=() row_c1=() row_c2=() row_c3=() row_c4=() row_c5=() row_detail=()
+}
+# rows_add <label> <c1> <c2> <c3> <c4> <c5> <detail>   (unused columns: "";
+# the repo is the caller's $repo)
+rows_add() {
+    row_repo[row_n]="$repo"; row_label[row_n]="$1"
+    row_c1[row_n]="$2"; row_c2[row_n]="$3"; row_c3[row_n]="$4"
+    row_c4[row_n]="$5"; row_c5[row_n]="$6"; row_detail[row_n]="$7"
+    row_n=$((row_n + 1))
+}
+_row_cell() {
+    case "$1" in
+        0) cell="${row_c1[$2]}" ;; 1) cell="${row_c2[$2]}" ;; 2) cell="${row_c3[$2]}" ;;
+        3) cell="${row_c4[$2]}" ;; 4) cell="${row_c5[$2]}" ;;
+    esac
+}
+# rows_render <label-width> [<show-clean>] — print every repo in $repos
+# order: a `== repo` header, then its rows grouped by BUCKET_ORDER. A repo
+# with no rows is silent unless <show-clean> is true (then "clean").
+rows_render() {
+    local lw="$1" show_clean="${2:-false}" i c b w cell r have line
+    local -a widths=(0 0 0 0 0)
+    for ((i = 0; i < row_n; i++)); do
+        for c in 0 1 2 3 4; do
+            _row_cell "$c" "$i"
+            if (( ${#cell} > widths[c] )); then widths[c]=${#cell}; fi
+        done
+    done
+    local last=0
+    for c in 0 1 2 3 4; do if (( widths[c] )); then last=$c; fi; done
+    (( ${#repos[@]} )) || return 0
+    for r in "${repos[@]}"; do
+        have=false
+        for ((i = 0; i < row_n; i++)); do
+            if [[ "${row_repo[i]}" == "$r" ]]; then have=true; break; fi
+        done
+        if [[ "$have" == false ]]; then
+            if [[ "$show_clean" == true ]]; then
+                printf '\n== %s\n' "$(shorten "$r")"
+                echo "  clean"
+            fi
+            continue
+        fi
+        printf '\n== %s\n' "$(shorten "$r")"
+        for b in $BUCKET_ORDER; do
+            for ((i = 0; i < row_n; i++)); do
+                [[ "${row_repo[i]}" == "$r" && "${row_label[i]}" == "$b" ]] || continue
+                line="  $(paint "$b" "$lw")"
+                for c in 0 1 2 3 4; do
+                    w=${widths[c]}
+                    (( w )) || continue
+                    _row_cell "$c" "$i"
+                    if (( c == last )); then
+                        line+="  $cell"
+                    else
+                        line+=$(printf "  %-${w}s" "$cell")
+                    fi
+                done
+                printf '%s\n' "$line"
+                if [[ -n "${row_detail[i]}" ]]; then
+                    printf '%s\n' "${row_detail[i]}"
+                fi
+            done
+        done
+    done
+}
+
+# count_cell <label> <n> — "LABEL:n" for the summary line in the bucket's
+# color; nothing at all when n is 0, so the line names only what exists.
+count_cell() {
+    (( $2 > 0 )) || return 0
+    printf '%s%s:%d%s  ' "$(bucket_color "$1")" "$1" "$2" "$C_RESET"
+}
+
+# source_warnings — the scope when narrowed to one repo, then one line per
+# data source the run had to do without. Silent otherwise: a healthy
+# everything-run needs no footer.
+source_warnings() {
+    if [[ -n "${SCOPED:-}" ]]; then
+        if [[ -n "$C_RESET" ]]; then
+            printf '\033[2mscope: %s  (--all for every project)%s\n' "$(shorten "$SCOPED")" "$C_RESET"
+        else
+            printf 'scope: %s  (--all for every project)\n' "$(shorten "$SCOPED")"
+        fi
+    fi
+    if [[ "$GH_OK" != true ]]; then
+        if [[ "${OFFLINE:-false}" == true ]]; then
+            echo "note: gh skipped (--offline) — PR state unknown, squash merges look unmerged"
+        else
+            echo "warning: gh not found — PR state unknown, squash merges look unmerged"
+        fi
+    fi
+    if [[ "$LSOF_RAN" != true ]]; then
+        echo "warning: lsof not found — liveness unknown, nothing can be LIVE"
+    fi
+}
+
+# shorten <path> [<repo>] — <path> relative to <repo> when it is inside it
+# (the repo header already names it), else ~-shortened.
+shorten() {
+    local p="$1" repo="${2:-}"
+    if [[ -n "$repo" && "$p" == "$repo/"* ]]; then
+        printf '%s' "${p#"$repo"/}"
+        return
+    fi
+    [[ "$p" == "$HOME/"* ]] && p="~/${p#"$HOME"/}"
+    printf '%s' "$p"
+}
+
+# where_for <path> <repo> — the WHERE column: `agent` for a harness-made
+# worktree under <repo>/.claude/worktrees/, `wt` for a worktrunk sibling
+# (<repo>.<branch> next to the hub), else the shortened path. The agent id
+# and the sibling dir name carry nothing the branch column doesn't; -v prints
+# the exact path in the command.
+where_for() {
+    local p="$1" repo="$2"
+    case "$p" in
+        "$repo"/.claude/worktrees/*) printf 'agent' ;;
+        "$repo".*)                   printf 'wt' ;;
+        *)                           shorten "$p" "$repo" ;;
+    esac
+}
+
+# classify_worktree <live> <dirty> <prunable> <pr_state> <unpushed> <merged_local>
+#   live/dirty/prunable/unpushed/merged_local: "true" or "false".
+#   pr_state: one of MERGED, CLOSED, OPEN, none, unknown.
+#   Prints the bucket name. First match wins — the order below IS the
+#   precedence, and tests/test-worktree-doctor.sh pins it.
+classify_worktree() {
+    local live="$1" dirty="$2" prunable="$3" pr_state="$4" unpushed="$5" merged_local="$6"
+
+    if [[ "$live" == true ]]; then
+        echo "LIVE"
+        return
+    fi
+    if [[ "$dirty" == true ]]; then
+        echo "DIRTY"
+        return
+    fi
+    if [[ "$prunable" == true ]]; then
+        echo "PRUNABLE"
+        return
+    fi
+    if [[ "$pr_state" == MERGED || "$merged_local" == true ]]; then
+        echo "MERGED"
+        return
+    fi
+    if [[ "$pr_state" == CLOSED ]]; then
+        echo "ABANDONED"
+        return
+    fi
+    if [[ "$pr_state" == OPEN ]]; then
+        echo "IN-REVIEW"
+        return
+    fi
+    if [[ "$unpushed" == true ]]; then
+        echo "PARKED"
+        return
+    fi
+    echo "SHIPPED?"
+}
+
+# action_for <bucket> <repo> <path> <branch> <locked> — the recommended
+# command, printed verbatim, never executed. A detached worktree (empty
+# branch) must be addressed by PATH, not branch, for `wt remove` (verified
+# against wt v0.68.0's --help). `locked` never changes the bucket, only
+# whether MERGED/ABANDONED get the `git worktree unlock` prefix they need:
+# every harness-made agent worktree stays locked after its agent exits, and
+# `wt remove` (like `git worktree remove`) refuses a locked worktree.
+action_for() {
+    local bucket="$1" repo="$2" path="$3" branch="$4" locked="${5:-false}"
+    local target unlock_prefix
+    target="${branch:-$path}"
+    unlock_prefix=""
+    if [[ "$locked" == true ]] && [[ "$bucket" == ABANDONED ]]; then
+        unlock_prefix="git -C $repo worktree unlock $path && "
+    fi
+    case "$bucket" in
+        LIVE)      echo "keep — in use" ;;
+        DIRTY)     echo "keep — inspect: git -C $path status" ;;
+        PRUNABLE)  echo "git -C $repo worktree prune" ;;
+        MERGED)    echo "worktrees sweep --apply  (removes every MERGED row; dry-run without --apply, -v shows each command)" ;;
+        ABANDONED) echo "${unlock_prefix}wt -C $repo remove -D $target  (confirm first — deletes an unmerged branch)" ;;
+        IN-REVIEW) echo "keep — /address-review may need it" ;;
+        PARKED)    echo "keep, surface — ship it or remove it deliberately" ;;
+        *)         echo "keep — remote has it; likely needs a PR or a merge you can't see offline" ;;
+    esac
+}
+
+# parse_porcelain_blocks <repo>
+#   Reads `git worktree list --porcelain` from stdin and calls
+#   on_worktree_block <path> <branch> <locked> <prunable> <wt_head> once per
+#   block, skipping <repo> itself (the main worktree, always listed first by
+#   git) and flushing a trailing block that has no blank line after it.
+#   on_worktree_block belongs to the CALLER, not this file: the report below
+#   defines the real one, tests/test-worktree-doctor.sh a recording stub —
+#   which is what lets the parser be exercised with no git and no gh.
+parse_porcelain_blocks() {
+    local repo="$1"
+    local path="" branch="" locked=false prunable=false wt_head=""
+    local have_block=false
+
+    _pb_flush() {
+        [[ "$have_block" == true ]] || return 0
+        have_block=false
+        [[ "$path" == "$repo" ]] && return 0
+        on_worktree_block "$path" "$branch" "$locked" "$prunable" "$wt_head"
+    }
+
+    while IFS= read -r line; do
+        case "$line" in
+            "worktree "*)
+                _pb_flush
+                path="${line#worktree }"
+                branch="" locked=false prunable=false wt_head=""
+                have_block=true
+                ;;
+            "HEAD "*)     wt_head="${line#HEAD }" ;;
+            "branch "*)   branch="${line#branch refs/heads/}" ;;
+            detached)     branch="" ;;
+            locked*)      locked=true ;;
+            prunable*)    prunable=true ;;
+            *) : ;;
+        esac
+    done
+    _pb_flush
+}
+
+# ---- liveness + fact derivation (shared by both modes) ----
+# They read/write globals the caller owns: init_liveness fills live_paths;
+# derive_worktree_facts reads $repo, $default_ref and $GH_OK and writes the
+# f_* result globals below.
+
+# init_liveness — fill live_paths (one cwd per line) from a single lsof and
+# set LSOF_RAN. Without lsof, live_paths stays empty and is_live is always
+# false (every worktree treated as not-live; the caller's footer says so).
+LSOF_RAN=false
+live_paths=$'\n'
+init_liveness() {
+    live_paths=$'\n'
+    if command -v lsof >/dev/null 2>&1; then
+        LSOF_RAN=true
+        while IFS= read -r _line; do
+            case "$_line" in
+                n*) live_paths+="${_line#n}"$'\n' ;;
+            esac
+        done < <(lsof -d cwd -Fpn 2>/dev/null)
+    fi
+}
+
+# is_live <path> — true if some live cwd equals or is under <path>.
+is_live() {
+    local target="$1" p
+    while IFS= read -r p; do
+        [[ -z "$p" ]] && continue
+        [[ "$p" == "$target" || "$p" == "$target"/* ]] && return 0
+    done <<< "$live_paths"
+    return 1
+}
+
+# load_pr_cache <repo> — one `gh pr list` for the whole repo into PR_CACHE
+# (TSV: headRefName number state headRefOid url, newest first), replacing a
+# network call per worktree (0.5s each). PR_CACHE_COMPLETE is true when the
+# list came back under its limit, i.e. it holds every PR of the repo and a
+# branch missing from it has none; a truncated list keeps the per-branch
+# lookup as the fallback for misses. Loaded lazily, on the first worktree
+# that needs it — most repos have no extra worktrees and must cost no call.
+PR_CACHE=""
+PR_CACHE_REPO=""
+PR_CACHE_OK=false
+PR_CACHE_COMPLETE=false
+PR_CACHE_LIMIT=200
+PR_PREFETCH_DIR=""
+_pr_list() {
+    cd "$1" 2>/dev/null && gh pr list --state all --limit "$PR_CACHE_LIMIT" \
+        --json number,state,headRefName,headRefOid,url \
+        --jq '.[] | [.headRefName, (.number|tostring), .state, .headRefOid, .url] | @tsv' 2>/dev/null
+}
+# prefetch_pr_lists <repo>... — run _pr_list for every given repo at once
+# (one background gh per repo, results in PR_PREFETCH_DIR keyed by path);
+# load_pr_cache picks a prefetched result up instead of calling gh itself.
+prefetch_pr_lists() {
+    local r key
+    [[ "$GH_OK" == true ]] && (( $# )) || return 0
+    PR_PREFETCH_DIR=$(mktemp -d "${TMPDIR:-/tmp}/worktrees-pr.XXXXXX") || { PR_PREFETCH_DIR=""; return 0; }
+    for r in "$@"; do
+        key="${r//\//_}"
+        ( _pr_list "$r" > "$PR_PREFETCH_DIR/$key"; echo $? > "$PR_PREFETCH_DIR/$key.rc" ) &
+    done
+    wait
+}
+load_pr_cache() {
+    local repo="$1" n key rc
+    [[ "$PR_CACHE_REPO" == "$repo" ]] && return 0
+    PR_CACHE=""; PR_CACHE_REPO="$repo"; PR_CACHE_OK=false; PR_CACHE_COMPLETE=false
+    [[ "$GH_OK" == true ]] || return 0
+    key="${repo//\//_}"
+    if [[ -n "$PR_PREFETCH_DIR" && -f "$PR_PREFETCH_DIR/$key.rc" ]]; then
+        rc=$(<"$PR_PREFETCH_DIR/$key.rc")
+        [[ "$rc" == 0 ]] || return 0
+        PR_CACHE=$(<"$PR_PREFETCH_DIR/$key")
+    else
+        PR_CACHE=$(_pr_list "$repo") || return 0
+    fi
+    PR_CACHE_OK=true
+    n=0
+    while IFS= read -r _l; do [[ -n "$_l" ]] && n=$((n + 1)); done <<< "$PR_CACHE"
+    (( n < PR_CACHE_LIMIT )) && PR_CACHE_COMPLETE=true
+    return 0
+}
+
+# default_ref_for <repo> — the default-branch commit-ish to compare worktree
+# HEADs against: origin/HEAD's symbolic ref, falling back to a local
+# main/master. Empty when a repo has neither (merged_local then reports
+# false for every worktree in it).
+default_ref_for() {
+    local repo="$1" ref
+    ref=$(git -C "$repo" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
+    if [[ -n "$ref" ]]; then
+        printf '%s' "$ref"
+        return
+    fi
+    if git -C "$repo" show-ref --verify --quiet refs/heads/main 2>/dev/null; then
+        printf 'main'
+        return
+    fi
+    if git -C "$repo" show-ref --verify --quiet refs/heads/master 2>/dev/null; then
+        printf 'master'
+        return
+    fi
+    printf ''
+}
+
+# sweep_remove_cmd <repo> <path> <branch> <locked>
+#   The exact command `worktrees sweep --apply` runs on a MERGED worktree, %q-quoted.
+#   The ONE renderer: the sweep's verbose dry-run line comes from here and its
+#   remove_worktree mirrors it step for step.
+#   --no-delete-branch plus our own `git branch -D`: wt's merged-ness check is
+#   offline and capped at 500 commits, so left to itself it can keep the
+#   branch and still exit 0; the caller already proved "merged".
+sweep_remove_cmd() {
+    local repo="$1" path="$2" branch="$3" locked="$4" q_repo q_path q_branch target cmd
+    q_repo=$(printf '%q' "$repo")
+    q_path=$(printf '%q' "$path")
+    q_branch=$(printf '%q' "$branch")
+    if [[ -n "$branch" ]]; then target="$q_branch"; else target="$q_path"; fi
+    cmd=""
+    if [[ "$locked" == true ]]; then cmd+="git -C $q_repo worktree unlock $q_path && "; fi
+    cmd+="wt -C $q_repo remove --foreground --no-delete-branch $target"
+    if [[ -n "$branch" ]]; then cmd+=" && git -C $q_repo branch -D $q_branch"; fi
+    printf '%s' "$cmd"
+}
+
+# derive_worktree_facts <path> <branch> <prunable> <wt_head>
+#   Compute the per-worktree facts classify_worktree needs, into the globals
+#   f_live f_dirty f_unpushed f_merged_local f_pr_state f_pr_head f_pr_disp
+#   f_age. f_pr_head is the merged/open PR's head commit ("" when unknown).
+#   Reads $repo, $default_ref and $GH_OK from the caller. A prunable block
+#   short-circuits to the "nothing to inspect" defaults (its gitdir is gone).
+derive_worktree_facts() {
+    local path="$1" branch="$2" prunable="$3" wt_head="$4"
+
+    if [[ "$prunable" == true ]]; then
+        f_live=false; f_dirty=false; f_unpushed=false; f_merged_local=false
+        f_pr_state="unknown"; f_pr_head=""; f_pr_disp="pr:unknown"; f_age="-"
+        return
+    fi
+
+    if is_live "$path"; then f_live=true; else f_live=false; fi
+
+    # --no-optional-locks: not even the stat-cache refresh git does
+    # opportunistically on a plain `status --porcelain` is allowed here.
+    if [[ -n "$(git --no-optional-locks -C "$path" status --porcelain 2>/dev/null)" ]]; then
+        f_dirty=true
+    else
+        f_dirty=false
+    fi
+
+    if [[ -n "$branch" ]]; then
+        if git -C "$repo" rev-parse --verify -q "refs/remotes/origin/$branch" >/dev/null 2>&1; then
+            local ahead
+            ahead=$(git -C "$repo" rev-list --count "origin/$branch..$wt_head" 2>/dev/null)
+            [[ -z "$ahead" ]] && ahead=0
+            if (( ahead > 0 )); then f_unpushed=true; else f_unpushed=false; fi
+        else
+            f_unpushed=true
+        fi
+        # --is-ancestor is trivially true for a branch that never diverged
+        # (fresh `wt switch -c`, parked before its first commit), and the ref
+        # graph cannot tell that from a branch a local merge folded in. So:
+        # wt_head must differ from default's current commit, AND — when the
+        # branch reflog exists (oldest entry = creation point; reflogs are in
+        # the common dir, visible from the hub) — the branch must have a
+        # commit of its own since creation. Reset-to-creation reads as none.
+        local default_sha created own
+        default_sha=$(git -C "$repo" rev-parse --verify -q "$default_ref" 2>/dev/null)
+        created=""
+        while IFS= read -r _sha; do created="$_sha"; done \
+            < <(git -C "$repo" reflog show --format=%H "refs/heads/$branch" 2>/dev/null)
+        own=""
+        if [[ -n "$created" ]]; then
+            own=$(git -C "$repo" rev-list --count "$created..$wt_head" 2>/dev/null)
+        fi
+        if [[ -n "$default_ref" ]] && [[ -n "$default_sha" ]] && [[ "$wt_head" != "$default_sha" ]] \
+            && [[ "$own" != 0 ]] \
+            && git -C "$repo" merge-base --is-ancestor "$wt_head" "$default_ref" 2>/dev/null; then
+            f_merged_local=true
+        else
+            f_merged_local=false
+        fi
+    else
+        # Detached HEAD has no branch to push or diff against a default.
+        # Deliberately reported as PARKED ("surface it") rather than
+        # SHIPPED?, which would read as "the remote has this" — it may
+        # not, and there is no branch to check.
+        f_unpushed=true
+        f_merged_local=false
+    fi
+
+    f_pr_state="unknown"
+    f_pr_head=""
+    f_pr_disp="pr:unknown"
+    if [[ -n "$branch" ]] && [[ "$GH_OK" == true ]]; then
+        local pr_line="" gh_rc=0 pr_num pr_url _head _l hit=false
+        load_pr_cache "$repo"
+        if [[ "$PR_CACHE_OK" == true ]]; then
+            while IFS= read -r _l; do
+                _head="${_l%%$'\t'*}"
+                if [[ "$_head" == "$branch" ]]; then
+                    pr_line="${_l#*$'\t'}"
+                    hit=true
+                    break
+                fi
+            done <<< "$PR_CACHE"
+        fi
+        if [[ "$hit" == false && "$PR_CACHE_COMPLETE" == false ]]; then
+            pr_line=$(cd "$repo" 2>/dev/null && gh pr list --head "$branch" --state all \
+                --json number,state,headRefOid,url \
+                --jq '(.[0] // empty) | [(.number|tostring), .state, .headRefOid, .url] | @tsv' 2>/dev/null)
+            gh_rc=$?
+        fi
+        if [[ $gh_rc -eq 0 ]]; then
+            if [[ -z "$pr_line" ]]; then
+                f_pr_state="none"
+                f_pr_disp="no PR"
+            else
+                IFS=$'\t' read -r pr_num f_pr_state f_pr_head pr_url <<< "$pr_line"
+                f_pr_disp="PR #${pr_num} ${f_pr_state}"
+            fi
+        fi
+    fi
+
+    f_age=$(git -C "$path" log -1 --format=%cr 2>/dev/null)
+    [[ -z "$f_age" ]] && f_age="-"
+}
+
+# Sourced (tests/test-worktrees.sh) rather than executed: hand back the pure
+# functions above and run none of the report or sweep below.
+
+# ---- the gitignored-data guard (pure; unit-tested) ----
+
+# _toml_strip_comment <line> — drop a trailing `#...` unless the # is inside
+# a double-quoted string. Walks quote state by hand: bash 3.2 regex has no
+# lookbehind, and a naive token pass would harvest quoted words from comments.
+_toml_strip_comment() {
+    local line="$1" out="" ch in_str=false i
+    for (( i = 0; i < ${#line}; i++ )); do
+        ch="${line:i:1}"
+        if [[ "$ch" == '"' ]]; then
+            if [[ "$in_str" == true ]]; then in_str=false; else in_str=true; fi
+        elif [[ "$ch" == '#' && "$in_str" == false ]]; then
+            break
+        fi
+        out+="$ch"
+    done
+    printf '%s' "$out"
+}
+
+# parse_copy_ignored_excludes <toml-path>
+#   Print, one per line, the regenerable-cache dir names from
+#   worktrunk.toml's [step.copy-ignored] exclude array — the SINGLE source of
+#   truth for "copy-ignored never copied this in, so it is safe to drop". Not
+#   copied here: kept read from the toml so the two cannot drift. Tolerates
+#   inline or multi-line arrays; prints nothing if the section/key is absent
+#   (the guard then falls back to pure content comparison — more skips, never
+#   an unsafe removal). Comments are stripped before any match: a `#` inside
+#   a quoted string survives, one outside it (even on a `[step.copy-ignored]`
+#   header line) never reaches the header/token matching below.
+parse_copy_ignored_excludes() {
+    local toml="$1" raw line in_section=false collecting=false rest tok
+    [[ -f "$toml" ]] || return 0
+    while IFS= read -r raw || [[ -n "$raw" ]]; do
+        line="$(_toml_strip_comment "$raw")"
+        line="${line#"${line%%[![:space:]]*}"}"
+        case "$line" in
+            '[step.copy-ignored]'*) in_section=true; continue ;;
+            \[*) in_section=false; collecting=false; continue ;;
+        esac
+        [[ "$in_section" == true ]] || continue
+        if [[ "$collecting" == false && "$line" == *exclude*=*\[* ]]; then
+            collecting=true
+        fi
+        [[ "$collecting" == true ]] || continue
+        rest="$line"
+        while [[ "$rest" =~ \"([^\"]*)\" ]]; do
+            tok="${BASH_REMATCH[1]}"
+            printf '%s\n' "$tok"
+            rest="${rest#*\"$tok\"}"
+        done
+        [[ "$line" == *\]* ]] && collecting=false
+    done < "$toml"
+}
+
+# _seg_is_cache <relpath> — true if <relpath> is, or is under, a name in
+# sweep_excludes. worktrunk writes excludes gitignore-style (".cache/"), so
+# trailing slashes are trimmed on both sides. Only DIRECTORY segments count:
+# ancestors always are; the final segment only when rel ends in "/" — a
+# gitignored FILE named "build" is not a cache.
+_seg_is_cache() {
+    local rel="$1" seg ex rest is_dir=false first=true
+    (( ${#sweep_excludes[@]} )) || return 1
+    [[ "$rel" == */ ]] && is_dir=true
+    rest="${rel%/}"
+    while [[ -n "$rest" ]]; do
+        seg="${rest##*/}"
+        if [[ "$first" == false || "$is_dir" == true ]]; then
+            for ex in "${sweep_excludes[@]}"; do
+                [[ "$seg" == "${ex%/}" ]] && return 0
+            done
+        fi
+        [[ "$rest" == */* ]] || break
+        rest="${rest%/*}"
+        first=false
+    done
+    return 1
+}
+
+# classify_ignored_file <relpath> <wt> <hub>
+#   Verdict for one gitignored entry as `git ls-files --directory` prints it
+#   (a fully-ignored dir arrives collapsed, with a trailing slash):
+#     safe-cache  regenerable cache (a segment in sweep_excludes)
+#     safe-copy   plain file byte-identical to the hub's copy
+#     recurse     ignored DIRECTORY, not a cache and not .feature/ — the
+#                 caller lists its files and classifies each
+#     at-risk     everything else (worktree-unique, or copied-in then edited)
+#   .feature/ is /feature pipeline scratch with no hub counterpart: disposable.
+classify_ignored_file() {
+    local rel="$1" wt="$2" hub="$3"
+    if _seg_is_cache "$rel"; then
+        echo "safe-cache"; return
+    fi
+    if [[ "$rel" == */ ]]; then
+        if [[ "$rel" == .feature/ || "$rel" == */.feature/ ]]; then
+            echo "safe-cache"; return
+        fi
+        echo "recurse"; return
+    fi
+    if [[ -f "$hub/$rel" ]] && cmp -s "$wt/$rel" "$hub/$rel"; then
+        echo "safe-copy"; return
+    fi
+    echo "at-risk"
+}
+
+# _ignored_dir_at_risk <reldir> <wt> <hub>
+#   At-risk files inside a non-cache ignored dir: listed WITHOUT --directory
+#   so nested entries come back individually. A listing failure fails closed
+#   (the whole dir is at-risk).
+_ignored_dir_at_risk() {
+    local reldir="$1" wt="$2" hub="$3" sub verdict
+    if ! git -C "$wt" ls-files --others --ignored --exclude-standard -z -- "$reldir" >/dev/null 2>&1; then
+        printf '%s\n' "$reldir"
+        return
+    fi
+    while IFS= read -r -d '' sub; do
+        [[ -z "$sub" ]] && continue
+        verdict="$(classify_ignored_file "$sub" "$wt" "$hub")"
+        case "$verdict" in
+            safe-cache|safe-copy) : ;;
+            *) printf '%s\n' "$sub" ;;
+        esac
+    done < <(git -C "$wt" ls-files --others --ignored --exclude-standard -z -- "$reldir" 2>/dev/null)
+}
+
+# worktree_ignored_at_risk <wt> <hub>
+#   At-risk gitignored entries in <wt>, one relative path per line; empty
+#   means safe to remove. FAILS CLOSED: a `git ls-files` error (e.g. a .git
+#   file pointing at a missing gitdir) prints a placeholder at-risk entry —
+#   the caller treats ANY output as "not without --force". --directory keeps
+#   a wholly-ignored cache dir to one segment check. -z throughout: with
+#   core.quotePath, plain output octal-quotes non-ASCII names and the byte
+#   compare would never match.
+worktree_ignored_at_risk() {
+    local wt="$1" hub="$2" rel verdict
+    if ! git -C "$wt" ls-files --others --ignored --exclude-standard --directory -z >/dev/null 2>&1; then
+        printf '%s\n' "<git ls-files failed — cannot verify gitignored contents, treating as at-risk>"
+        return
+    fi
+    while IFS= read -r -d '' rel; do
+        [[ -z "$rel" ]] && continue
+        verdict="$(classify_ignored_file "$rel" "$wt" "$hub")"
+        case "$verdict" in
+            safe-cache|safe-copy) : ;;
+            recurse) _ignored_dir_at_risk "$rel" "$wt" "$hub" ;;
+            *) printf '%s\n' "$rel" ;;
+        esac
+    done < <(git -C "$wt" ls-files --others --ignored --exclude-standard --directory -z 2>/dev/null)
+}
+
+# sweep_is_removable <bucket> <unpushed> [<pr_state> <pr_head> <wt_head>]
+#   MERGED is removable only if the worktree carries nothing the merge did
+#   not: with a merged PR whose head is known, wt_head must equal it;
+#   otherwise no commits ahead of origin/<branch> — and a missing
+#   origin/<branch> refuses too, since nothing then vouches for local commits.
+sweep_is_removable() {
+    local bucket="$1" unpushed="$2" pr_state="${3:-}" pr_head="${4:-}" wt_head="${5:-}"
+    [[ "$bucket" == MERGED ]] || return 1
+    if [[ "$pr_state" == MERGED && -n "$pr_head" && -n "$wt_head" ]]; then
+        [[ "$pr_head" == "$wt_head" ]]
+        return
+    fi
+    [[ "$unpushed" != true ]]
+}
+
+# sweep_would_kill_own_session <repo> <path> <branch>
+#   True when removing <path> would make wt's post-remove hook (wt-tmux-cleanup)
+#   kill the CURRENT tmux session: the hook kills the session named after the
+#   removed worktree, and post-* hooks run in the background regardless of
+#   --foreground (`wt hook --help`), so the only defense is not to start.
+#   is_live misses this case (panes cd'd to the hub, still in that session).
+#   Read-only `tmux display-message` only.
+sweep_would_kill_own_session() {
+    local repo="$1" path="$2" branch="$3" repo_name cur_session
+    [[ -n "${TMUX:-}" ]] || return 1
+    cur_session=$(tmux display-message -p '#S' 2>/dev/null) || return 1
+    [[ -n "$cur_session" ]] || return 1
+    repo_name="${repo##*/}"
+    session_name_for_removed "$repo_name" "$path" "$branch"
+    [[ "$cur_session" == "$session_name" ]]
+}
+
+# Sourced (tests/test-worktree-sweep.sh) rather than executed: hand back the
+# guard functions above and run none of the sweep below.
+
+# remove_worktree <repo> <path> <branch> <locked> — the removal itself
+# (--apply only; mirrors sweep_remove_cmd step for step).
+# --foreground waits for the directory to go, NOT for the post-remove hook
+# (background regardless — `wt hook --help`). No -f: the dirty check already
+# ran and -f would defeat it. Sets REMOVE_FAIL_NOTE when an unlock happened
+# before a failed removal (a mutation that survives it) and REMOVE_NOTE when
+# the branch delete failed after a successful one.
+remove_worktree() {
+    local repo="$1" path="$2" branch="$3" locked="$4" target unlocked=false
+    target="${branch:-$path}"
+    REMOVE_FAIL_NOTE=""
+    REMOVE_NOTE=""
+    if [[ "$locked" == true ]]; then
+        if git -C "$repo" worktree unlock "$path" 2>/dev/null; then
+            unlocked=true
+        fi
+    fi
+    if ! wt -C "$repo" remove --foreground --no-delete-branch "$target" </dev/null; then
+        [[ "$unlocked" == true ]] && REMOVE_FAIL_NOTE=" (worktree was unlocked before this failure and is left unlocked)"
+        return 1
+    fi
+    if [[ -n "$branch" ]] && ! git -C "$repo" branch -D "$branch" >/dev/null 2>&1; then
+        REMOVE_NOTE="; branch $branch KEPT (git branch -D failed — delete it by hand)"
+    fi
+    return 0
+}
+
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
+
+# ---- args ----
+MODE=report
+if [[ "${1:-}" == sweep ]]; then
+    MODE=sweep
+    shift
+fi
+OFFLINE=false
+VERBOSE=false
+SHOW_ALL=false
+APPLY=false
+FORCE=false
+for arg in "$@"; do
+    case "$arg" in
+        --offline) OFFLINE=true ;;
+        -v|--verbose) VERBOSE=true ;;
+        -h|--help) usage; exit 0 ;;
+        --all) SHOW_ALL=true ;;
+        --apply)
+            [[ "$MODE" == sweep ]] || { echo "worktrees: --apply needs the sweep verb: worktrees sweep --apply" >&2; exit 2; }
+            APPLY=true ;;
+        --force)
+            [[ "$MODE" == sweep ]] || { echo "worktrees: --force needs the sweep verb" >&2; exit 2; }
+            FORCE=true ;;
+        *)
+            echo "worktrees: unknown argument: $arg" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+# gh unless --offline: without it a squash merge looks unmerged and the sweep
+# leaves it alone (the safe direction).
+GH_OK=false
+if [[ "$OFFLINE" == false ]] && command -v gh >/dev/null 2>&1; then
+    GH_OK=true
+fi
+
+if [[ "$APPLY" == true ]] && ! command -v wt >/dev/null 2>&1; then
+    echo "worktrees: sweep --apply needs wt on PATH; not found" >&2
+    exit 2
+fi
+
+init_liveness
+
+# Without lsof every worktree looks not-live, and the one guard against
+# removing out from under a live agent/editor is silently off. Refuse --apply.
+if [[ "$APPLY" == true ]] && [[ "$LSOF_RAN" == false ]]; then
+    echo "worktrees: sweep --apply needs lsof to protect live worktrees; not found" >&2
+    exit 2
+fi
+
+# Cache exclude list (single source of truth: dots/worktrunk.toml).
+sweep_excludes=()
+if [[ "$MODE" == sweep ]]; then
+    while IFS= read -r _ex; do
+        [[ -n "$_ex" ]] && sweep_excludes+=("$_ex")
+    done < <(parse_copy_ignored_excludes "$DOTFILES/dots/worktrunk.toml")
+fi
+
+# shellcheck source=/dev/null
+source "$DOTFILES/bin/project-dirs-lib"
+project_dirs
+
+repos=()
+repos_seen=$'\n'
+# Scope: the repo the cwd is in (a worktree resolves to its hub through the
+# common git dir), unless --all or the cwd is in no repo. Everything the tool
+# needs is per repo, so the other two dozen projects must cost nothing.
+SCOPED=""
+_cwd_common=$(git rev-parse --git-common-dir 2>/dev/null)
+if [[ "$SHOW_ALL" == false && -n "$_cwd_common" ]]; then
+    _cwd_common=$(cd "$_cwd_common" 2>/dev/null && pwd -P)
+    SCOPED="${_cwd_common%/.git}"
+    repos=("$SCOPED")
+# Guarded on element count, not just "declared": bash 3.2 treats
+# "${arr[@]}" on a zero-element array as unbound under `set -u`.
+elif (( ${#project_dirs_out[@]} )); then
+    for _cand in "${project_dirs_out[@]}"; do
+        [[ -d "$_cand/.git" ]] || continue
+        [[ "$repos_seen" == *$'\n'"$_cand"$'\n'* ]] && continue
+        repos_seen+="$_cand"$'\n'
+        repos+=("$_cand")
+    done
+fi
+
+CNT_REMOVE=0 CNT_SKIP=0 CNT_FAIL=0
+
+CNT_LIVE=0 CNT_DIRTY=0 CNT_PRUNABLE=0 CNT_MERGED=0 CNT_ABANDONED=0
+CNT_INREVIEW=0 CNT_PARKED=0 CNT_SHIPPED=0
+
+count_bucket() {
+    case "$1" in
+        LIVE)      CNT_LIVE=$((CNT_LIVE + 1)) ;;
+        DIRTY)     CNT_DIRTY=$((CNT_DIRTY + 1)) ;;
+        PRUNABLE)  CNT_PRUNABLE=$((CNT_PRUNABLE + 1)) ;;
+        MERGED)    CNT_MERGED=$((CNT_MERGED + 1)) ;;
+        ABANDONED) CNT_ABANDONED=$((CNT_ABANDONED + 1)) ;;
+        IN-REVIEW) CNT_INREVIEW=$((CNT_INREVIEW + 1)) ;;
+        PARKED)    CNT_PARKED=$((CNT_PARKED + 1)) ;;
+        SHIPPED?)  CNT_SHIPPED=$((CNT_SHIPPED + 1)) ;;
+    esac
+}
+
+# report_row <path> <branch> <locked> <prunable> <wt_head>
+#   The report's per-worktree callback: derive facts, classify, buffer a row.
+#   Depends on globals the per-repo loop below sets: $repo and $default_ref.
+report_row() {
+    local path="$1" branch="$2" locked="$3" prunable="$4" wt_head="$5"
+
+    derive_worktree_facts "$path" "$branch" "$prunable" "$wt_head"
+
+    local bucket flags
+    bucket=$(classify_worktree "$f_live" "$f_dirty" "$prunable" "$f_pr_state" "$f_unpushed" "$f_merged_local")
+    count_bucket "$bucket"
+
+    flags=""
+    [[ "$locked" == true ]] && flags+="locked "
+    [[ "$f_dirty" == true ]] && flags+="dirty "
+    [[ "$f_unpushed" == true ]] && flags+="unpushed "
+    flags="${flags% }"
+    [[ -z "$flags" ]] && flags="-"
+
+    local detail=""
+    if [[ "$VERBOSE" == true ]]; then
+        detail="      $(action_for "$bucket" "$repo" "$path" "$branch" "$locked")"
+    fi
+    rows_add "$bucket" "${branch:-(detached)}" "$f_pr_disp" "$flags" "$f_age" "$(where_for "$path" "$repo")" "$detail"
+}
+
+# sweep_row <path> <branch> <locked> <prunable> <wt_head>
+#   The sweep's per-worktree callback; acts only on MERGED. Buffers a row and
+#   bumps the counters in THIS shell — the caller is fed by process
+#   substitution, not a pipe, so both survive. Under --apply the removal
+#   happens here; only the printing is deferred.
+sweep_row() {
+    local path="$1" branch="$2" locked="$3" prunable="$4" wt_head="$5"
+    local bucket at_risk n rel detail nl=$'\n'
+
+    derive_worktree_facts "$path" "$branch" "$prunable" "$wt_head"
+    bucket=$(classify_worktree "$f_live" "$f_dirty" "$prunable" "$f_pr_state" "$f_unpushed" "$f_merged_local")
+    [[ "$bucket" == MERGED ]] || return 0
+
+    # Removable only if the worktree carries nothing the merge did not.
+    if ! sweep_is_removable "$bucket" "$f_unpushed" "$f_pr_state" "$f_pr_head" "$wt_head"; then
+        CNT_SKIP=$((CNT_SKIP + 1))
+        if [[ "$f_pr_state" == MERGED && -n "$f_pr_head" ]]; then
+            detail="      merged upstream, but this worktree is not at the merged PR's head commit — needs manual review, never auto-removed"
+        else
+            detail="      merged, but no origin/${branch:-HEAD} to vouch for its commits (missing, or local commits ahead of it) — needs manual review, never auto-removed"
+        fi
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" "$detail"
+        return 0
+    fi
+
+    at_risk=$(worktree_ignored_at_risk "$path" "$repo")
+
+    if [[ -n "$at_risk" ]] && [[ "$FORCE" == false ]]; then
+        n=$(printf '%s\n' "$at_risk" | grep -c .)
+        CNT_SKIP=$((CNT_SKIP + 1))
+        detail="      merged, but $n at-risk gitignored file(s) — inspect, or --force to remove anyway:"
+        while IFS= read -r rel; do
+            [[ -z "$rel" ]] && continue
+            detail+=$'\n'"        $rel"
+        done <<< "$at_risk"
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" "$detail"
+        return 0
+    fi
+
+    # The post-remove hook would kill the session this sweep runs in.
+    if sweep_would_kill_own_session "$repo" "$path" "$branch"; then
+        CNT_SKIP=$((CNT_SKIP + 1))
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" \
+            "      merged, but removing it would kill the tmux session this sweep is running in — run it from elsewhere"
+        return 0
+    fi
+
+    # Re-check liveness right before the point of no return: the snapshot
+    # predates the slow (one gh call per row) work above.
+    if [[ "$APPLY" == true ]]; then
+        init_liveness
+        if is_live "$path"; then
+            CNT_SKIP=$((CNT_SKIP + 1))
+            rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" \
+                "      merged, but became live just before removal (re-checked) — left in place"
+            return 0
+        fi
+    fi
+
+    CNT_REMOVE=$((CNT_REMOVE + 1))
+    detail=""
+    if [[ -n "$at_risk" ]]; then
+        detail="      --force: dropping at-risk gitignored files"
+    fi
+    if [[ "$APPLY" == true ]]; then
+        if remove_worktree "$repo" "$path" "$branch" "$locked"; then
+            detail+="${detail:+$nl}      removed$REMOVE_NOTE"
+        else
+            CNT_FAIL=$((CNT_FAIL + 1))
+            detail+="${detail:+$nl}      $(paint FAILED 6) to remove (left in place)$REMOVE_FAIL_NOTE"
+        fi
+    elif [[ "$VERBOSE" == true ]]; then
+        detail+="${detail:+$nl}      would run: $(sweep_remove_cmd "$repo" "$path" "$branch" "$locked")"
+    fi
+    rows_add REMOVE "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" "$detail"
+}
+
+on_worktree_block() {
+    if [[ "$MODE" == sweep ]]; then sweep_row "$@"; else report_row "$@"; fi
+}
+
+# Guarded on element count, not just "declared" — see the note above the
+# same guard around project_dirs_out.
+if (( ${#repos[@]} )); then
+# Only repos with a linked worktree ever need PR state; fetch their lists in
+# parallel up front (the serial cost was one gh round-trip per such repo).
+_with_wts=()
+for repo in "${repos[@]}"; do
+    _n=$(git -C "$repo" worktree list --porcelain 2>/dev/null | grep -c '^worktree ')
+    (( _n > 1 )) && _with_wts+=("$repo")
+done
+if (( ${#_with_wts[@]} )); then prefetch_pr_lists "${_with_wts[@]}"; fi
+rows_reset
+for repo in "${repos[@]}"; do
+    default_ref=$(default_ref_for "$repo")
+
+    # Process substitution (not a pipe): on_worktree_block must run in this
+    # shell so the counters and, under --apply, the removals take effect here.
+    parse_porcelain_blocks "$repo" < <(git -C "$repo" worktree list --porcelain 2>/dev/null)
+done
+if [[ "$MODE" == sweep ]]; then rows_render 6; else rows_render 9 "$SHOW_ALL"; fi
+[[ -n "$PR_PREFETCH_DIR" ]] && rm -rf "$PR_PREFETCH_DIR"
+fi
+
+echo
+if [[ "$MODE" == sweep ]]; then
+    if [[ "$APPLY" == true ]]; then
+        _sum="$(count_cell removed "$CNT_REMOVE")$(count_cell SKIP "$CNT_SKIP")$(count_cell FAILED "$CNT_FAIL")"
+        if [[ -n "$_sum" ]]; then printf '%s\n' "${_sum%  }"; else echo "nothing to sweep"; fi
+    else
+        _sum="$(count_cell would-remove "$CNT_REMOVE")$(count_cell SKIP "$CNT_SKIP")"
+        [[ -n "$_sum" ]] && printf '%s\n' "${_sum%  }"
+        if (( CNT_REMOVE > 0 )); then
+            echo "dry-run — re-run with --apply to remove"
+        else
+            echo "dry-run — nothing to sweep"
+        fi
+    fi
+    source_warnings
+    # `(( CNT_FAIL > 0 )) && exit 2` as the last statement leaks the
+    # arithmetic's false status (1) as the script's exit code when CNT_FAIL is
+    # 0 (bash 3.2 and 5.x). The explicit `exit 0` is load-bearing.
+    if [[ "$APPLY" == true ]] && (( CNT_FAIL > 0 )); then
+        exit 2
+    fi
+    exit 0
+fi
+
+_sum="$(count_cell MERGED "$CNT_MERGED")$(count_cell ABANDONED "$CNT_ABANDONED")$(count_cell PRUNABLE "$CNT_PRUNABLE")$(count_cell PARKED "$CNT_PARKED")$(count_cell 'SHIPPED?' "$CNT_SHIPPED")$(count_cell DIRTY "$CNT_DIRTY")$(count_cell IN-REVIEW "$CNT_INREVIEW")$(count_cell LIVE "$CNT_LIVE")"
+if [[ -n "$_sum" ]]; then printf '%s\n' "${_sum%  }"; else echo "no linked worktrees"; fi
+source_warnings
+
+# Exit 1 = something to act on (MERGED/ABANDONED/PRUNABLE), same convention
+# as bin/doctor.
+if (( CNT_MERGED > 0 || CNT_ABANDONED > 0 || CNT_PRUNABLE > 0 )); then
+    exit 1
+fi
+exit 0
