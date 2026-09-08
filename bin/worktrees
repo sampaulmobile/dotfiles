@@ -71,7 +71,8 @@ bucket_color() {
         PARKED|SKIP|ABANDONED|PRUNABLE) printf '\033[33m' ;;
         DIRTY|FAILED)                printf '\033[31m' ;;
         LIVE)                        printf '\033[34m' ;;
-        IN-REVIEW|SHIPPED?)          printf '\033[2m' ;;
+        IN-REVIEW)                   printf '\033[36m' ;;
+        SHIPPED?)                    printf '\033[35m' ;;
     esac
 }
 # paint <label> <width> — <label> left-padded to <width>, colored by bucket.
@@ -158,16 +159,11 @@ rows_render() {
     done
 }
 
-# count_cell <label> <n> — "LABEL:n" for the summary line, in the bucket's
-# color when n > 0 and dim when 0, so the non-zero buckets stand out.
+# count_cell <label> <n> — "LABEL:n" for the summary line in the bucket's
+# color; nothing at all when n is 0, so the line names only what exists.
 count_cell() {
-    if (( $2 > 0 )); then
-        printf '%s%s:%d%s' "$(bucket_color "$1")" "$1" "$2" "$C_RESET"
-    elif [[ -n "$C_RESET" ]]; then
-        printf '\033[2m%s:%d%s' "$1" "$2" "$C_RESET"
-    else
-        printf '%s:%d' "$1" "$2"
-    fi
+    (( $2 > 0 )) || return 0
+    printf '%s%s:%d%s  ' "$(bucket_color "$1")" "$1" "$2" "$C_RESET"
 }
 
 # source_warnings — the scope when narrowed to one repo, then one line per
@@ -1007,9 +1003,11 @@ fi
 echo
 if [[ "$MODE" == sweep ]]; then
     if [[ "$APPLY" == true ]]; then
-        printf '%s  %s  %s\n' "$(count_cell removed "$CNT_REMOVE")" "$(count_cell SKIP "$CNT_SKIP")" "$(count_cell FAILED "$CNT_FAIL")"
+        _sum="$(count_cell removed "$CNT_REMOVE")$(count_cell SKIP "$CNT_SKIP")$(count_cell FAILED "$CNT_FAIL")"
+        if [[ -n "$_sum" ]]; then printf '%s\n' "${_sum%  }"; else echo "nothing to sweep"; fi
     else
-        printf '%s  %s\n' "$(count_cell would-remove "$CNT_REMOVE")" "$(count_cell SKIP "$CNT_SKIP")"
+        _sum="$(count_cell would-remove "$CNT_REMOVE")$(count_cell SKIP "$CNT_SKIP")"
+        [[ -n "$_sum" ]] && printf '%s\n' "${_sum%  }"
         if (( CNT_REMOVE > 0 )); then
             echo "dry-run — re-run with --apply to remove"
         else
@@ -1026,11 +1024,8 @@ if [[ "$MODE" == sweep ]]; then
     exit 0
 fi
 
-printf '%s  %s  %s  %s  %s  %s  %s  %s\n' \
-    "$(count_cell MERGED "$CNT_MERGED")" "$(count_cell ABANDONED "$CNT_ABANDONED")" \
-    "$(count_cell PRUNABLE "$CNT_PRUNABLE")" "$(count_cell PARKED "$CNT_PARKED")" \
-    "$(count_cell 'SHIPPED?' "$CNT_SHIPPED")" "$(count_cell DIRTY "$CNT_DIRTY")" \
-    "$(count_cell IN-REVIEW "$CNT_INREVIEW")" "$(count_cell LIVE "$CNT_LIVE")"
+_sum="$(count_cell MERGED "$CNT_MERGED")$(count_cell ABANDONED "$CNT_ABANDONED")$(count_cell PRUNABLE "$CNT_PRUNABLE")$(count_cell PARKED "$CNT_PARKED")$(count_cell 'SHIPPED?' "$CNT_SHIPPED")$(count_cell DIRTY "$CNT_DIRTY")$(count_cell IN-REVIEW "$CNT_INREVIEW")$(count_cell LIVE "$CNT_LIVE")"
+if [[ -n "$_sum" ]]; then printf '%s\n' "${_sum%  }"; else echo "no linked worktrees"; fi
 source_warnings
 
 # Exit 1 = something to act on (MERGED/ABANDONED/PRUNABLE), same convention
