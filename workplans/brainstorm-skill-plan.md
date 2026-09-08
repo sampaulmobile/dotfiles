@@ -267,9 +267,9 @@ is the three dry runs in Ordered steps 6–8, plus:
 - Wiki write-back of the finished design (do by hand; automate later if the
   knowledge rule's write-back keeps getting skipped).
 - Codex sharing (`AskUserQuestion` has no codex equivalent).
-- Updating the LIVE `~/dev/hq` (private repo): the user adds `designs/` and
-  the CLAUDE.md bullet there by hand after this lands; `hq-init` only affects
-  new scaffolds.
+- Updating the LIVE `~/dev/hq` (private repo) CLAUDE.md: the user pastes the
+  designs bullet there by hand after this lands; `hq-init` only affects new
+  scaffolds. (`designs/` itself needs no hand step: the skill `mkdir -p`s it.)
 - Any change to the popup/dashboard/attention layer.
 
 ## Public-repo caution

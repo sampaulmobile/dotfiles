@@ -38,7 +38,9 @@ Resume rules below for the resume case):
 - **Greenfield mode**: anything else (including an hq session, per above). The
   design root is `~/dev/hq/designs/`. No hq repo at `~/dev/hq` → STOP and say
   so, the same way `/hq` stops when `routing.md` is missing — mention that
-  `~/dotfiles/bin/hq-init` scaffolds `designs/` along with the rest of hq.
+  `~/dotfiles/bin/hq-init` scaffolds one. When hq exists but `designs/` does
+  not (an hq scaffolded before this skill), `mkdir -p` it — the dir is the
+  skill's own, so creating it needs no ceremony and no hq-init upgrade.
 
 The design root is the mode's base directory (no slug yet); the design dir —
 `<design-root>/<slug>/` — is where this brainstorm's `design.md` and friends
