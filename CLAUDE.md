@@ -95,6 +95,7 @@ during the transition off that layout); its scripts are in `archive/`.
 
 ## Conventions
 
+- **Confirm before commit, topic branch always.** Any agent session editing this repo (from here or from another repo's session) shows the diff and waits for a yes, then commits on a `<type>/<kebab-slug>` branch — never directly on master. Rules/skills/agents here load into every session's prompt, so each change needs a review point; the PUBLIC sweep above applies to the diff and the commit message.
 - Branch names: `<type>/<kebab-slug>` with `type` ∈ `feat`, `fix`, `chore`, `docs` — the same prefixes as commit types. `/feature` reads this line when it renames its worktree branch; older branches predate it.
 - zshrc loads brew first, then auto-launches tmux. The outer shell skips everything after the tmux block (`&& return`). The inner shell (inside tmux) loads the full config.
 - Platform-specific zshrc: `zshrc` for macOS, `zshrc_linux` for Linux.
