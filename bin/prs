@@ -1,0 +1,313 @@
+#!/usr/bin/env bash
+# prs — your pull requests, one table per repo: OPEN rows tagged with the ONE
+# thing each PR is waiting on, then the PRs merged since --since (default:
+# today). Read-only. The deterministic half of a status check — bin/worktrees
+# is the other half (checkouts), and anything that needs judgment (what to do
+# next) is left to whoever reads the two.
+#
+# Two GitHub search calls for the whole run (open, merged, in parallel),
+# whatever the repo count: GraphQL `search` returns every PR by an author across repos with the
+# tag fields attached, and `archived:false` drops archived repos (GitHub keeps
+# listing their PRs, but nothing can be done to them). Results are filtered
+# locally to the repos in scope, so a repo is never queried on its own. A
+# failing call is retried once (GitHub's GraphQL returns transient "Something
+# went wrong" errors — seen 2026-09-08) and then fails the run with gh's own
+# error.
+#
+# Tag precedence (first match wins, pr_tag() below): draft, merge-conflict,
+# ci-red, changes-requested, approved (i.e. mergeable — go merge it),
+# review-required, then open.
+set -uo pipefail
+
+DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+
+usage() {
+    cat <<'USAGE'
+usage: prs [--all|--any-repo] [--since DATE|Nd] [--author LOGIN] [--open-only] [--merged-only]
+
+Scope: inside a git repo (hub or worktree), that repo only; anywhere else,
+every project bin/project-dirs-lib knows about that has a GitHub remote.
+--all forces every project even from inside a repo; --any-repo drops the
+local filter and shows your PRs in repos you have not cloned too. A repo
+with nothing to show is not listed; archived repos never are.
+
+Rows (per repo, OPEN then MERGED):
+  OPEN    #123  <tag>              <age>   <title>
+  MERGED  #120  merged HH:MM               <title>
+On a terminal each row is a clickable link to its PR (OSC 8) and the tag is
+colored (NO_COLOR disables); piped, the URL is appended as a last column.
+Tags, first match wins: draft · merge-conflict · ci-red · changes-requested ·
+approved · review-required · open.
+
+  --since X     merged window: a date (2026-09-01) or Nd (7d). Default: today.
+  --author L    GitHub login (default: @me, the gh login).
+  --open-only / --merged-only   print just that half.
+USAGE
+}
+
+# fmt_age <seconds> — "just now" / "5m" / "3h" / "2d" / "6w". Pure; tested in
+# tests/test-prs.sh.
+fmt_age() {
+    local s="$1"
+    (( s < 0 )) && s=0
+    if   (( s < 60 ));      then printf 'just now'
+    elif (( s < 3600 ));    then printf '%dm' $(( s / 60 ))
+    elif (( s < 86400 ));   then printf '%dh' $(( s / 3600 ))
+    elif (( s < 604800 ));  then printf '%dd' $(( s / 86400 ))
+    else                         printf '%dw' $(( s / 604800 ))
+    fi
+}
+
+# pr_tag <isDraft> <mergeable> <ci> <reviewDecision>
+#   isDraft: true|false. mergeable: MERGEABLE|CONFLICTING|UNKNOWN.
+#   ci: green|red|pending|none (the check rollup state, folded by the jq below).
+#   reviewDecision: APPROVED|CHANGES_REQUESTED|REVIEW_REQUIRED|"".
+#   Prints the one tag. Order IS the precedence.
+pr_tag() {
+    local draft="$1" mergeable="$2" ci="$3" review="$4"
+    if   [[ "$draft" == "true" ]];               then printf 'draft'
+    elif [[ "$mergeable" == "CONFLICTING" ]];    then printf 'merge-conflict'
+    elif [[ "$ci" == "red" ]];                   then printf 'ci-red'
+    elif [[ "$review" == "CHANGES_REQUESTED" ]]; then printf 'changes-requested'
+    elif [[ "$review" == "APPROVED" ]];          then printf 'approved'
+    elif [[ "$review" == "REVIEW_REQUIRED" ]];   then printf 'review-required'
+    else                                              printf 'open'
+    fi
+}
+
+shorten() {
+    local p="$1"
+    [[ "$p" == "$HOME/"* ]] && p="~/${p#"$HOME"/}"
+    printf '%s' "$p"
+}
+
+# github_slug <repo-dir> — owner/name from the origin remote, lowercased (the
+# API's casing can differ from the remote's); nothing when origin is not on
+# github.com.
+github_slug() {
+    local r
+    r=$(git -C "$1" remote get-url origin 2>/dev/null) || return 0
+    [[ "$r" == *github.com* ]] || return 0
+    r="${r%/}"; r="${r%.git}"
+    r="${r#*github.com:}"; r="${r#*github.com/}"
+    printf '%s' "$r" | tr '[:upper:]' '[:lower:]'
+}
+
+# Colors and links only when stdout is a terminal (NO_COLOR drops the colors,
+# links stay). Same palette as bin/worktrees: green = go merge it, red = broken,
+# yellow = on you, cyan = in review, blue = live. Padding is applied to the
+# visible text first and the escapes wrapped after, so columns stay aligned.
+C_RESET=""
+LINKS=false
+if [[ -t 1 ]]; then
+    LINKS=true
+    [[ -z "${NO_COLOR:-}" ]] && C_RESET=$'\033[0m'
+fi
+tag_color() {
+    [[ -n "$C_RESET" ]] || return 0
+    case "$1" in
+        approved|merged*)          printf '\033[32m' ;;
+        ci-red|merge-conflict)     printf '\033[31m' ;;
+        draft|changes-requested)   printf '\033[33m' ;;
+        review-required)           printf '\033[36m' ;;
+        open)                      printf '\033[34m' ;;
+    esac
+}
+# paint <tag> <width>
+paint() {
+    local padded
+    padded=$(printf "%-${2}s" "$1")
+    printf '%s%s%s' "$(tag_color "$1")" "$padded" "$C_RESET"
+}
+# link_open <url> / link_close — the OSC 8 hyperlink around a whole row, on
+# a terminal only. Colors (SGR) nest inside a hyperlink without ending it.
+link_open() { [[ "$LINKS" == true ]] && printf '\033]8;;%s\033\\' "$1"; return 0; }
+link_close() { [[ "$LINKS" == true ]] && printf '\033]8;;\033\\'; return 0; }
+# pr_num <number> <width> — "#N" padded, blue on a terminal.
+pr_num() {
+    local text="#$1" n pad=""
+    n=$(( $2 - ${#text} ))
+    (( n > 0 )) && pad=$(printf "%*s" "$n" "")
+    if [[ -n "$C_RESET" ]]; then
+        printf '\033[34m%s%s%s' "$text" "$C_RESET" "$pad"
+    else
+        printf '%s%s' "$text" "$pad"
+    fi
+}
+
+# Sourced by the test: hand back the pure functions and stop.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0 2>/dev/null || true
+fi
+
+SHOW_ALL=false; ANY_REPO=false; SINCE=""; AUTHOR="@me"; WANT_OPEN=true; WANT_MERGED=true
+while (( $# )); do
+    case "$1" in
+        --all) SHOW_ALL=true ;;
+        --any-repo) ANY_REPO=true ;;
+        --since) SINCE="${2:-}"; shift ;;
+        --author) AUTHOR="${2:-@me}"; shift ;;
+        --open-only) WANT_MERGED=false ;;
+        --merged-only) WANT_OPEN=false ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "prs: unknown argument: $1" >&2; usage >&2; exit 2 ;;
+    esac
+    shift
+done
+
+# --since: "7d" -> a date 7 days back; a bare date passes through; default today.
+if [[ -z "$SINCE" ]]; then
+    SINCE=$(date +%Y-%m-%d)
+elif [[ "$SINCE" =~ ^([0-9]+)d$ ]]; then
+    n="${BASH_REMATCH[1]}"
+    SINCE=$(date -v-"${n}"d +%Y-%m-%d 2>/dev/null || date -d "-${n} days" +%Y-%m-%d)
+fi
+
+if ! command -v gh >/dev/null 2>&1; then
+    echo "prs: gh not installed" >&2; exit 2
+fi
+
+# gh_try <gh args...> — one retry; stderr lands in $GH_ERRF, one file per
+# background search so the two cannot clobber each other.
+TMPD=$(mktemp -d) || exit 2
+trap 'rm -rf "$TMPD"' EXIT
+gh_try() {
+    gh "$@" 2>"$GH_ERRF" && return 0
+    sleep 3
+    gh "$@" 2>"$GH_ERRF"
+}
+# gh_failed <errfile> — its first line, for the report.
+gh_failed() {
+    local line
+    line=$(head -n1 "$1" 2>/dev/null)
+    printf '%s' "${line:-gh failed}"
+}
+
+# search_prs <qualifiers> <row-jq> — every page of one GitHub search, rows as
+# TSV with the lowercased repo slug first. The jq emits a trailing
+# "NEXT\t<cursor>" line while pages remain.
+SEARCH_GQL='query($q:String!,$after:String){ search(query:$q, type:ISSUE, first:100, after:$after){
+  pageInfo{hasNextPage endCursor}
+  nodes{ ... on PullRequest{ number title url isDraft mergeable reviewDecision updatedAt mergedAt
+    repository{nameWithOwner} commits(last:1){nodes{commit{statusCheckRollup{state}}}} } } } }'
+search_prs() {
+    local q="$1" jq="$2" after="" out line
+    local -a cursor=()
+    while :; do
+        out=$(gh_try api graphql -f q="$q" ${cursor[@]+"${cursor[@]}"} -f query="$SEARCH_GQL" \
+            --jq "(.data.search.nodes[] | $jq), (.data.search.pageInfo | select(.hasNextPage) | \"NEXT\t\(.endCursor)\")") || return 1
+        after=""
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            if [[ "$line" == NEXT$'\t'* ]]; then after="${line#NEXT$'\t'}"; else printf '%s\n' "$line"; fi
+        done <<< "$out"
+        [[ -n "$after" ]] || break
+        cursor=(-f after="$after")
+    done
+}
+OPEN_JQ='[ (.repository.nameWithOwner | ascii_downcase), .number, .isDraft, (.mergeable // "UNKNOWN"),
+  ( .commits.nodes[0].commit.statusCheckRollup.state
+    | if . == null then "none" elif . == "SUCCESS" then "green"
+      elif . == "FAILURE" or . == "ERROR" then "red" else "pending" end ),
+  (.reviewDecision // ""), ((now - (.updatedAt | fromdate)) | floor), .title, .url ] | @tsv'
+MERGED_JQ='[ (.repository.nameWithOwner | ascii_downcase), .number, (.mergedAt | fromdate | strflocaltime("%H:%M")), .title, .url ] | @tsv'
+
+# The two searches run in parallel, each in its own subshell with its own
+# stderr file; the run fails as a whole if either does.
+open_pid=""; merged_pid=""
+if [[ "$WANT_OPEN" == true ]]; then
+    ( GH_ERRF="$TMPD/open.err"; search_prs "is:pr is:open archived:false author:$AUTHOR sort:updated-desc" "$OPEN_JQ" ) > "$TMPD/open" &
+    open_pid=$!
+fi
+if [[ "$WANT_MERGED" == true ]]; then
+    ( GH_ERRF="$TMPD/merged.err"; search_prs "is:pr is:merged archived:false author:$AUTHOR merged:>=$SINCE sort:updated-desc" "$MERGED_JQ" ) > "$TMPD/merged" &
+    merged_pid=$!
+fi
+# Scope: "<slug>\t<dir>" per local repo, in bin/project-dirs-lib order. With
+# --any-repo the list still supplies dirs for headers, but no longer filters.
+# Computed AFTER the searches are launched: enumerating ~25 repos and reading
+# each remote costs ~1s, which overlaps the network wait instead of adding to it.
+# shellcheck source=/dev/null
+source "$DOTFILES/bin/project-dirs-lib"
+project_dirs
+
+scope=$'\n'
+add_scope() {
+    local slug
+    slug=$(github_slug "$1")
+    [[ -n "$slug" ]] || return 0
+    [[ "$scope" == *$'\n'"${slug}"$'\t'* ]] && return 0
+    scope+="${slug}"$'\t'"$1"$'\n'
+}
+_cwd_common=$(git rev-parse --git-common-dir 2>/dev/null)
+if [[ "$SHOW_ALL" == false && "$ANY_REPO" == false && -n "$_cwd_common" ]]; then
+    _cwd_common=$(cd "$_cwd_common" 2>/dev/null && pwd -P)
+    add_scope "${_cwd_common%/.git}"
+elif (( ${#project_dirs_out[@]} )); then
+    for cand in "${project_dirs_out[@]}"; do
+        [[ -d "$cand/.git" ]] || continue
+        [[ "$cand" == "$DOTFILES" ]] && continue
+        add_scope "$cand"
+    done
+fi
+
+failed=""
+[[ -n "$open_pid" ]] && { wait "$open_pid" || failed+=" open: $(gh_failed "$TMPD/open.err")"; }
+[[ -n "$merged_pid" ]] && { wait "$merged_pid" || failed+=" merged: $(gh_failed "$TMPD/merged.err")"; }
+[[ -n "$failed" ]] && { echo "prs: gh failed (after one retry):$failed" >&2; exit 1; }
+open_rows=""; merged_rows=""
+[[ -n "$open_pid" ]] && open_rows=$(cat "$TMPD/open")
+[[ -n "$merged_pid" ]] && merged_rows=$(cat "$TMPD/merged")
+
+# Repo order: scope first (project-dirs order), then — with --any-repo only —
+# every other slug the rows mention, first seen.
+slugs=""
+while IFS=$'\t' read -r slug _dir; do
+    [[ -n "$slug" ]] && slugs+="${slug}"$'\n'
+done <<< "$scope"
+if [[ "$ANY_REPO" == true ]]; then
+    while IFS=$'\t' read -r slug _rest; do
+        [[ -z "$slug" ]] && continue
+        [[ "$slugs" == *"${slug}"$'\n'* ]] || slugs+="${slug}"$'\n'
+    done <<< "${open_rows}"$'\n'"${merged_rows}"
+fi
+
+# rows_for <rows> <slug> — the rows of one repo, slug column dropped.
+rows_for() {
+    local line
+    while IFS= read -r line; do
+        [[ "$line" == "${2}"$'\t'* ]] && printf '%s\n' "${line#*$'\t'}"
+    done <<< "$1"
+}
+# Piped output keeps the URL as a trailing column: no terminal, no link.
+url_col() { [[ "$LINKS" == true ]] || printf '  %s' "$1"; }
+
+printed_any=false
+while IFS= read -r slug; do
+    [[ -z "$slug" ]] && continue
+    o=$(rows_for "$open_rows" "$slug")
+    m=$(rows_for "$merged_rows" "$slug")
+    [[ -z "$o" && -z "$m" ]] && continue
+
+    header="$slug"
+    rest="${scope#*$'\n'"${slug}"$'\t'}"
+    [[ "$rest" != "$scope" ]] && header=$(shorten "${rest%%$'\n'*}")
+    printf '\n== %s\n' "$header"
+    printed_any=true
+    if [[ -n "$o" ]]; then
+        while IFS=$'\t' read -r num draft mergeable ci review age title url; do
+            [[ -z "$num" ]] && continue
+            tag=$(pr_tag "$draft" "$mergeable" "$ci" "$review")
+            printf '  %s%-7s %s %s %-9s %s%s%s\n' "$(link_open "$url")" "OPEN" "$(pr_num "$num" 6)" "$(paint "$tag" 18)" "$(fmt_age "$age")" "$title" "$(link_close)" "$(url_col "$url")"
+        done <<< "$o"
+    fi
+    if [[ -n "$m" ]]; then
+        while IFS=$'\t' read -r num when title url; do
+            [[ -z "$num" ]] && continue
+            printf '  %s%-7s %s %s %-9s %s%s%s\n' "$(link_open "$url")" "MERGED" "$(pr_num "$num" 6)" "$(paint "merged $when" 18)" "" "$title" "$(link_close)" "$(url_col "$url")"
+        done <<< "$m"
+    fi
+done <<< "$slugs"
+
+[[ "$printed_any" == false ]] && echo "no PRs open or merged since $SINCE in scope (--any-repo widens it)"
+exit 0
