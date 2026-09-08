@@ -8,7 +8,6 @@ if [ ! -z "$DOCKER_DEV" ]; then
     [ ! -d $hist_dir ] && mkdir $hist_dir
 
     HISTFILE="$hist_dir/.zsh_history"
-    RG_HISTFILE="$hist_dir/.zsh_history"
 fi
 
 if [ -d "$HOME/dropbox/!public" ]; then
