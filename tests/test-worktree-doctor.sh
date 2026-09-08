@@ -99,10 +99,22 @@ action_for_() {
 }
 
 echo "── action_for: locked prefixes MERGED/ABANDONED with an unlock, nothing else"
-action_for_ "merged, unlocked -> the sweep's exact remove + branch delete" MERGED false \
-    "wt -C /repo remove --foreground --no-delete-branch branchname && git -C /repo branch -D branchname"
-action_for_ "merged, locked -> unlock && the same" MERGED true \
-    "git -C /repo worktree unlock /repo/wt && wt -C /repo remove --foreground --no-delete-branch branchname && git -C /repo branch -D branchname"
+action_for_ "merged, unlocked -> points at the sweep (the actor)" MERGED false \
+    "bin/worktree-sweep --apply  (removes every MERGED row; dry-run without --apply, -v shows each command)"
+action_for_ "merged, locked -> same (the sweep unlocks itself)" MERGED true \
+    "bin/worktree-sweep --apply  (removes every MERGED row; dry-run without --apply, -v shows each command)"
+
+echo "── shorten: repo-relative inside the repo, ~-shortened elsewhere"
+if [[ "$(shorten /r/proj/.claude/worktrees/agent-1 /r/proj)" == ".claude/worktrees/agent-1" ]]; then
+    printf '  ok   %s\n' "path under the repo -> relative to it"; pass=$(( pass + 1 ))
+else
+    printf '  FAIL %s got [%s]\n' "repo-relative shorten" "$(shorten /r/proj/.claude/worktrees/agent-1 /r/proj)"; fail=$(( fail + 1 ))
+fi
+if [[ "$(HOME=/h shorten /h/dev/proj.feat-x /h/dev/proj)" == "~/dev/proj.feat-x" ]]; then
+    printf '  ok   %s\n' "sibling worktree -> ~-shortened"; pass=$(( pass + 1 ))
+else
+    printf '  FAIL %s got [%s]\n' "sibling shorten" "$(HOME=/h shorten /h/dev/proj.feat-x /h/dev/proj)"; fail=$(( fail + 1 ))
+fi
 action_for_ "abandoned, unlocked -> plain wt remove -D" ABANDONED false \
     "wt -C /repo remove -D branchname  (confirm first — deletes an unmerged branch)"
 action_for_ "abandoned, locked -> unlock && wt remove -D" ABANDONED true \

@@ -31,6 +31,42 @@ is MERGED, ABANDONED or PRUNABLE.
 EOF
 }
 
+# Colors only when stdout is a terminal and NO_COLOR is unset — piped/test
+# output stays plain. Both scripts color the bucket word alone (row labels,
+# not icons), so alignment is padded first and wrapped after.
+C_RESET=""
+if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; then
+    C_RESET=$'\033[0m'
+fi
+bucket_color() {
+    [[ -n "$C_RESET" ]] || return 0
+    case "$1" in
+        MERGED|REMOVE)               printf '\033[32m' ;;
+        PARKED|SKIP|ABANDONED|PRUNABLE) printf '\033[33m' ;;
+        DIRTY|FAILED)                printf '\033[31m' ;;
+        LIVE)                        printf '\033[34m' ;;
+        IN-REVIEW|SHIPPED?)          printf '\033[2m' ;;
+    esac
+}
+# paint <label> <width> — <label> left-padded to <width>, colored by bucket.
+paint() {
+    local padded
+    padded=$(printf "%-${2}s" "$1")
+    printf '%s%s%s' "$(bucket_color "$1")" "$padded" "$C_RESET"
+}
+
+# shorten <path> [<repo>] — <path> relative to <repo> when it is inside it
+# (the repo header already names it), else ~-shortened.
+shorten() {
+    local p="$1" repo="${2:-}"
+    if [[ -n "$repo" && "$p" == "$repo/"* ]]; then
+        printf '%s' "${p#"$repo"/}"
+        return
+    fi
+    [[ "$p" == "$HOME/"* ]] && p="~/${p#"$HOME"/}"
+    printf '%s' "$p"
+}
+
 # classify_worktree <live> <dirty> <prunable> <pr_state> <unpushed> <merged_local>
 #   live/dirty/prunable/unpushed/merged_local: "true" or "false".
 #   pr_state: one of MERGED, CLOSED, OPEN, none, unknown.
@@ -89,7 +125,7 @@ action_for() {
         LIVE)      echo "keep — in use" ;;
         DIRTY)     echo "keep — inspect: git -C $path status" ;;
         PRUNABLE)  echo "git -C $repo worktree prune" ;;
-        MERGED)    sweep_remove_cmd "$repo" "$path" "$branch" "$locked"; echo ;;
+        MERGED)    echo "bin/worktree-sweep --apply  (removes every MERGED row; dry-run without --apply, -v shows each command)" ;;
         ABANDONED) echo "${unlock_prefix}wt -C $repo remove -D $target  (confirm first — deletes an unmerged branch)" ;;
         IN-REVIEW) echo "keep — /address-review may need it" ;;
         PARKED)    echo "keep, surface — ship it or remove it deliberately" ;;
@@ -193,8 +229,8 @@ default_ref_for() {
 
 # sweep_remove_cmd <repo> <path> <branch> <locked>
 #   The exact command bin/worktree-sweep runs on a MERGED worktree, %q-quoted.
-#   The ONE renderer: the doctor's MERGED action line and the sweep's dry-run
-#   line both come from here, and the sweep's remove_worktree mirrors it.
+#   The ONE renderer: the sweep's verbose dry-run line comes from here and its
+#   remove_worktree mirrors it step for step.
 #   --no-delete-branch plus our own `git branch -D`: wt's merged-ness check is
 #   offline and capped at 500 commits, so left to itself it can keep the
 #   branch and still exit 0; the caller already proved "merged".
@@ -365,12 +401,6 @@ count_bucket() {
     esac
 }
 
-shorten() {
-    local p="$1"
-    [[ "$p" == "$HOME/"* ]] && p="~/${p#"$HOME"/}"
-    printf '%s' "$p"
-}
-
 # on_worktree_block <path> <branch> <locked> <prunable> <wt_head>
 #   The real per-row derivation and printing for parse_porcelain_blocks.
 #   Derivation is derive_worktree_facts (shared with the sweeper); this just
@@ -392,8 +422,8 @@ on_worktree_block() {
     flags="${flags% }"
     [[ -z "$flags" ]] && flags="-"
 
-    repo_out+=$(printf '  %-9s %-28s %-16s %-20s %-14s %s\n' \
-        "$bucket" "${branch:-(detached)}" "$f_pr_disp" "$flags" "$f_age" "$(shorten "$path")")
+    repo_out+=$(printf '  %s %-28s %-16s %-20s %-14s %s\n' \
+        "$(paint "$bucket" 9)" "${branch:-(detached)}" "$f_pr_disp" "$flags" "$f_age" "$(shorten "$path" "$repo")")
     repo_out+=$'\n'
     repo_out+=$(printf '      %s\n' "$(action_for "$bucket" "$repo" "$path" "$branch" "$locked")")
     repo_out+=$'\n'
