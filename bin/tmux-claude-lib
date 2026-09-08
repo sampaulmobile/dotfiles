@@ -74,6 +74,8 @@ agent_window_name() {
 #   tracks whatever runs there after nvim exits. [agent] defaults to
 #   agent_default and is recorded as the session's @agent.
 #   Shared by tmux-sessionizer and wt-tmux-jump so both build the same thing.
+#   The claude in window 1 is launched as `claude -n <session-name>-hub` for
+#   hubs / `claude -n <session-name>` for worktrees (see below).
 new_hub_session() {
     local name="$1" dir="$2" agent="${3:-}"
     local nvim_win
@@ -85,7 +87,19 @@ new_hub_session() {
     # exact-match form outright ("no such session: =name")
     tmux set-option -t "$name" @agent "$agent"
     tmux set-option -w -t "${name}:1" automatic-rename off
-    tmux send-keys -t "${name}:1" "$agent" Enter
+    # Claude peer name: `claude -n` sets the display name AND the
+    # cross-session address (ListAgents/SendMessage), stable across --resume.
+    # Hubs (normal clones: .git is a directory) get "<session>-hub";
+    # worktree sessions (.git is a file) keep the bare session name. Only this
+    # front-door window is named; extra claude windows (tmux-claude-window)
+    # stay unnamed (<dir>-NN) so the hub is unambiguous. codex: no equivalent.
+    if [[ "$agent" == "claude" ]]; then
+        local peer="$name"
+        [[ -d "$dir/.git" ]] && peer="${name}-hub"
+        tmux send-keys -t "${name}:1" "claude -n '$peer'" Enter
+    else
+        tmux send-keys -t "${name}:1" "$agent" Enter
+    fi
 
     nvim_win=$(tmux new-window -t "${name}:" -c "$dir" -P -F '#{window_id}')
     tmux send-keys -t "$nvim_win" "nvim" Enter
