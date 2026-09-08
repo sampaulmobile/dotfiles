@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # The single home for search_dirs, the machine-local override and the
-# tmux-session naming rule. Sourced by bin/tmux-sessionizer, bin/worktree-doctor,
+# tmux-session naming rule. Sourced by bin/tmux-sessionizer, bin/worktrees,
 # bin/wt-tmux-jump and bin/wt-tmux-cleanup, none of which keep a second copy.
 #
 # Constraints: project_dirs() runs on the sessionizer's hot path before fzf
@@ -176,7 +176,7 @@ _project_dirs_add_candidate() {
 #   Deliberately never builds an intermediate candidates array to iterate with
 #   "${arr[@]}": bash 3.2 treats that expansion as unbound under `set -u` when
 #   the array is empty (a depth-1 entry with no subdirectories), and
-#   bin/worktree-doctor sources this into a `set -uo pipefail` shell. Globbing
+#   bin/worktrees sources this into a `set -uo pipefail` shell. Globbing
 #   straight into `for x in <pattern>` with nullglob just runs zero times.
 project_dirs() {
     project_dirs_out=()
