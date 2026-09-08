@@ -192,14 +192,12 @@ default_ref_for() {
 }
 
 # sweep_remove_cmd <repo> <path> <branch> <locked>
-#   The exact command sequence bin/worktree-sweep runs to remove a MERGED
-#   worktree, rendered as paste-safe text. The ONE renderer: the doctor's
-#   MERGED action line and the sweep's dry-run "would run:" line both come
-#   from here, and remove_worktree mirrors it step for step, so the three can
-#   never disagree. `--no-delete-branch` + an explicit `git branch -D`: wt's
-#   own merged-ness oracle is offline and capped at 500 commits, so left to
-#   itself it can keep the branch and still exit 0 — the caller already
-#   established "merged" and owns the branch delete too.
+#   The exact command bin/worktree-sweep runs on a MERGED worktree, %q-quoted.
+#   The ONE renderer: the doctor's MERGED action line and the sweep's dry-run
+#   line both come from here, and the sweep's remove_worktree mirrors it.
+#   --no-delete-branch plus our own `git branch -D`: wt's merged-ness check is
+#   offline and capped at 500 commits, so left to itself it can keep the
+#   branch and still exit 0; the caller already proved "merged".
 sweep_remove_cmd() {
     local repo="$1" path="$2" branch="$3" locked="$4" q_repo q_path q_branch target cmd
     q_repo=$(printf '%q' "$repo")
@@ -247,15 +245,13 @@ derive_worktree_facts() {
         else
             f_unpushed=true
         fi
-        # B6: --is-ancestor is trivially true for a branch that never
-        # diverged (fresh `wt switch -c`, or parked before its first commit),
-        # and the ref graph alone cannot tell that apart from a branch whose
-        # commits a real local merge folded in. Two guards: wt_head must
-        # differ from default's CURRENT commit, and — when the branch reflog
-        # is available (its oldest entry is the creation point; reflogs live
-        # in the common dir so the hub sees every worktree's) — the branch
-        # must have at least one commit of its own since creation. A branch
-        # reset back to its creation point reads as zero-commit: safe side.
+        # --is-ancestor is trivially true for a branch that never diverged
+        # (fresh `wt switch -c`, parked before its first commit), and the ref
+        # graph cannot tell that from a branch a local merge folded in. So:
+        # wt_head must differ from default's current commit, AND — when the
+        # branch reflog exists (oldest entry = creation point; reflogs are in
+        # the common dir, visible from the hub) — the branch must have a
+        # commit of its own since creation. Reset-to-creation reads as none.
         local default_sha created own
         default_sha=$(git -C "$repo" rev-parse --verify -q "$default_ref" 2>/dev/null)
         created=""
