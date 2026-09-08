@@ -46,14 +46,16 @@ MERGED, ABANDONED or PRUNABLE.
 
 sweep: remove the MERGED worktrees, guarding against the loss of
 worktree-unique gitignored data. Dry-run by default: REMOVE rows first, then
-SKIP rows, each with the reason it was skipped. Exit 0 on a clean run; 2 on a
-removal failure under --apply.
+SKIP rows, each with the reason it was skipped. A skip for at-risk gitignored
+data lists one line per top-level dir with a file count (-v lists every file).
+Exit 0 on a clean run; 2 on a removal failure under --apply.
   --apply     actually remove (default: dry-run — only print what would happen)
   --force     also remove MERGED worktrees that hold at-risk gitignored files
               (the guard's skips); LIVE/DIRTY/unmerged are still never touched
   --offline   skip gh (a squash-merged worktree then looks unmerged and is
               left alone — the safe direction)
-  -v          print, under each REMOVE row, the exact command --apply runs
+  -v          under each REMOVE row, the exact command --apply runs; under a
+              guard SKIP, the full at-risk file list instead of the summary
 EOF
 }
 
@@ -165,6 +167,9 @@ rows_render() {
                         line+=$(printf "  %-${w}s" "$cell")
                     fi
                 done
+                # Strip trailing padding (a REMOVE row's empty reason column).
+                # Safe: colour codes sit at the line start, never the end.
+                line="${line%"${line##*[![:space:]]}"}"
                 printf '%s\n' "$line"
                 if [[ -n "${row_detail[i]}" ]]; then
                     printf '%s\n' "${row_detail[i]}"
@@ -720,14 +725,36 @@ worktree_ignored_at_risk() {
     done < <(git -C "$wt" ls-files --others --ignored --exclude-standard --directory -z 2>/dev/null)
 }
 
-# sweep_is_removable <bucket> <unpushed> [<pr_state> <pr_head> <wt_head>]
-#   MERGED is removable only if the worktree carries nothing the merge did
-#   not: with a merged PR whose head is known, wt_head must equal it;
-#   otherwise no commits ahead of origin/<branch> — and a missing
-#   origin/<branch> refuses too, since nothing then vouches for local commits.
+# summarize_at_risk   (stdin: at-risk paths, one per line)
+#   Collapse to one line per top-level component with a file count, so a
+#   worktree's 200 per-run data-test/ files read as `data-test/ (198 files)`,
+#   not 198 lines. A path with no `/` (a repo-root file, or the fail-closed
+#   placeholder) is printed verbatim. sweep_row's -v path dumps every path raw.
+summarize_at_risk() {
+    awk -F/ '
+        !/./ { next }
+        { root = (NF > 1) ? $1"/" : $1 }
+        !(root in seen) { order[++k] = root; seen[root] = 1 }
+        { cnt[root]++ }
+        END {
+            for (i = 1; i <= k; i++) {
+                r = order[i]
+                if (cnt[r] == 1 && r !~ /\/$/) printf "        %s\n", r
+                else printf "        %s  (%d file%s)\n", r, cnt[r], (cnt[r] == 1 ? "" : "s")
+            }
+        }
+    '
+}
+
+# sweep_is_removable <bucket> <unpushed> [<pr_state> <pr_head> <wt_head> <merged_local>]
+#   MERGED is removable when nothing unique would be lost, proven any of three
+#   ways: merged_local (contained in the default ref), a merged PR at wt_head,
+#   or a branch not ahead of origin/<branch>. merged_local is checked first —
+#   it vouches even past a PR-head mismatch or a missing origin/<branch>.
 sweep_is_removable() {
-    local bucket="$1" unpushed="$2" pr_state="${3:-}" pr_head="${4:-}" wt_head="${5:-}"
+    local bucket="$1" unpushed="$2" pr_state="${3:-}" pr_head="${4:-}" wt_head="${5:-}" merged_local="${6:-}"
     [[ "$bucket" == MERGED ]] || return 1
+    [[ "$merged_local" == true ]] && return 0
     if [[ "$pr_state" == MERGED && -n "$pr_head" && -n "$wt_head" ]]; then
         [[ "$pr_head" == "$wt_head" ]]
         return
@@ -923,43 +950,41 @@ report_row() {
 #   happens here; only the printing is deferred.
 sweep_row() {
     local path="$1" branch="$2" locked="$3" prunable="$4" wt_head="$5"
-    local bucket at_risk n rel detail nl=$'\n'
+    local bucket at_risk detail listing reason nl=$'\n'
 
     derive_worktree_facts "$path" "$branch" "$prunable" "$wt_head"
     bucket=$(classify_worktree "$f_live" "$f_dirty" "$prunable" "$f_pr_state" "$f_unpushed" "$f_merged_local")
     [[ "$bucket" == MERGED ]] || return 0
 
     # Removable only if the worktree carries nothing the merge did not.
-    if ! sweep_is_removable "$bucket" "$f_unpushed" "$f_pr_state" "$f_pr_head" "$wt_head"; then
+    if ! sweep_is_removable "$bucket" "$f_unpushed" "$f_pr_state" "$f_pr_head" "$wt_head" "$f_merged_local"; then
         CNT_SKIP=$((CNT_SKIP + 1))
         if [[ "$f_pr_state" == MERGED && -n "$f_pr_head" ]]; then
-            detail="      merged upstream, but this worktree is not at the merged PR's head commit — needs manual review, never auto-removed"
+            reason="merged, not at PR head"
         else
-            detail="      merged, but no origin/${branch:-HEAD} to vouch for its commits (missing, or local commits ahead of it) — needs manual review, never auto-removed"
+            reason="merged, unpushed (no remote)"
         fi
-        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" "$detail"
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "$reason" "" ""
         return 0
     fi
 
     at_risk=$(worktree_ignored_at_risk "$path" "$repo")
 
     if [[ -n "$at_risk" ]] && [[ "$FORCE" == false ]]; then
-        n=$(printf '%s\n' "$at_risk" | grep -c .)
         CNT_SKIP=$((CNT_SKIP + 1))
-        detail="      merged, but $n at-risk gitignored file(s) — inspect, or --force to remove anyway:"
-        while IFS= read -r rel; do
-            [[ -z "$rel" ]] && continue
-            detail+=$'\n'"        $rel"
-        done <<< "$at_risk"
-        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" "$detail"
+        if [[ "$VERBOSE" == true ]]; then
+            listing=$(printf '%s\n' "$at_risk" | grep . | sed 's/^/        /')
+        else
+            listing=$(printf '%s\n' "$at_risk" | summarize_at_risk)
+        fi
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, has gitignored data" "" "$listing"
         return 0
     fi
 
     # The post-remove hook would kill the session this sweep runs in.
     if sweep_would_kill_own_session "$repo" "$path" "$branch"; then
         CNT_SKIP=$((CNT_SKIP + 1))
-        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" \
-            "      merged, but removing it would kill the tmux session this sweep is running in — run it from elsewhere"
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, in this session" "" ""
         return 0
     fi
 
@@ -969,8 +994,7 @@ sweep_row() {
         init_liveness
         if is_live "$path"; then
             CNT_SKIP=$((CNT_SKIP + 1))
-            rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" \
-                "      merged, but became live just before removal (re-checked) — left in place"
+            rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, now live" "" ""
             return 0
         fi
     fi
