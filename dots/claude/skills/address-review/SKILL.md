@@ -44,7 +44,10 @@ Spawn ONE background agent (`subagent_type: "high"`, `model: "sonnet"`; use `mod
 - Run the tests/linters relevant to what it touched.
 - Commit specific files with clear messages (never `git add -A`); push to the same branch. The commit body is where the what/why of each fix lives — say which feedback it addresses.
 - Reply to each inline thread with a ONE-LINE pointer, e.g. `Done in <short-sha>.` (at most add a short clause if the fix took a different shape than asked):
-  `gh api repos/<owner>/<repo>/pulls/<n>/comments/<databaseId>/replies -f body='...'`
+  Write the reply text to a scratch file and pass it with `-F body=@<file>`:
+  `gh api repos/<owner>/<repo>/pulls/<n>/comments/<databaseId>/replies -F body=@/tmp/reply.md`
+  NEVER pass comment/PR bodies as inline shell-quoted strings (`-f body='...'`) — apostrophes in the
+  text turn into literal `'\''` artifacts in the posted comment (seen 2026-09-08).
   Elaborate only when the thread was a question (answer it) or you're declining a change (give the reasoning). Do NOT duplicate the commit message into the thread, and do NOT resolve threads — the human reviewer resolves them on re-review.
 - Do NOT post a PR-level summary comment when every item was an inline thread — the thread replies are the record. Post one only if some feedback had no thread to reply into (review-body asks, bot findings) and needs its disposition recorded.
 - Report back: commits pushed, threads addressed (fix vs. reply-only), and anything it could not address and why.
