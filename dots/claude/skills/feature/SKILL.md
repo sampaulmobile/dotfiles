@@ -49,7 +49,7 @@ Each seat is a `<model>:<effort>` pair. Spawn it as **`subagent_type: "<effort>"
 
 Spawn ONE background agent for the implementer seat (`subagent_type: "<IMPL_EFFORT>"`, `model: "<IMPL_MODEL>"` — resolved per `--implementer`, default `sonnet:high`; `opus` with `--hard` — and `isolation: "worktree"`) with this prompt (filled in):
 
-> Implement the following in this worktree: <FEATURE>. Follow the repo's conventions and CLAUDE.md. Run the tests and linters relevant to what you touch and get them passing. Commit specific files only (never `git add -A`). When done and verified, invoke the `pr` skill to commit anything remaining, push, and open the PR. Report back ONLY: the PR URL and a 2-line summary.
+> Implement the following in this worktree: <FEATURE>. First write `.feature/status.json` (mkdir `.feature`, add `.feature/` to `$(git rev-parse --git-common-dir)/info/exclude`) as `{"repo","branch","pr":null,"phase":"implement","round":1,"seat":"implementer","task":"<one line>","last_commit":null,"pushed":false,"updated":<ISO-8601 UTC>,"started_by":"<user:/feature or hq:<session>>"}` and rewrite it on each commit and when you open the PR (`phase: done`, `pr` set) — a coordinator reads it to see where the pipeline is. Follow the repo's conventions and CLAUDE.md. Run the tests and linters relevant to what you touch and get them passing. Commit specific files only (never `git add -A`). When done and verified, invoke the `pr` skill to commit anything remaining, push, and open the PR. Report back ONLY: the PR URL and a 2-line summary.
 
 When it reports back, relay the PR URL to the user. Done — the rest of this file does not apply to quick mode.
 
@@ -72,6 +72,7 @@ Max review rounds: <MAX_ROUNDS>. Default branch: <DEFAULT_BRANCH>. Strict review
 - `mkdir -p .feature` at the worktree root, and ensure it is ignored: append `.feature/` to `$(git rev-parse --git-common-dir)/info/exclude` if not already present. NEVER commit anything under `.feature/`.
 - `.feature/NOTES.md` — running log. You and every subagent MUST append to it before finishing a step: decisions made and why, dead ends hit, gotchas, flaky tests. Write for a reader with zero memory of this session.
 - `.feature/findings-round-<N>.md` — reviewer output per round.
+- `.feature/status.json` — the pipeline status contract, what a coordinator (hq) reads to see where the pipeline is without a transcript. Rewrite it (whole file) at every phase change and whenever the active seat or task changes: `{"repo","branch","pr" (URL or null),"phase" (plan|implement|review|review-fix|ship|done|stalled),"round","seat" (orchestrator|implementer|reviewer),"task" (one line),"last_commit","pushed" (bool),"updated" (ISO-8601 UTC),"started_by" ("user:/feature" or "hq:<session>" — whoever invoked the pipeline)}`. Tell every subagent to update `seat`/`task`/`updated` when it starts and `last_commit`/`updated` when it commits. Set `phase: done` in step 6, `phase: stalled` with the blockers in `task` when the loop stops without shipping.
 
 **0. Branch**
 - Rename this worktree's auto-generated branch to match the repo's convention (`git branch -m feature/<SLUG>` or `fix/<SLUG>`, or whatever CLAUDE.md prescribes). Never attempt to check out the default branch from inside the worktree — it is checked out at the hub and git will refuse.

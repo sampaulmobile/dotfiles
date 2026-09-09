@@ -40,8 +40,16 @@ other case.
 
 ## 3. Find or spawn each hub session
 
-- Hub sessions are named after the repo dir basename (dots → underscores).
-  Find them via ListAgents.
+- The hub is the claude session whose peer name is EXACTLY
+  `<repo-dir-basename>-hub` (`routing.md` lists it as `hub`).
+  new_hub_session launches it as `claude -n <basename>-hub`, so ListAgents
+  shows it under that name. Other claude sessions in the same repo show up as
+  auto-named `<basename>-NN` — those are NOT hubs: never dispatch to them,
+  even if idle (durable repo context lives in the hub; dispatching elsewhere
+  splits it and risks two sessions on one branch).
+- Hub tmux session exists but no exactly-named peer (hub launched before the
+  naming convention, or renamed)? Don't spawn a duplicate: ask the user to
+  run `/rename <basename>-hub` in that hub's claude pane, then re-check.
 - Not running? Spawn one headlessly with the standard hub layout, then
   re-check ListAgents (allow ~15s):
   `source ~/dotfiles/bin/tmux-claude-lib && new_hub_session <repo-dir-basename> ~/dev/<repo-dir> claude`
@@ -56,6 +64,15 @@ other case.
   Creation only — never kill or mutate existing sessions (tmux-safety rules).
 
 ## 4. Delegate
+
+Before dispatching anything that touches an EXISTING PR or branch (review
+fixes, rebases, follow-ups), assume the user may already be working it directly
+in that hub. Every such dispatch must open with an in-flight check the hub
+answers before acting: "If work on <PR/branch> is already in flight in your
+session (e.g. the user ran /address-review or is steering an agent there),
+do NOT start a second agent — fold this into the running work where it fits,
+drop what the user has since overridden, and reply with the current state."
+Fresh work (a new /feature) needs no check.
 
 SendMessage each hub a SELF-CONTAINED task — the receiver has none of this
 conversation:

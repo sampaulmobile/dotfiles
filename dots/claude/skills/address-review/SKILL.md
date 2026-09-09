@@ -39,12 +39,16 @@ Spawn ONE background agent (`subagent_type: "high"`, `model: "sonnet"`; use `mod
 
 - Find a checkout of the branch: `git worktree list`, use the worktree that has it checked out; otherwise create one as a sibling of the repo (`git worktree add <repo-dir>.<branch-slug> <branch>`, slashes in the branch sanitized to dashes) and work there.
 - Read the workplan doc (`workplans/`) and the PR body for context; read `.feature/NOTES.md` if present and append to it as it works.
+- Maintain `.feature/status.json` in the worktree (create `.feature/` and exclude it via `$(git rev-parse --git-common-dir)/info/exclude` if absent): `{"repo","branch","pr","phase":"review-fix","round":<N>,"seat":"implementer","task":"<thread being addressed>","last_commit","pushed","updated":<ISO-8601 UTC>,"started_by":"user:/address-review" or "hq:<session>"}` — rewrite on start, on each commit, and set `phase: done` after the push. It is the contract a coordinator (hq) reads to see where the pipeline is without a transcript.
 - Address EVERY unresolved thread and change request: make the fix, or — if it disagrees, or the comment is a question — prepare a reasoned reply instead of a change. Never silently skip one.
 - Bot/automation findings are input feedback too, with two differences: triage them on merit (fix real correctness/security findings; it is fine to decline noise or style nits from a bot, briefly noting why in the summary), and when human feedback conflicts with a bot's, the human wins. There is no thread to reply into for issue-comment findings — cover their disposition in the summary comment instead.
 - Run the tests/linters relevant to what it touched.
 - Commit specific files with clear messages (never `git add -A`); push to the same branch. The commit body is where the what/why of each fix lives — say which feedback it addresses.
 - Reply to each inline thread with a ONE-LINE pointer, e.g. `Done in <short-sha>.` (at most add a short clause if the fix took a different shape than asked):
-  `gh api repos/<owner>/<repo>/pulls/<n>/comments/<databaseId>/replies -f body='...'`
+  Write the reply text to a scratch file and pass it with `-F body=@<file>`:
+  `gh api repos/<owner>/<repo>/pulls/<n>/comments/<databaseId>/replies -F body=@/tmp/reply.md`
+  NEVER pass comment/PR bodies as inline shell-quoted strings (`-f body='...'`) — apostrophes in the
+  text turn into literal `'\''` artifacts in the posted comment (seen 2026-09-08).
   Elaborate only when the thread was a question (answer it) or you're declining a change (give the reasoning). Do NOT duplicate the commit message into the thread, and do NOT resolve threads — the human reviewer resolves them on re-review.
 - Do NOT post a PR-level summary comment when every item was an inline thread — the thread replies are the record. Post one only if some feedback had no thread to reply into (review-body asks, bot findings) and needs its disposition recorded.
 - Report back: commits pushed, threads addressed (fix vs. reply-only), and anything it could not address and why.

@@ -15,8 +15,8 @@
 #              shows its repo's path, not its own proj.feat-x dir name.
 # Keys: Enter = new session with the default agent (or switch, if the row
 #   already has one); ctrl-x / Option+Enter = the other agent (fzf --expect
-#   keys, named in the header line); ctrl-/ = lazy preview (pane snapshot
-#   for sessions, git status/log for dirs).
+#   keys); ctrl-/ = lazy preview (pane snapshot for sessions, git status/log
+#   for dirs).
 #
 # Invariant: nothing is scanned at keypress time. Row status comes only from
 # caches — ~/.cache/claude-attention/status.tsv, published every ~5s by
@@ -233,7 +233,6 @@ else
     fzf_out=$(emit_rows | fzf --ansi --tiebreak=index \
         --delimiter '\t' --with-nth 2 \
         --expect=ctrl-x,alt-enter \
-        --header "⏎ new: ${default_agent} · ⌥⏎/^x new: ${other_agent}" \
         --preview "$HOME/dotfiles/bin/tmux-sessionizer --preview {1}" \
         --preview-window 'right,55%,hidden' \
         --bind 'ctrl-/:toggle-preview')
