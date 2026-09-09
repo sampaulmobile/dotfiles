@@ -103,6 +103,7 @@ SEL=$'\033[48;5;236m'
 #   The cursor is preserved by pane id, not index: rows are sorted by
 #   activity time, so the order changes between refreshes.
 reload_sessions() {
+    frame_at=0
     local prev=""
     if (( ${#panes[@]} > 0 && selected < ${#panes[@]} )); then
         prev="${panes[$selected]}"
@@ -254,9 +255,20 @@ get_row_agent_tree() {
 
 # ── render ──────────────────────────────────────────────
 
-render() {
-    local cols
-    cols=$(tmux display-message -p '#{pane_width}' 2>/dev/null || tput cols 2>/dev/null || echo 80)
+# build_frame
+#   Lays out and formats every row for the current data into frame_head,
+#   frame_rows[i] / frame_trees[i] (session line, then its agent tree and
+#   snippets) and frame_foot, at the width in $cols and the clock in $now.
+#   This is the expensive half (a dozen forks per row: bc, printf, the
+#   helpers); render() reuses it across cursor moves. A cached row is
+#   cursor-neutral: two leading spaces where the marker goes and the name
+#   wrapped in \x01..\x02, which render() turns into bold on the selected
+#   row and strips elsewhere.
+build_frame() {
+    frame_rows=()
+    frame_trees=()
+    frame_cols=$cols
+    frame_at=$now
 
     local max_name=7
     for n in "${names[@]}"; do
@@ -361,8 +373,6 @@ render() {
     (( table_w > cols - 1 )) && table_w=$(( cols - 1 ))
 
     local out=""
-    local now
-    now=$(date +%s)
 
     local rhs="[⏎ · x · X · a · r · q]"
     (( cols >= 80 )) && rhs="[⏎ switch · x kill · X prune · a agents · r refresh · q quit]"
@@ -382,8 +392,10 @@ render() {
     (( show_total ))  && hdr+=$(printf " %${all_w}s" "TOTAL")
     (( show_cost ))   && hdr+=$(printf " %${cost_w}s" "COST")
     out+="  ${DIM}${hdr}${RST}"$'\n'
+    frame_head="$out"
 
     for i in "${!sessions[@]}"; do
+        out=""
         local working_agents="${agent_working_counts[$i]:-0}"
 
         # live-agent badge eats into the name's own width budget
@@ -403,17 +415,10 @@ render() {
         local all_tok="${total_alls[$i]}"
         local mdl="${models[$i]}"
 
-        # marker + name (+ badge, if this session has working agents)
-        local row_start=${#out}
-        if (( i == selected )); then
-            out+="${CYAN}▸ ${RST}${BOLD}"
-        else
-            out+="  "
-        fi
-        out+="${name}"
+        # marker slot + name (+ badge, if this session has working agents)
+        out+="  "$'\x01'"${name}"$'\x02'
         (( working_agents > 0 )) && out+="${CYAN}${badge}${RST}"
         out+="$(printf '%*s' "$(( name_w - ${#name} - ${#badge} + name_gap ))" '')"
-        (( i == selected )) && out+="${RST}"
 
         # An idle row carrying an attention flag shows as "done", so the
         # dashboard reveals WHICH agent the statusbar's ✅ belongs to. The
@@ -504,11 +509,8 @@ render() {
             fi
             out+="$(printf " %${cost_w}s" "$cost_fmt")"
         fi
-        if (( i == selected )); then
-            local row="${out:$row_start}"
-            out="${out:0:$row_start}${SEL}${row//"$RST"/${RST}${SEL}}${RST}"
-        fi
-        out+=$'\n'
+        frame_rows[$i]="$out"
+        out=""
 
         # agent tree — auto-expand sessions with a working agent; 'a' forces
         # every session's tree open (including idle-only agents)
@@ -662,15 +664,45 @@ render() {
                 fi
             done <<< "${agent_lines[$i]}"
         fi
+        frame_trees[$i]="$out"
     done
 
-    out+=$'\n'
+    out=$'\n'
     # Responsive like the header rhs above: the full key list is 85 chars,
     # which wraps and garbles the display on an 80-column terminal. Drop
     # text at narrow widths instead of letting the line wrap.
     local footer="  j/k navigate · ⏎ switch · x kill · X prune · r refresh · R hard · q quit"
     (( cols >= 85 )) && footer="  j/k navigate · ⏎ switch · x kill · X prune · a agents · r refresh · R hard · q quit"
     out+="${DIM}${footer}${RST}"
+    frame_foot="$out"
+}
+
+# render
+#   Paints the cached frame with the cursor on row $selected. Rebuilds the
+#   frame only when the pane width changed or the cache is 30s old (the
+#   STATUS ages are baked into the rows), so j/k costs string ops, not the
+#   forks of a full rebuild. Data changes must invalidate with frame_at=0.
+render() {
+    local cols now
+    cols=$(tmux display-message -p '#{pane_width}' 2>/dev/null || tput cols 2>/dev/null || echo 80)
+    now=$(date +%s)
+    (( cols != frame_cols || now - frame_at >= 30 )) && build_frame
+
+    local out="$frame_head" i row
+    for i in "${!frame_rows[@]}"; do
+        row="${frame_rows[$i]}"
+        if (( i == selected )); then
+            row="${CYAN}▸ ${RST}${row:2}"
+            row="${row//$'\x01'/$BOLD}"
+            row="${row//$'\x02'/$RST}"
+            row="${SEL}${row//"$RST"/${RST}${SEL}}${RST}"
+        else
+            row="${row//$'\x01'/}"
+            row="${row//$'\x02'/}"
+        fi
+        out+="${row}"$'\n'"${frame_trees[$i]}"
+    done
+    out+="$frame_foot"
 
     printf '\033[H\033[2J%s' "$out"
 }
@@ -678,6 +710,7 @@ render() {
 # ── data collection ─────────────────────────────────────
 
 load_data() {
+    frame_at=0
     statuses=()
     contexts=()
     outputs=()
@@ -774,6 +807,7 @@ load_data() {
     done
 
     rm -rf "$parallel_dir"
+    frame_at=0
     render
 }
 
@@ -797,6 +831,8 @@ agent_lines=()
 agent_working_counts=()
 agent_total_counts=()
 agents_forced=0
+frame_at=0
+frame_cols=0
 
 reload_sessions
 
@@ -838,6 +874,7 @@ while true; do
             # toggle forcing every session's agent tree open (sessions with
             # a working agent auto-expand regardless of this toggle)
             (( agents_forced = !agents_forced ))
+            frame_at=0
             render
             ;;
         r)
