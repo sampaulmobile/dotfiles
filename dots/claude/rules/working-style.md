@@ -13,3 +13,10 @@
   Iterating blindly on broken code and making the user re-test wastes their time
   (this rule was born from ~10 rounds of a column-width/wrapping bug in a TUI
   dashboard — verify the root cause, then fix once).
+
+- **A question is not a go.** "Are we good to push?", "can we commit?",
+  "should we merge?" ask for an assessment: answer it and stop. Act only on
+  an imperative ("push it", "go", "do it"). This applies doubly to anything
+  outward-facing or hard to reverse (push, PR, merge, deploy, delete,
+  history rewrite), where the cost of guessing wrong is borne by the user.
+  Born 2026-09-08: a readiness question was answered with a push attempt.

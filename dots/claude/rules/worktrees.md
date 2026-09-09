@@ -2,6 +2,10 @@
 
 Work repos are "hubs" — normal clones at `~/dev/<repo>` with the default branch
 checked out; you live there and its claude session accumulates durable context.
+The hub's claude is launched as `claude -n <repo-dir-basename>-hub` (tmux-claude-lib
+does this), so its cross-session peer name is deterministic; worktree sessions are
+named after their tmux session, and extra claude windows in the same repo are
+auto-named `<basename>-NN` — neither is a hub.
 Branch work happens in disposable sibling worktrees managed by worktrunk (`wt`):
 
 - Create: from the hub, `git pull` then `wt switch -c <branch>` — it lands the

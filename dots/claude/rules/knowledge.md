@@ -27,3 +27,16 @@
   stays only in a session dies with it.
 - Day-to-day routing (which repo, alert channels, tmux sessions) is
   `~/dev/hq/CLAUDE.md`; the wiki is knowledge, hq is dispatch.
+- Team-shared files never carry personal filesystem paths. A repo's CLAUDE.md,
+  its docs, PR bodies and code comments are read by teammates whose machines
+  differ — `~/dev/...`, `/Users/<name>/...`, `$HOME`-relative or any other
+  path that only resolves on this laptop is wrong there (review feedback,
+  2026-09-08). Reference the thing
+  portably instead: repo-relative path, `<org>/<repo>` plus path, or a URL.
+  The `~/dev/wiki` vault is PERSONAL, not a team resource — never reference
+  it (by path or page name) in a repo's CLAUDE.md or docs. Local paths and
+  wiki pointers are fine ONLY in these global rules, hq, and per-machine
+  memory.
+- Editing `~/dotfiles` from any session: confirm the diff with the user
+  first, and commit on a `<type>/<slug>` topic branch — never on master. It is
+  loaded into every session's prompt, so it gets a review point.
