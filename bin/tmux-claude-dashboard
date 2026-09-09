@@ -89,6 +89,10 @@ BOLD_RED=$'\033[1;31m'
 GREEN=$'\033[32m'
 DIM_GREEN=$'\033[2;32m'
 DIM_RED=$'\033[2;31m'
+# cursor-row background, re-armed after every field's own reset; a fixed
+# dark grey (256-color) rather than ANSI bright-black, whose palette
+# mapping is too light under the dim fields. Assumes a dark theme.
+SEL=$'\033[48;5;236m'
 
 # ── helpers ─────────────────────────────────────────────
 
@@ -400,6 +404,7 @@ render() {
         local mdl="${models[$i]}"
 
         # marker + name (+ badge, if this session has working agents)
+        local row_start=${#out}
         if (( i == selected )); then
             out+="${CYAN}▸ ${RST}${BOLD}"
         else
@@ -498,6 +503,10 @@ render() {
                 cost_fmt=$(printf '$%.2f' "$cost_raw")
             fi
             out+="$(printf " %${cost_w}s" "$cost_fmt")"
+        fi
+        if (( i == selected )); then
+            local row="${out:$row_start}"
+            out="${out:0:$row_start}${SEL}${row//"$RST"/${RST}${SEL}}${RST}"
         fi
         out+=$'\n'
 
@@ -605,7 +614,12 @@ render() {
                     if (( ${#amdl_field} > mdl_w )); then
                         (( mdl_w > 1 )) && amdl_field="${amdl_field:0:$(( mdl_w - 1 ))}…" || amdl_field="…"
                     fi
-                    row+="${DIM}$(printf "%-${mdl_w}s" "$amdl_field")${RST}  "
+                    # bash 3.2's printf pads %-Ns by BYTES (3.2.57): the ·
+                    # is 2 bytes, so it would eat a column from every field
+                    # to the right. Pad by character count instead.
+                    local amdl_pad=$(( mdl_w - ${#amdl_field} ))
+                    (( amdl_pad < 0 )) && amdl_pad=0
+                    row+="${DIM}${amdl_field}${RST}$(printf '%*s' "$(( amdl_pad + 2 ))" '')"
                 fi
                 # The window is sized from the transcript's model id, not
                 # from the agentType the MODEL column shows.
