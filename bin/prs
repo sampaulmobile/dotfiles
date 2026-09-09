@@ -6,17 +6,15 @@
 # next) is left to whoever reads the two.
 #
 # Two GitHub search calls for the whole run (open, merged, in parallel),
-# whatever the repo count: GraphQL `search` returns every PR by an author across repos with the
-# tag fields attached, and `archived:false` drops archived repos (GitHub keeps
-# listing their PRs, but nothing can be done to them). Results are filtered
-# locally to the repos in scope, so a repo is never queried on its own. A
-# failing call is retried once (GitHub's GraphQL returns transient "Something
-# went wrong" errors — seen 2026-09-08) and then fails the run with gh's own
-# error.
+# whatever the repo count: GraphQL `search` returns every PR by an author
+# across repos with the tag fields attached, and `archived:false` drops
+# archived repos (GitHub keeps listing their PRs, but nothing can be done to
+# them). Results are filtered locally to the repos in scope, so a repo is never
+# queried on its own. A failing call is retried once (GitHub's GraphQL returns
+# transient "Something went wrong" errors — seen 2026-09-08) and then fails the
+# run with gh's own error.
 #
-# Tag precedence (first match wins, pr_tag() below): draft, merge-conflict,
-# ci-red, changes-requested, approved (i.e. mergeable — go merge it),
-# review-required, then open.
+# Tag precedence is pr_tag()'s order; the tag list is in --help.
 set -uo pipefail
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
