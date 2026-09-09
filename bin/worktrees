@@ -32,8 +32,8 @@ usage: worktrees [--all] [--offline] [-v]                   report (read-only)
        worktrees sweep [--all] [--apply] [--force] [--offline] [-v]
 
 Scope: inside a git repo (hub or worktree), that repo only; anywhere else,
-every project bin/project-dirs-lib knows about. --all forces every project,
-and in the report also lists the clean ones.
+every project bin/project-dirs-lib knows about. --all forces every project.
+A repo with no linked worktree is never listed — absence means "none".
 
 Report: every worktree of the repos in scope, bucketed LIVE / DIRTY / PRUNABLE / MERGED / ABANDONED / IN-REVIEW / PARKED /
 SHIPPED? (first match wins). Rows are grouped: MERGED, ABANDONED, PRUNABLE
@@ -41,7 +41,7 @@ SHIPPED? (first match wins). Rows are grouped: MERGED, ABANDONED, PRUNABLE
 progress). Exit 0 when nothing is removable, 1 when at least one worktree is
 MERGED, ABANDONED or PRUNABLE.
   --offline   skip gh entirely (every worktree's PR state -> pr:unknown)
-  --all       every project, clean ones included (one "clean" line each)
+  --all       every project (those with no linked worktree are omitted)
   -v          print, under each row, the command that would act on it
 
 sweep: remove the MERGED worktrees, guarding against the loss of
@@ -112,11 +112,11 @@ _row_cell() {
         3) cell="${row_c4[$2]}" ;; 4) cell="${row_c5[$2]}" ;;
     esac
 }
-# rows_render <label-width> [<show-clean>] — print every repo in $repos
-# order: a `== repo` header, then its rows grouped by BUCKET_ORDER. A repo
-# with no rows is silent unless <show-clean> is true (then "clean").
+# rows_render <label-width> — print every repo in $repos: a `== repo` header,
+# then its rows grouped by BUCKET_ORDER. $repos is pre-filtered to repos with a
+# linked worktree, so every one has rows.
 rows_render() {
-    local lw="$1" show_clean="${2:-false}" i c b w cell r have line
+    local lw="$1" i c b w cell r have line
     local -a widths=(0 0 0 0 0)
     for ((i = 0; i < row_n; i++)); do
         for c in 0 1 2 3 4; do
@@ -132,13 +132,7 @@ rows_render() {
         for ((i = 0; i < row_n; i++)); do
             if [[ "${row_repo[i]}" == "$r" ]]; then have=true; break; fi
         done
-        if [[ "$have" == false ]]; then
-            if [[ "$show_clean" == true ]]; then
-                printf '\n== %s\n' "$(shorten "$r")"
-                echo "  clean"
-            fi
-            continue
-        fi
+        [[ "$have" == false ]] && continue
         printf '\n== %s\n' "$(shorten "$r")"
         for b in $BUCKET_ORDER; do
             # Within a bucket, newest commit first (age epoch, desc); ties keep
@@ -565,12 +559,12 @@ derive_worktree_facts() {
         fi
     fi
 
-    f_age=$(git -C "$path" log -1 --format=%cr 2>/dev/null)
-    [[ -z "$f_age" ]] && f_age="-"
-    # Sort key for the age column: %cr ("7 weeks ago") is unsortable, so keep
-    # the commit's epoch alongside it. 0 when there is no commit to read.
-    f_age_epoch=$(git -C "$path" log -1 --format=%ct 2>/dev/null)
-    [[ -z "$f_age_epoch" ]] && f_age_epoch=0
+    # One log call for both age forms: %cr for display, %ct as the sort key
+    # (%cr "7 weeks ago" is unsortable). "-"/0 when there is no commit to read.
+    local _age
+    _age=$(git -C "$path" log -1 --format='%cr%n%ct' 2>/dev/null)
+    f_age="${_age%%$'\n'*}"; [[ -z "$f_age" ]] && f_age="-"
+    f_age_epoch="${_age##*$'\n'}"; [[ -z "$f_age_epoch" ]] && f_age_epoch=0
 }
 
 # Sourced (tests/test-worktrees.sh) rather than executed: hand back the pure
@@ -1024,24 +1018,34 @@ on_worktree_block() {
 # Guarded on element count, not just "declared" — see the note above the
 # same guard around project_dirs_out.
 if (( ${#repos[@]} )); then
-# Only repos with a linked worktree ever need PR state; fetch their lists in
-# parallel up front (the serial cost was one gh round-trip per such repo).
+# One `git worktree list` per repo, cached. It decides which repos have a
+# linked worktree — the only ones queried, processed or shown — and feeds the
+# porcelain straight into the loop below. A repo with only its hub costs this
+# single fork and is then dropped: an absent repo in the report means "no
+# linked worktrees", so nothing scans or lists the empty majority.
 _with_wts=()
+_porc=()
 for repo in "${repos[@]}"; do
-    _n=$(git -C "$repo" worktree list --porcelain 2>/dev/null | grep -c '^worktree ')
-    (( _n > 1 )) && _with_wts+=("$repo")
+    _p=$(git -C "$repo" worktree list --porcelain 2>/dev/null)
+    (( $(printf '%s\n' "$_p" | grep -c '^worktree ') > 1 )) || continue
+    _with_wts+=("$repo")
+    _porc+=("$_p")
 done
-if (( ${#_with_wts[@]} )); then prefetch_pr_lists "${_with_wts[@]}"; fi
-rows_reset
-for repo in "${repos[@]}"; do
-    default_ref=$(default_ref_for "$repo")
-
-    # Process substitution (not a pipe): on_worktree_block must run in this
-    # shell so the counters and, under --apply, the removals take effect here.
-    parse_porcelain_blocks "$repo" < <(git -C "$repo" worktree list --porcelain 2>/dev/null)
-done
-if [[ "$MODE" == sweep ]]; then rows_render 6; else rows_render 9 "$SHOW_ALL"; fi
-[[ -n "$PR_PREFETCH_DIR" ]] && rm -rf "$PR_PREFETCH_DIR"
+repos=()
+(( ${#_with_wts[@]} )) && repos=("${_with_wts[@]}")
+if (( ${#repos[@]} )); then
+    prefetch_pr_lists "${repos[@]}"
+    rows_reset
+    for _i in "${!repos[@]}"; do
+        repo="${repos[_i]}"
+        default_ref=$(default_ref_for "$repo")
+        # A herestring, not a pipe: on_worktree_block must run in this shell so
+        # the counters and, under --apply, the removals take effect here.
+        parse_porcelain_blocks "$repo" <<< "${_porc[_i]}"
+    done
+    if [[ "$MODE" == sweep ]]; then rows_render 6; else rows_render 9; fi
+    [[ -n "$PR_PREFETCH_DIR" ]] && rm -rf "$PR_PREFETCH_DIR"
+fi
 fi
 
 echo
