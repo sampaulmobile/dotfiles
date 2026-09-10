@@ -20,3 +20,21 @@
   outward-facing or hard to reverse (push, PR, merge, deploy, delete,
   history rewrite), where the cost of guessing wrong is borne by the user.
   Born 2026-09-08: a readiness question was answered with a push attempt.
+
+- **Say what comes out before you start, and size the process to the
+  stakes.** Before launching anything autonomous that will run more than a
+  few minutes (a pipeline, an agent fan-out), state in one line what the end
+  artifact will be and how heavy the process is, then go — a wrong
+  deliverable costs the user five seconds to correct up front and an hour
+  after. Rigor follows blast radius: review loops for code that runs in CI or
+  changes shared behavior; a single implementer for scripts, reports and
+  analysis. A peer's or a skill's default is not the user's choice of either.
+  Born 2026-09-10: a 40-min full pipeline built a report PR when the user
+  wanted the fix PR.
+
+- **Never force-push.** Not `--force`, not `--force-with-lease`, not on a
+  branch this session created five minutes ago. To remove or undo commits on
+  a pushed branch, add a commit (`git revert`, or edit + commit) and push
+  normally. If a force-push looks like the only way forward, stop and hand it
+  to the user. Born 2026-09-10: a PR branch was rebased to drop two commits
+  and force-pushed.
