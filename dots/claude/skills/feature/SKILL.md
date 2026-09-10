@@ -15,6 +15,7 @@ Run the end-to-end feature pipeline. The argument is either a short description 
 
 **Behavior**
 - `--quick` — trivial task: skip the workplan doc and the review loop entirely (one implementer seat, no orchestrator/reviewer).
+- `--no-workplan` — keep the plan at `.feature/plan.md` instead of committing `workplans/<slug>-plan.md`; the review loop still runs (unlike `--quick`, which skips review entirely). Same effect as `[<repo>].workplans = false` in `~/.claude/repo-props.toml` for the target repo (see **Plan** in the full pipeline below).
 - `--rounds N` — review/fix rounds before escalating (default 3). The loop always runs until a review returns CLEAN; hitting the cap with blockers still open stops and reports for a human decision — it never ships at the cap.
 - `--strict` — reviewer blocks on ANY finding with a concrete failure scenario (default: only what a senior human reviewer would request changes for).
 - `--local` — for repos with no push/PR access from this machine (e.g. a repo whose remote this machine isn't authed to): the ship step SKIPS `/pr` entirely. Instead the orchestrator leaves the reviewed work committed on its branch and reports: branch name, worktree path, diffstat, summary, and the merge command (`git merge <branch>` from the main checkout). Any unresolved findings go in the report instead of a PR body. Also use this mode automatically if `git push` fails with an auth/permission error — never retry pushes into a wall.
@@ -55,7 +56,7 @@ When it reports back, relay the PR URL to the user. Done — the rest of this fi
 
 ## Full pipeline
 
-Spawn ONE background orchestrator agent (`subagent_type: "<ORCH_EFFORT>"`, `model: "<ORCH_MODEL>"` — resolved per `--orchestrator`, default `fable:high` — and `isolation: "worktree"`), using the prompt template below — fill in `<FEATURE>`, `<PLAN_PATH>` (if given), `<IMPL_MODEL>`/`<IMPL_EFFORT>` (default `sonnet:high`; `opus` with `--hard`), `<REVIEWER_MODEL>`/`<REVIEWER_EFFORT>` (default `fable:high`), `<MAX_ROUNDS>`, `<DEFAULT_BRANCH>`, `<SLUG>`, `<STRICT>` (true only with `--strict`). Each seat's effort maps to its preset name and the model rides as an Agent `model:` override — see **Seat resolution**.
+Spawn ONE background orchestrator agent (`subagent_type: "<ORCH_EFFORT>"`, `model: "<ORCH_MODEL>"` — resolved per `--orchestrator`, default `fable:high` — and `isolation: "worktree"`), using the prompt template below — fill in `<FEATURE>`, `<PLAN_PATH>` (if given), `<IMPL_MODEL>`/`<IMPL_EFFORT>` (default `sonnet:high`; `opus` with `--hard`), `<REVIEWER_MODEL>`/`<REVIEWER_EFFORT>` (default `fable:high`), `<MAX_ROUNDS>`, `<DEFAULT_BRANCH>`, `<SLUG>`, `<STRICT>` (true only with `--strict`), `<NO_WORKPLAN>` (true only with `--no-workplan`). Each seat's effort maps to its preset name and the model rides as an Agent `model:` override — see **Seat resolution**.
 
 Multiple `/feature` invocations may run concurrently — each gets its own orchestrator and worktree.
 
@@ -66,7 +67,7 @@ When the orchestrator reports back, relay to the user: the PR URL, the summary, 
 You are the orchestrator for one feature, working in an isolated git worktree. You do NOT write implementation code yourself — you plan, delegate, review, and ship. Every agent in this pipeline is ephemeral: all context that matters must live in files, so that a fresh agent with zero memory could pick up where any other left off.
 
 Feature: <FEATURE>
-Max review rounds: <MAX_ROUNDS>. Default branch: <DEFAULT_BRANCH>. Strict review: <STRICT>.
+Max review rounds: <MAX_ROUNDS>. Default branch: <DEFAULT_BRANCH>. Strict review: <STRICT>. No-workplan: <NO_WORKPLAN>.
 
 **State files**
 - `mkdir -p .feature` at the worktree root, and ensure it is ignored: append `.feature/` to `$(git rev-parse --git-common-dir)/info/exclude` if not already present. NEVER commit anything under `.feature/`.
@@ -81,15 +82,31 @@ Max review rounds: <MAX_ROUNDS>. Default branch: <DEFAULT_BRANCH>. Strict review
 - A fresh worktree does NOT carry the repo's gitignored files. If planning, implementing, or testing needs runtime files that live only in the hub checkout — secrets, TLS certs, `.env.*`, or caches like `.venv`/`node_modules` required to actually run or test — run `wt step copy-ignored` from inside this worktree to populate them before the step that needs them, and tell any subagent that will run/test the same. Skip it for pure code changes that don't execute anything requiring those files (it can copy gigabytes). Never hand-copy secrets or paste them into prompts.
 
 **1. Plan**
-- If a workplan path was provided (<PLAN_PATH>), read it — that plan is authoritative. If it lives outside this worktree (typically an uncommitted file at the hub), copy it to `workplans/<basename>` here first; that copy is what gets committed below.
-- Otherwise write one to `workplans/<SLUG>-plan.md` (create the dir if the repo lacks it; if it exists, match the naming and style of the docs already in it). Spec it to handoff quality: goal, approach, files to touch, ordered steps, test plan, explicitly out of scope.
+- Decide whether workplans are disabled for this repo: true if <NO_WORKPLAN> is true, or if `~/.claude/repo-props.toml` sets `[<key>].workplans` to `false` for `<key>` = the hub repo's directory basename. Resolve `<key>` and run the check with:
+  ```
+  REPO_KEY=$(basename "$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)")
+  python3 -c "
+  import pathlib, sys
+  key = sys.argv[1]
+  path = pathlib.Path.home() / '.claude/repo-props.toml'
+  try:
+      import tomllib
+      data = tomllib.load(open(path, 'rb'))
+      print(str(bool(data.get(key, {}).get('workplans', True))).lower())
+  except Exception:
+      print('true')
+  " "$REPO_KEY"
+  ```
+  (prints `true`/`false`; a missing or malformed properties file degrades to `true`, i.e. workplans allowed). `git rev-parse --git-common-dir` resolves through a worktree to the hub checkout's `.git`, so `<key>` names the hub repo even though this agent runs in a worktree.
+- If a workplan path was provided (<PLAN_PATH>), read it — that plan is authoritative. If it lives outside this worktree (typically an uncommitted file at the hub), copy it here first: to `.feature/plan.md` when workplans are disabled, otherwise to `workplans/<basename>`; that copy is what gets committed below (skipped when workplans are disabled).
+- Otherwise write one to `.feature/plan.md` (already untracked via the `.feature/` exclude — never commit it) when workplans are disabled, else to `workplans/<SLUG>-plan.md` (create the dir if the repo lacks it; if it exists, match the naming and style of the docs already in it). Spec it to handoff quality: goal, approach, files to touch, ordered steps, test plan, explicitly out of scope.
 - The workplan MUST include an **Assumptions** section: every unverified premise the plan depends on, each marked VERIFIED (with the evidence) or ASSUMED. A claim that something is live/needed/consumed counts as verified only via consumer-side evidence (what reads it) — file existence, file counts, or mtimes never prove liveness.
 - Never resolve a conflict between the task's explicit instruction and an assumption by silently doing MORE than instructed (e.g. preserving or migrating machinery the task said to remove). Either verify the assumption with direct evidence, or follow the literal instruction and record the judgment in Assumptions (it will reach the PR body), or report the single question back to the hub before implementing. Doing less as instructed is reviewable and reversible; silently adding machinery on an assumed premise is how rabbit holes start.
-- Commit the workplan on its own before implementation starts.
+- Commit the workplan on its own before implementation starts — skip this when workplans are disabled; `.feature/plan.md` is never committed.
 
 **2. Implement (round N)**
 Spawn a FRESH implementer subagent (`subagent_type: "<IMPL_EFFORT>"`, `model: "<IMPL_MODEL>"`, no extra isolation — it inherits this worktree). Its prompt must tell it to:
-- Read the workplan, `.feature/NOTES.md`, and (round > 1) `.feature/findings-round-<N-1>.md`.
+- Read the workplan (`workplans/<SLUG>-plan.md`, or `.feature/plan.md` when workplans are disabled per step 1), `.feature/NOTES.md`, and (round > 1) `.feature/findings-round-<N-1>.md`.
 - Round 1: implement the plan. Later rounds: address every blocking finding.
 - Follow repo conventions/CLAUDE.md; run the tests and linters relevant to what it touches and get them passing. If a test or run needs gitignored runtime files absent from the worktree (secrets/certs/`.env.*`/caches), run `wt step copy-ignored` first (see step 0b) — never hand-copy or inline secrets.
 - Commit as it goes — specific files only, never `git add -A`; clear messages in the repo's style.

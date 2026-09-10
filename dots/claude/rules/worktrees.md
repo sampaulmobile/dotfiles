@@ -12,6 +12,11 @@ Branch work happens in disposable sibling worktrees managed by worktrunk (`wt`):
   worktree as a `~/dev/<repo>.<branch>` sibling (slashes sanitized) and sets up
   its tmux session. Do NOT use raw `git worktree add`. New branches base off
   LOCAL main, so pull the hub first (same discipline as `git checkout -b`).
+  From an agent's shell (Claude Code sets `CLAUDECODE`) the post-switch hook
+  is a no-op: the worktree appears, but no tmux session is built, no claude
+  auto-starts and the user's screen never switches — Ctrl+F lists the
+  worktree and builds its session on first visit. So agents may use
+  `wt switch` freely; the hook's tmux side is for humans at the keyboard.
 - `wt switch pr:123` makes a review worktree for a PR. `wt remove <branch>`
   tears the worktree down (and its tmux/claude) when done.
 - Runnable by default for ENV: a `pre-start` hook (`dots/worktrunk.toml`)
@@ -42,7 +47,16 @@ Branch work happens in disposable sibling worktrees managed by worktrunk (`wt`):
   symptoms and check `pwd` + `git -C . log --oneline -1` first: unexpected
   test-collection counts, HEAD at the default branch when you expected a
   feature branch, diffs that look already-applied or missing.
-- Prefer real isolation for worktree labor: an agent spawned with
-  `isolation: "worktree"` (or EnterWorktree) gets enforcement that BLOCKS
-  cross-tree writes. A hub session freelancing in worktree paths has no such
-  guardrail — keep that mode for small, carefully-anchored operations only.
+- Which mechanism when an agent needs a worktree:
+  - NEW work from a clean base, done by a subagent: spawn it with
+    `isolation: "worktree"`. The harness makes `.claude/worktrees/agent-<id>`
+    on a fresh branch (base governed by the `worktree.baseRef` setting) and
+    BLOCKS cross-tree writes.
+    It never reuses an existing worktree or branch, and the tree carries no
+    gitignored runtime files (`wt step copy-ignored` when a step needs them).
+  - An EXISTING branch or PR (review fixes), or seats that must share one
+    tree (implementer + reviewer + fixer): work in that tree. If no worktree
+    holds the branch, `wt switch <branch>` / `wt switch pr:N` from the hub
+    makes the sibling. No write fence here, so the anchoring discipline above
+    is the guardrail — keep a hub session's own freelancing in worktree paths
+    to small, carefully-anchored operations.
