@@ -6,7 +6,8 @@
 # of cd'ing the invoking pane (the wt() zsh wrapper passes --no-cd). Naming
 # goes through bin/project-dirs-lib's session_name_for, so a `wt switch -c`
 # sibling and an agent worktree for the same branch share one session, and
-# Ctrl+F finds it. No-op outside tmux. Unlike wt-tmux-cleanup, post-switch
+# Ctrl+F finds it. No-op outside tmux and in agent shells (CLAUDECODE, see
+# below). Unlike wt-tmux-cleanup, post-switch
 # runs with the worktree present, so reading its .git here is fine.
 
 set -euo pipefail

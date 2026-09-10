@@ -83,7 +83,8 @@ it is NOT repeated here. This section is only the DOTFILES-specific glue.
   drops you into the worktree's tmux session) → `Ctrl+Space` for claude there.
 - Glue: `dots/worktrunk.toml` (user-level hooks) + `bin/wt-tmux-jump` /
   `bin/wt-tmux-cleanup`. `wt-tmux-jump` builds new worktree sessions with
-  the same `new_hub_session` layout as the sessionizer; the zshrc `wt()`
+  the same `new_hub_session` layout as the sessionizer (human shells only:
+  it exits early under `CLAUDECODE`); the zshrc `wt()`
   wrapper passes `--no-cd` on switch so the invoking pane never moves.
   `wt-tmux-cleanup` kills the removed worktree's session. Session naming
   matches the sessionizer, so Ctrl+F/Ctrl+Space/Ctrl+G work on worktrees with
