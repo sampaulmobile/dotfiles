@@ -908,6 +908,10 @@ get_agent_stats() {
 #   Parses per line via fromjson?, so the partial first record the byte-tail
 #   cuts is skipped rather than fatal. Empty output means neither text nor a
 #   tool call yet — the caller hides the line.
+#   The flatten + truncate happen INSIDE jq: bash 3.2's ${var//x/y} is
+#   quadratic on long strings in a UTF-8 locale — 13.7s for one 33KB
+#   narration (macOS 25.5, 2026-09-10), which stalled the whole dashboard on
+#   a cold cache. Bash must only ever see the <= maxlen result.
 get_agent_snippet() {
     local jsonl="$1" maxlen="${2:-60}" cache="$3"
     [[ ! -f "$jsonl" ]] && printf '' && return
@@ -923,12 +927,12 @@ get_agent_snippet() {
     fi
 
     local text
-    text=$(tail -c 131072 "$jsonl" | jq -Rn -r '
+    text=$(tail -c 131072 "$jsonl" | jq -Rn -r --argjson maxlen "$maxlen" '
         [inputs | fromjson?] as $recs |
         # all assistant content blocks, in order, most recent last
         [$recs[] | select(.type == "assistant") | (.message.content // [])[]?] as $blocks |
         ([$blocks[] | select(.type == "text") | .text | select(length > 0)] | last) as $narration |
-        if $narration != null then
+        (if $narration != null then
             $narration
         else
             # Keyed on input FIELD names, never tool names: command/path/
@@ -953,21 +957,16 @@ get_agent_snippet() {
                  end) as $arg |
                 "→ " + ($tu.name // "tool") + (if ($arg | length) > 0 then ": " + $arg else "" end)
             end
-        end
+        end)
+        # Flatten to one line. A surviving tab counts as 1 char in
+        # ${#row_plain} at render time but the terminal expands it to the
+        # next 8-column stop, so a row that passes the width check still
+        # wraps and misaligns every row below it. Other C0 control chars go
+        # for the same reason.
+        | gsub("[\\n\\r\\t]"; " ")
+        | gsub("[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]"; "")
+        | if length > $maxlen then .[:$maxlen - 1] + "…" else . end
     ' 2>/dev/null)
-
-    # Flatten to one line. A surviving tab counts as 1 char in ${#row_plain}
-    # at render time but the terminal expands it to the next 8-column stop,
-    # so a row that passes the width check still wraps and misaligns every
-    # row below it. Other C0 control chars go for the same reason.
-    text="${text//$'\n'/ }"
-    text="${text//$'\r'/ }"
-    text="${text//$'\t'/ }"
-    text=$(printf '%s' "$text" | tr -d '\000-\010\013\014\016-\037')
-
-    if (( ${#text} > maxlen )); then
-        text="${text:0:$(( maxlen - 1 ))}…"
-    fi
 
     [[ -n "$cache" ]] && _agent_cache_set "$cache" "$mtime" "$text"
     printf '%s' "$text"
