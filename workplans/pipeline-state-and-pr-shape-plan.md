@@ -217,14 +217,15 @@ writer, so a session's conversation is never the only copy of anything.
   the sweep must create the whole tree. Nothing reads it until step 2. Still
   ASSUMED for other machines — `mkdir -p` makes that difference irrelevant.
 - ASSUMED: the `<branch-slug>` in the sweep's archive path is the branch with
-  `/` → `-`, the same sanitisation worktrunk and `bin/project-dirs-lib` use for
-  session and sibling-directory names. Nothing reads the path back in this
-  step, so a mismatch is invisible until step 2's collector; keeping it
-  identical to the existing rule is what makes it verifiable later.
-- ASSUMED: the archive copy is a snapshot, not a merge. A second sweep of the
-  same repo and branch overwrites whatever the first one wrote. Acceptable
-  while nothing reads it; step 2 either timestamps the destination or accepts
-  last-writer-wins.
+  `/` → `-`, worktrunk's sibling-directory sanitisation. It is NOT
+  `bin/project-dirs-lib`'s session name, which also prefixes the repo and maps
+  `.` → `_` (`release/1.2` on `proj`: session `proj_release-1_2`, archive
+  `runs/proj/release-1.2`). Nothing reads the path back in this step, so a
+  mismatch is invisible until step 2's collector.
+- VERIFIED (2026-09-12, `tests/test-worktrees.sh`): the archive copy is a
+  snapshot. `archive_feature_dir` removes the destination before copying, so a
+  second sweep of the same repo and branch leaves no file of the first one's
+  behind — `cp -R src/. dest/` alone would have merged the two runs.
 - ASSUMED: step 6's profile numbers cannot all be collected from inside this
   pipeline. `bin/worktrees` and `bin/prs` are non-interactive and read-only, so
   their numbers are real measurements taken here. `bin/tmux-claude-dashboard`
@@ -293,7 +294,8 @@ Findings, for the step-2 collector rather than this PR:
   all of it the several git forks per worktree in `derive_worktree_facts`
   (status, rev-parse, rev-list, reflog, merge-base, log). Batching those per
   repo is the fix, and it is neither local nor obvious. `pipeline_state` adds
-  no fork.
+  one subshell per worktree (the command substitution `report_row` calls it
+  through) and no exec, no git, no gh.
 - `pr prefetch` costs 2s online, one parallel `gh pr list` per repo already.
 - In `bin/prs` the local scope enumeration (490ms) runs while the searches are
   in flight, so it is already free; the run is its two GitHub searches.
