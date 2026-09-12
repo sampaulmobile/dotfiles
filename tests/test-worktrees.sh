@@ -26,6 +26,15 @@
 # merged_local (B6) even though `merge-base --is-ancestor` is trivially true
 # for it; a branch with its own commit, folded into default by a real local
 # merge, still must.
+#
+# pipeline_state's cases that matter: the column is the LAST line of
+# status.jsonl (a run's earlier phases must never be shown as current), and it
+# is blank for everything that is not a parseable jsonl line — including a
+# worktree left holding the pre-jsonl status.json, which would otherwise
+# report a phase no one is in any more.
+# feature_archive_dir/archive_feature_dir's case that matters: a failed copy
+# must REPORT failure, because that return value is the only thing standing
+# between a sweep and a deleted run history.
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo_dir=$(dirname "$here")
