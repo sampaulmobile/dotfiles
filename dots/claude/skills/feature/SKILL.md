@@ -57,11 +57,11 @@ When it reports back, relay the PR URL to the user. Done — the rest of this fi
 
 ## Full pipeline
 
-Spawn ONE background orchestrator agent (`subagent_type: "<ORCH_EFFORT>"`, `model: "<ORCH_MODEL>"` — resolved per `--orchestrator`, default `fable:high` — and `isolation: "worktree"`), using the prompt template below — fill in `<FEATURE>`, `<PLAN_PATH>` (if given), `<IMPL_MODEL>`/`<IMPL_EFFORT>` (default `sonnet:high`; `opus` with `--hard`), `<REVIEWER_MODEL>`/`<REVIEWER_EFFORT>` (default `fable:high`), `<MAX_ROUNDS>`, `<DEFAULT_BRANCH>`, `<SLUG>`, `<STRICT>` (true only with `--strict`), `<NO_WORKPLAN>` (true only with `--no-workplan`), `<GO>` (true only with `--go`), `<REQUESTER>` (this session's name, or `main` when /feature was typed here). Each seat's effort maps to its preset name and the model rides as an Agent `model:` override — see **Seat resolution**.
+Spawn ONE background orchestrator agent (`subagent_type: "<ORCH_EFFORT>"`, `model: "<ORCH_MODEL>"` — resolved per `--orchestrator`, default `fable:high` — and `isolation: "worktree"`), using the prompt template below — fill in `<FEATURE>`, `<PLAN_PATH>` (if given), `<IMPL_MODEL>`/`<IMPL_EFFORT>` (default `sonnet:high`; `opus` with `--hard`), `<REVIEWER_MODEL>`/`<REVIEWER_EFFORT>` (default `fable:high`), `<MAX_ROUNDS>`, `<DEFAULT_BRANCH>`, `<SLUG>`, `<STRICT>` (true only with `--strict`), `<NO_WORKPLAN>` (true only with `--no-workplan`), `<GO>` (true only with `--go`). Each seat's effort maps to its preset name and the model rides as an Agent `model:` override — see **Seat resolution**.
 
 Multiple `/feature` invocations may run concurrently — each gets its own orchestrator and worktree.
 
-Unless `--go`, the orchestrator's FIRST message back is the plan digest, and it then ends its turn. Relay the digest to the user verbatim and stop. On a go, resume that orchestrator BY NAME with `SendMessage` ("go", plus any correction the user made) — a new `/feature` would start over. Everything the user says about the plan goes back the same way.
+Unless `--go`, the orchestrator's FIRST message back is the plan digest, and it then ends its turn. Relay the digest verbatim — to the user, and to the dispatching session when a dispatch started this run — and stop. On a go, resume that orchestrator BY NAME with `SendMessage` ("go", plus any correction) — a new `/feature` would start over. Everything said about the plan goes back the same way.
 
 When the orchestrator reports back at the end, relay to the user: the PR URL, the summary, rounds used, any deferred non-blocking notes, and the Lessons block — or, if the loop escalated instead of shipping, the branch/worktree and open blockers awaiting a human decision. Keep the hub conversation clean — do not pull implementation details into it.
 
@@ -70,7 +70,7 @@ When the orchestrator reports back at the end, relay to the user: the PR URL, th
 You are the orchestrator for one feature, working in an isolated git worktree. You do NOT write implementation code yourself — you plan, delegate, review, and ship. Every agent in this pipeline is ephemeral: all context that matters must live in files, so that a fresh agent with zero memory could pick up where any other left off.
 
 Feature: <FEATURE>
-Max review rounds: <MAX_ROUNDS>. Default branch: <DEFAULT_BRANCH>. Strict review: <STRICT>. No-workplan: <NO_WORKPLAN>. Skip the gate: <GO>. Requester: <REQUESTER>.
+Max review rounds: <MAX_ROUNDS>. Default branch: <DEFAULT_BRANCH>. Strict review: <STRICT>. No-workplan: <NO_WORKPLAN>. Skip the gate: <GO>.
 
 **State files**
 - `mkdir -p .feature` at the worktree root, and ensure it is ignored: append `.feature/` to `$(git rev-parse --git-common-dir)/info/exclude` if not already present. NEVER commit anything under `.feature/`.
@@ -110,8 +110,8 @@ Max review rounds: <MAX_ROUNDS>. Default branch: <DEFAULT_BRANCH>. Strict review
 - Commit the workplan on its own before implementation starts — skip this when workplans are disabled; `.feature/plan.md` is never committed.
 
 **1b. Gate** — skipped entirely when <GO> is true; go straight to step 2.
-- Append a `phase: gate` line to `.feature/status.jsonl`, then `SendMessage` the digest verbatim to <REQUESTER> and END YOUR TURN. You cannot block mid-turn waiting for an answer; the digest is on disk in the plan either way, so nothing is lost if you are never resumed.
-- The requester relays the digest and, on a go, resumes you by name. Resume at step 2. A correction arrives the same way: fold it into the workplan, commit the amendment, and only then implement. A correction that changes the goal means re-planning, not implementing around it.
+- Append a `phase: gate` line to `.feature/status.jsonl`, then `SendMessage` the digest verbatim to the session that spawned you (`to: "main"`) and END YOUR TURN. You cannot block mid-turn waiting for an answer; the digest is on disk in the plan either way, so nothing is lost if you are never resumed.
+- That session relays the digest and, on a go, resumes you by name. Resume at step 2. A correction arrives the same way: fold it into the workplan, commit the amendment, and only then implement. A correction that changes the goal means re-planning, not implementing around it.
 
 **2. Implement (round N)**
 Spawn a FRESH implementer subagent (`subagent_type: "<IMPL_EFFORT>"`, `model: "<IMPL_MODEL>"`, no extra isolation — it inherits this worktree). Its prompt must tell it to:
