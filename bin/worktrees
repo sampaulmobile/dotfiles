@@ -45,13 +45,16 @@ MERGED, ABANDONED or PRUNABLE.
   -v          print, under each row, the command that would act on it
 
 sweep: remove the MERGED worktrees, guarding against the loss of
-worktree-unique gitignored data. Dry-run by default: REMOVE rows first, then
-SKIP rows, each with the reason it was skipped. A skip for at-risk gitignored
-data lists one line per top-level dir with a file count (-v lists every file).
+worktree-unique data: at-risk gitignored files, and untracked files (a DIRTY
+row whose only dirt is untracked files is merged underneath and is swept
+like a MERGED one, past the same guard). Dry-run by default: REMOVE rows
+first, then SKIP rows, each with the reason it was skipped. A guard skip lists
+one line per top-level dir with a file count (-v lists every file).
 Exit 0 on a clean run; 2 on a removal failure under --apply.
   --apply     actually remove (default: dry-run — only print what would happen)
-  --force     also remove MERGED worktrees that hold at-risk gitignored files
-              (the guard's skips); LIVE/DIRTY/unmerged are still never touched
+  --force     also remove the guard's skips: merged worktrees holding at-risk
+              gitignored files or untracked files (wt remove -f). LIVE,
+              modified/staged tracked files and unmerged are still never touched
   --offline   skip gh (a squash-merged worktree then looks unmerged and is
               left alone — the safe direction)
   -v          under each REMOVE row, the exact command --apply runs; under a
@@ -268,15 +271,17 @@ classify_worktree() {
     echo "SHIPPED?"
 }
 
-# action_for <bucket> <repo> <path> <branch> <locked> — the recommended
-# command, printed verbatim, never executed. A detached worktree (empty
-# branch) must be addressed by PATH, not branch, for `wt remove` (verified
-# against wt v0.68.0's --help). `locked` never changes the bucket, only
-# whether MERGED/ABANDONED get the `git worktree unlock` prefix they need:
-# every harness-made agent worktree stays locked after its agent exits, and
-# `wt remove` (like `git worktree remove`) refuses a locked worktree.
+# action_for <bucket> <repo> <path> <branch> <locked> [<sweepable_dirty>] —
+# the recommended command, printed verbatim, never executed. A detached
+# worktree (empty branch) must be addressed by PATH, not branch, for
+# `wt remove` (verified against wt v0.68.0's --help). `locked` never changes
+# the bucket, only whether MERGED/ABANDONED get the `git worktree unlock`
+# prefix they need: every harness-made agent worktree stays locked after its
+# agent exits, and `wt remove` (like `git worktree remove`) refuses a locked
+# worktree. `sweepable_dirty` is DIRTY's only variant: merged underneath with
+# untracked files as the sole dirt, which `sweep --force` drops.
 action_for() {
-    local bucket="$1" repo="$2" path="$3" branch="$4" locked="${5:-false}"
+    local bucket="$1" repo="$2" path="$3" branch="$4" locked="${5:-false}" sweepable_dirty="${6:-false}"
     local target unlock_prefix
     target="${branch:-$path}"
     unlock_prefix=""
@@ -285,7 +290,12 @@ action_for() {
     fi
     case "$bucket" in
         LIVE)      echo "keep — in use" ;;
-        DIRTY)     echo "keep — inspect: git -C $path status" ;;
+        DIRTY)
+            if [[ "$sweepable_dirty" == true ]]; then
+                echo "worktrees sweep --force --apply  (merged; the only dirt is untracked files, which --force drops)"
+            else
+                echo "keep — inspect: git -C $path status"
+            fi ;;
         PRUNABLE)  echo "git -C $repo worktree prune" ;;
         MERGED)    echo "worktrees sweep --apply  (removes every MERGED row; dry-run without --apply, -v shows each command)" ;;
         ABANDONED) echo "${unlock_prefix}wt -C $repo remove -D $target  (confirm first — deletes an unmerged branch)" ;;
@@ -439,37 +449,58 @@ default_ref_for() {
     printf ''
 }
 
-# sweep_remove_cmd <repo> <path> <branch> <locked>
+# sweep_remove_cmd <repo> <path> <branch> <locked> [<dirty>]
 #   The exact command `worktrees sweep --apply` runs on a MERGED worktree, %q-quoted.
 #   The ONE renderer: the sweep's verbose dry-run line comes from here and its
 #   remove_worktree mirrors it step for step.
 #   --no-delete-branch plus our own `git branch -D`: wt's merged-ness check is
 #   offline and capped at 500 commits, so left to itself it can keep the
 #   branch and still exit 0; the caller already proved "merged".
+#   -f only when <dirty> is true: wt (like git) refuses a worktree with
+#   untracked files, and the caller has already proved that is the ONLY dirt
+#   and that --force was given. Never default it on — it would defeat the
+#   dirty check for modified tracked files.
 sweep_remove_cmd() {
-    local repo="$1" path="$2" branch="$3" locked="$4" q_repo q_path q_branch target cmd
+    local repo="$1" path="$2" branch="$3" locked="$4" dirty="${5:-false}" q_repo q_path q_branch target cmd
     q_repo=$(printf '%q' "$repo")
     q_path=$(printf '%q' "$path")
     q_branch=$(printf '%q' "$branch")
     if [[ -n "$branch" ]]; then target="$q_branch"; else target="$q_path"; fi
     cmd=""
     if [[ "$locked" == true ]]; then cmd+="git -C $q_repo worktree unlock $q_path && "; fi
-    cmd+="wt -C $q_repo remove --foreground --no-delete-branch $target"
+    cmd+="wt -C $q_repo remove --foreground --no-delete-branch"
+    if [[ "$dirty" == true ]]; then cmd+=" -f"; fi
+    cmd+=" $target"
     if [[ -n "$branch" ]]; then cmd+=" && git -C $q_repo branch -D $q_branch"; fi
     printf '%s' "$cmd"
 }
 
+# porcelain_untracked_only <status --porcelain output>
+#   True when the output is non-empty and every line is an untracked entry
+#   (`?? `): the worktree's only dirt is files git never tracked. Any other
+#   status code (modified, staged, deleted, renamed, conflicted) is false.
+porcelain_untracked_only() {
+    local porc="$1" line
+    [[ -n "$porc" ]] || return 1
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        [[ "$line" == '?? '* ]] || return 1
+    done <<< "$porc"
+    return 0
+}
+
 # derive_worktree_facts <path> <branch> <prunable> <wt_head>
 #   Compute the per-worktree facts classify_worktree needs, into the globals
-#   f_live f_dirty f_unpushed f_merged_local f_pr_state f_pr_head f_pr_disp
-#   f_age. f_pr_head is the merged/open PR's head commit ("" when unknown).
+#   f_live f_dirty f_untracked_only f_unpushed f_merged_local f_pr_state
+#   f_pr_head f_pr_disp f_age. f_pr_head is the merged/open PR's head commit
+#   ("" when unknown). f_untracked_only: the dirt is untracked files alone.
 #   Reads $repo, $default_ref and $GH_OK from the caller. A prunable block
 #   short-circuits to the "nothing to inspect" defaults (its gitdir is gone).
 derive_worktree_facts() {
     local path="$1" branch="$2" prunable="$3" wt_head="$4"
 
     if [[ "$prunable" == true ]]; then
-        f_live=false; f_dirty=false; f_unpushed=false; f_merged_local=false
+        f_live=false; f_dirty=false; f_untracked_only=false; f_unpushed=false; f_merged_local=false
         f_pr_state="unknown"; f_pr_head=""; f_pr_disp="pr:unknown"; f_age="-"
         f_age_epoch=0
         return
@@ -479,10 +510,14 @@ derive_worktree_facts() {
 
     # --no-optional-locks: not even the stat-cache refresh git does
     # opportunistically on a plain `status --porcelain` is allowed here.
-    if [[ -n "$(git --no-optional-locks -C "$path" status --porcelain 2>/dev/null)" ]]; then
+    local _porc
+    _porc=$(git --no-optional-locks -C "$path" status --porcelain 2>/dev/null)
+    if [[ -n "$_porc" ]]; then
         f_dirty=true
+        if porcelain_untracked_only "$_porc"; then f_untracked_only=true; else f_untracked_only=false; fi
     else
         f_dirty=false
+        f_untracked_only=false
     fi
 
     if [[ -n "$branch" ]]; then
@@ -773,19 +808,36 @@ sweep_would_kill_own_session() {
     [[ "$cur_session" == "$session_name" ]]
 }
 
+# merged_under_untracked <prunable> — true when the current f_* facts describe
+# a DIRTY worktree whose only dirt is untracked files and which classifies
+# MERGED once that dirt is ignored. The sweep's look-through and the report's
+# -v hint share this one definition so they cannot disagree.
+merged_under_untracked() {
+    [[ "$f_dirty" == true && "$f_untracked_only" == true ]] || return 1
+    [[ "$(classify_worktree false false "$1" "$f_pr_state" "$f_unpushed" "$f_merged_local")" == MERGED ]]
+}
+
+# worktree_untracked <path> — every untracked, non-ignored file, one per
+# line (files, not collapsed dirs, so summarize_at_risk counts are real).
+worktree_untracked() {
+    git -C "$1" ls-files --others --exclude-standard -z 2>/dev/null | tr '\0' '\n'
+}
+
 # Sourced (tests/test-worktree-sweep.sh) rather than executed: hand back the
 # guard functions above and run none of the sweep below.
 
-# remove_worktree <repo> <path> <branch> <locked> — the removal itself
-# (--apply only; mirrors sweep_remove_cmd step for step).
+# remove_worktree <repo> <path> <branch> <locked> [<dirty>] — the removal
+# itself (--apply only; mirrors sweep_remove_cmd step for step).
 # --foreground waits for the directory to go, NOT for the post-remove hook
-# (background regardless — `wt hook --help`). No -f: the dirty check already
-# ran and -f would defeat it. Sets REMOVE_FAIL_NOTE when an unlock happened
-# before a failed removal (a mutation that survives it) and REMOVE_NOTE when
-# the branch delete failed after a successful one.
+# (background regardless — `wt hook --help`). -f only under <dirty>, which
+# sweep_row sets solely for untracked-only dirt under --force; anywhere else
+# the dirty check already ran and -f would defeat it. Sets REMOVE_FAIL_NOTE
+# when an unlock happened before a failed removal (a mutation that survives
+# it) and REMOVE_NOTE when the branch delete failed after a successful one.
 remove_worktree() {
-    local repo="$1" path="$2" branch="$3" locked="$4" target unlocked=false
+    local repo="$1" path="$2" branch="$3" locked="$4" dirty="${5:-false}" target unlocked=false force_flag=""
     target="${branch:-$path}"
+    [[ "$dirty" == true ]] && force_flag=-f
     REMOVE_FAIL_NOTE=""
     REMOVE_NOTE=""
     if [[ "$locked" == true ]]; then
@@ -793,7 +845,9 @@ remove_worktree() {
             unlocked=true
         fi
     fi
-    if ! wt -C "$repo" remove --foreground --no-delete-branch "$target" </dev/null; then
+    # ${force_flag:+-f} rather than an array: an empty array expansion is an
+    # unbound variable under bash 3.2's set -u.
+    if ! wt -C "$repo" remove --foreground --no-delete-branch ${force_flag:+-f} "$target" </dev/null; then
         [[ "$unlocked" == true ]] && REMOVE_FAIL_NOTE=" (worktree was unlocked before this failure and is left unlocked)"
         return 1
     fi
@@ -930,9 +984,10 @@ report_row() {
     flags="${flags% }"
     [[ -z "$flags" ]] && flags="-"
 
-    local detail=""
+    local detail="" sweepable_dirty=false
     if [[ "$VERBOSE" == true ]]; then
-        detail="      $(action_for "$bucket" "$repo" "$path" "$branch" "$locked")"
+        if [[ "$bucket" == DIRTY ]] && merged_under_untracked "$prunable"; then sweepable_dirty=true; fi
+        detail="      $(action_for "$bucket" "$repo" "$path" "$branch" "$locked" "$sweepable_dirty")"
     fi
     rows_add "$bucket" "${branch:-(detached)}" "$f_pr_disp" "$flags" "$f_age" "$(where_for "$path" "$repo")" "$detail" "$f_age_epoch"
 }
@@ -948,6 +1003,15 @@ sweep_row() {
 
     derive_worktree_facts "$path" "$branch" "$prunable" "$wt_head"
     bucket=$(classify_worktree "$f_live" "$f_dirty" "$prunable" "$f_pr_state" "$f_unpushed" "$f_merged_local")
+    # Look through untracked-only dirt: it is worktree-unique data the merge
+    # never had, the same class as at-risk gitignored files, and goes through
+    # the same guard (SKIP with a listing; --force drops it). Modified or
+    # staged tracked files keep the row DIRTY and out of the sweep entirely.
+    local dirty_untracked=false
+    if [[ "$bucket" == DIRTY ]] && merged_under_untracked "$prunable"; then
+        bucket=MERGED
+        dirty_untracked=true
+    fi
     [[ "$bucket" == MERGED ]] || return 0
 
     # Removable only if the worktree carries nothing the merge did not.
@@ -963,15 +1027,24 @@ sweep_row() {
     fi
 
     at_risk=$(worktree_ignored_at_risk "$path" "$repo")
+    local untracked="" what=""
+    if [[ "$dirty_untracked" == true ]]; then
+        untracked=$(worktree_untracked "$path")
+        # Fail closed like worktree_ignored_at_risk: status said dirty, so an
+        # empty listing means the enumeration failed, not that nothing is there.
+        [[ -n "$untracked" ]] || untracked="<git ls-files failed — cannot list untracked files, treating as at-risk>"
+        what="untracked files"
+    fi
+    if [[ -n "$at_risk" ]]; then what+="${what:+ + }gitignored data"; fi
 
-    if [[ -n "$at_risk" ]] && [[ "$FORCE" == false ]]; then
+    if [[ -n "$what" ]] && [[ "$FORCE" == false ]]; then
         CNT_SKIP=$((CNT_SKIP + 1))
         if [[ "$VERBOSE" == true ]]; then
-            listing=$(printf '%s\n' "$at_risk" | grep . | sed 's/^/        /')
+            listing=$(printf '%s\n%s\n' "$untracked" "$at_risk" | grep . | sed 's/^/        /')
         else
-            listing=$(printf '%s\n' "$at_risk" | summarize_at_risk)
+            listing=$(printf '%s\n%s\n' "$untracked" "$at_risk" | summarize_at_risk)
         fi
-        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, has gitignored data" "" "$listing"
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, has $what" "" "$listing"
         return 0
     fi
 
@@ -995,18 +1068,18 @@ sweep_row() {
 
     CNT_REMOVE=$((CNT_REMOVE + 1))
     detail=""
-    if [[ -n "$at_risk" ]]; then
-        detail="      --force: dropping at-risk gitignored files"
+    if [[ -n "$what" ]]; then
+        detail="      --force: dropping $what"
     fi
     if [[ "$APPLY" == true ]]; then
-        if remove_worktree "$repo" "$path" "$branch" "$locked"; then
+        if remove_worktree "$repo" "$path" "$branch" "$locked" "$dirty_untracked"; then
             detail+="${detail:+$nl}      removed$REMOVE_NOTE"
         else
             CNT_FAIL=$((CNT_FAIL + 1))
             detail+="${detail:+$nl}      $(paint FAILED 6) to remove (left in place)$REMOVE_FAIL_NOTE"
         fi
     elif [[ "$VERBOSE" == true ]]; then
-        detail+="${detail:+$nl}      would run: $(sweep_remove_cmd "$repo" "$path" "$branch" "$locked")"
+        detail+="${detail:+$nl}      would run: $(sweep_remove_cmd "$repo" "$path" "$branch" "$locked" "$dirty_untracked")"
     fi
     rows_add REMOVE "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" "$detail"
 }

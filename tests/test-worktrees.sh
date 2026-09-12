@@ -12,7 +12,11 @@
 # The classify_worktree case that matters is precedence: LIVE beats DIRTY
 # beats PRUNABLE beats MERGED beats ABANDONED beats IN-REVIEW beats PARKED
 # beats SHIPPED?, first match wins — so a merged worktree that's still dirty
-# must report DIRTY (keep, inspect), never silently look removable.
+# must report DIRTY (keep, inspect), never silently look removable. The one
+# sanctioned look-through is merged_under_untracked: dirt that is untracked
+# files alone is worktree-unique data like the gitignored guard's, so sweep
+# treats it as a guard SKIP that --force drops; any modified/staged tracked
+# file keeps the row DIRTY and out of the sweep.
 # action_for's case that matters is the locked-unlock prefix landing on
 # MERGED/ABANDONED only, never changing any other bucket's command.
 # parse_porcelain_blocks's case that matters is a real parser bug this PR
@@ -601,6 +605,87 @@ if [[ "$got" == "$want" ]]; then
     ok "paths with spaces are shell-quoted (paste-safe)"
 else
     bad "sweep_remove_cmd quoting" "got [$got] want [$want]"
+fi
+
+got=$(sweep_remove_cmd /repo /repo/wt branchname false true)
+want='wt -C /repo remove --foreground --no-delete-branch -f branchname && git -C /repo branch -D branchname'
+if [[ "$got" == "$want" ]]; then
+    ok "dirty (untracked-only, --force) -> wt remove -f, same branch delete"
+else
+    bad "sweep_remove_cmd dirty" "got [$got] want [$want]"
+fi
+got=$(sweep_remove_cmd /repo /repo/wt branchname false false)
+if [[ "$got" != *" -f "* ]]; then
+    ok "dirty=false -> no -f (the default stays the dirty-refusing remove)"
+else
+    bad "sweep_remove_cmd dirty=false" "got [$got], must not carry -f"
+fi
+
+echo "── porcelain_untracked_only: untracked entries alone, and nothing else, count"
+if porcelain_untracked_only $'?? uv.lock\n?? reports/'; then
+    ok "all ?? lines -> true"
+else
+    bad "porcelain untracked" "expected true for two ?? lines"
+fi
+if ! porcelain_untracked_only $'?? uv.lock\n M src/app.py'; then
+    ok "a modified tracked file among them -> false"
+else
+    bad "porcelain modified" "expected false when a line is not ??"
+fi
+if ! porcelain_untracked_only $'A  new.py'; then
+    ok "staged-only -> false (tracked now, not untracked)"
+else
+    bad "porcelain staged" "expected false for a staged add"
+fi
+if ! porcelain_untracked_only ""; then
+    ok "empty porcelain (clean) -> false, never 'untracked-only'"
+else
+    bad "porcelain empty" "expected false for empty input"
+fi
+
+echo "── merged_under_untracked: the sweep's look-through and the report's -v hint"
+f_dirty=true; f_untracked_only=true; f_pr_state=MERGED; f_unpushed=false; f_merged_local=false
+if merged_under_untracked false; then
+    ok "dirty, untracked-only, PR merged -> looks through to MERGED"
+else
+    bad "look-through merged PR" "expected true"
+fi
+f_pr_state=OPEN
+if ! merged_under_untracked false; then
+    ok "dirty, untracked-only, PR open -> not merged, stays DIRTY"
+else
+    bad "look-through open PR" "expected false"
+fi
+f_pr_state=MERGED; f_untracked_only=false
+if ! merged_under_untracked false; then
+    ok "dirty with modified tracked files, PR merged -> stays DIRTY"
+else
+    bad "look-through modified" "expected false when dirt is not untracked-only"
+fi
+f_untracked_only=true; f_pr_state=none; f_merged_local=true
+if merged_under_untracked false; then
+    ok "dirty, untracked-only, folded into local default -> MERGED"
+else
+    bad "look-through merged_local" "expected true"
+fi
+f_dirty=false
+if ! merged_under_untracked false; then
+    ok "not dirty at all -> false (a clean MERGED row is not this case)"
+else
+    bad "look-through clean" "expected false"
+fi
+unset f_dirty f_untracked_only f_pr_state f_unpushed f_merged_local
+got=$(action_for DIRTY /repo /repo/wt branchname false true)
+if [[ "$got" == "worktrees sweep --force --apply"* ]]; then
+    ok "action_for DIRTY sweepable -> points at sweep --force"
+else
+    bad "action_for DIRTY sweepable" "got [$got]"
+fi
+got=$(action_for DIRTY /repo /repo/wt branchname false)
+if [[ "$got" == "keep — inspect: git -C /repo/wt status" ]]; then
+    ok "action_for DIRTY default -> keep, inspect (unchanged)"
+else
+    bad "action_for DIRTY default" "got [$got]"
 fi
 
 echo "── B5: a clean --apply run (no removals, no failures) exits 0"

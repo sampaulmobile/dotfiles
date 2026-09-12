@@ -8,7 +8,7 @@ Run the end-to-end feature pipeline. The argument is either a short description 
 ## Flags
 
 **Per-seat model/effort** — value is `model` or `model:effort` (effort defaults to `high`). An explicit `--<seat>=` always wins over the convenience bundles below.
-- `--orchestrator=<model[:effort]>` — planner / review-coordinator / shipper seat. Default `fable:high`.
+- `--orchestrator=<model[:effort]>` — planner / review-coordinator / shipper seat. Default `opus:high`.
 - `--implementer=<model[:effort]>` — the coding seat. Default `sonnet:high`.
 - `--reviewer=<model[:effort]>` — the adversarial-review seat. Default `fable:high`.
 - `model` ∈ `opus|sonnet|fable|haiku`; `effort` ∈ `high|xhigh` (the presets that exist — see **Seat resolution**).
@@ -56,7 +56,7 @@ When it reports back, relay the PR URL to the user. Done — the rest of this fi
 
 ## Full pipeline
 
-Spawn ONE background orchestrator agent (`subagent_type: "<ORCH_EFFORT>"`, `model: "<ORCH_MODEL>"` — resolved per `--orchestrator`, default `fable:high` — and `isolation: "worktree"`), using the prompt template below — fill in `<FEATURE>`, `<PLAN_PATH>` (if given), `<IMPL_MODEL>`/`<IMPL_EFFORT>` (default `sonnet:high`; `opus` with `--hard`), `<REVIEWER_MODEL>`/`<REVIEWER_EFFORT>` (default `fable:high`), `<MAX_ROUNDS>`, `<DEFAULT_BRANCH>`, `<SLUG>`, `<STRICT>` (true only with `--strict`), `<NO_WORKPLAN>` (true only with `--no-workplan`). Each seat's effort maps to its preset name and the model rides as an Agent `model:` override — see **Seat resolution**.
+Spawn ONE background orchestrator agent (`subagent_type: "<ORCH_EFFORT>"`, `model: "<ORCH_MODEL>"` — resolved per `--orchestrator`, default `opus:high` — and `isolation: "worktree"`), using the prompt template below — fill in `<FEATURE>`, `<PLAN_PATH>` (if given), `<IMPL_MODEL>`/`<IMPL_EFFORT>` (default `sonnet:high`; `opus` with `--hard`), `<REVIEWER_MODEL>`/`<REVIEWER_EFFORT>` (default `fable:high`), `<MAX_ROUNDS>`, `<DEFAULT_BRANCH>`, `<SLUG>`, `<STRICT>` (true only with `--strict`), `<NO_WORKPLAN>` (true only with `--no-workplan`). Each seat's effort maps to its preset name and the model rides as an Agent `model:` override — see **Seat resolution**.
 
 Multiple `/feature` invocations may run concurrently — each gets its own orchestrator and worktree.
 

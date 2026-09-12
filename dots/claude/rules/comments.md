@@ -9,6 +9,13 @@ agent, at token cost, on every visit — so a comment must pay for itself.
   file (why this path must stay fork-free, why bash 3.2 syntax). Never write
   what the code does — the code already says that. No narrative walkthroughs
   of the implementation.
+- **A changed line states the new fact, never why it changed.** No
+  `(because ...)`, no `(X is reserved for Y)`, no "was Z, now W" appended to
+  a value, default, or setting. The why of a change is the commit message
+  and PR body. This applies to EVERY file an agent edits, not just code:
+  skills, rules, CLAUDE.md, READMEs, configs, YAML. Before finishing an
+  edit, reread the diff for added parentheticals that justify a decision
+  and delete them.
 - **One home per fact.** Cross-file behavior, architecture and operating
   knowledge live in the repo's CLAUDE.md (or its docs). A local invariant
   lives in ONE comment at the code it protects. A file header states purpose
