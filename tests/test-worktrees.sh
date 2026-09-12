@@ -32,9 +32,11 @@
 # is blank for everything that is not a parseable jsonl line — including a
 # worktree left holding the pre-jsonl status.json, which would otherwise
 # report a phase no one is in any more.
-# feature_archive_dir/archive_feature_dir's case that matters: a failed copy
+# feature_archive_dir/archive_feature_dir's cases that matter: a failed copy
 # must REPORT failure, because that return value is the only thing standing
-# between a sweep and a deleted run history.
+# between a sweep and a deleted run history; and a re-archive of the same
+# branch must leave nothing behind from the previous run, or a later reader
+# sees two runs as one.
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo_dir=$(dirname "$here")
@@ -674,6 +676,14 @@ if HOME="$tmp/home" archive_feature_dir /r/myrepo "$awt" feat/y \
     ok "state tree created and every .feature/ file copied"
 else
     bad "archive_feature_dir copy" "expected status.jsonl and NOTES.md under $tmp/home/.local/state/hq/runs/myrepo/feat-y"
+fi
+printf 'stale\n' > "$tmp/home/.local/state/hq/runs/myrepo/feat-y/findings-round-9.md"
+if HOME="$tmp/home" archive_feature_dir /r/myrepo "$awt" feat/y \
+    && [[ ! -e "$tmp/home/.local/state/hq/runs/myrepo/feat-y/findings-round-9.md" ]] \
+    && [[ -f "$tmp/home/.local/state/hq/runs/myrepo/feat-y/status.jsonl" ]]; then
+    ok "re-archiving the same branch replaces the dir, leaving no earlier file"
+else
+    bad "archive_feature_dir snapshot" "expected findings-round-9.md gone and this run's files present"
 fi
 if HOME="$tmp/home" archive_feature_dir /r/myrepo "$tmp/no-such-worktree" feat/z; then
     ok "worktree without a .feature/ -> nothing to archive, success"

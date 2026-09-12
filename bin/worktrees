@@ -23,10 +23,9 @@
 # list) or byte-identical to the hub's copy; anything else is worktree-unique
 # data — the worktree is SKIPPED and the files listed, unless --force.
 #
-# A pipeline's `.feature/` is the exception the guard waves through, so
-# --apply copies it to ~/.local/state/hq/runs/ first (feature_archive_dir)
-# and abandons that worktree's removal if the copy fails. The same directory
-# feeds the report's PIPELINE column (pipeline_state).
+# A pipeline's `.feature/` is the exception the guard waves through: it feeds
+# the report's PIPELINE column (pipeline_state) and --apply archives it
+# (archive_feature_dir, whose comment carries the invariant).
 set -uo pipefail
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
@@ -59,9 +58,9 @@ worktree-unique gitignored data. Dry-run by default: REMOVE rows first, then
 SKIP rows, each with the reason it was skipped. A skip for at-risk gitignored
 data lists one line per top-level dir with a file count (-v lists every file).
 A worktree with a .feature/ names, under its REMOVE row, the
-~/.local/state/hq/runs/ directory --apply copies that pipeline history to
-before removing it; the removal is abandoned if the copy fails.
-Exit 0 on a clean run; 2 on a removal failure under --apply.
+~/.local/state/hq/runs/ directory --apply archives that pipeline history to.
+Exit 0 on a clean run; 2 when --apply left a worktree in place through a
+failure, its removal's or its archive's.
   --apply     actually remove (default: dry-run — only print what would happen)
   --force     also remove MERGED worktrees that hold at-risk gitignored files
               (the guard's skips); LIVE/DIRTY/unmerged are still never touched
@@ -815,25 +814,26 @@ sweep_would_kill_own_session() {
 }
 
 # feature_archive_dir <repo> <path> <branch> — where a swept worktree's
-#   .feature/ run history is parked: ~/.local/state/hq/runs/<repo
-#   basename>/<branch slug>, the branch with "/" -> "-" (the sanitisation
-#   project-dirs-lib and worktrunk already use for session and sibling names,
-#   so a run is findable from its session name). A detached worktree has no
-#   branch; its directory basename stands in.
+#   .feature/ run history is parked. The branch slug maps "/" -> "-", the
+#   sanitisation worktrunk uses for its sibling directories. A detached
+#   worktree has no branch; its directory basename stands in.
 feature_archive_dir() {
     local repo="$1" path="$2" branch="$3" slug
     slug="${branch:-${path##*/}}"
     printf '%s/.local/state/hq/runs/%s/%s' "$HOME" "${repo##*/}" "${slug//\//-}"
 }
 
-# archive_feature_dir <repo> <path> <branch> — copy the worktree's .feature/
-#   to its archive dir, snapshot-style (a second sweep of the same branch
-#   overwrites it). Non-zero when the copy fails, and the caller must then
-#   leave the worktree in place: the run history is worth more than the sweep.
+# archive_feature_dir <repo> <path> <branch> — replace the archive dir with
+#   this worktree's .feature/. The destination is cleared first, so a second
+#   sweep of the same branch cannot leave a file of the first one's behind for
+#   a reader to mistake for part of this run. Non-zero when the copy fails,
+#   and the caller must then leave the worktree in place: the run history is
+#   worth more than the sweep.
 archive_feature_dir() {
     local repo="$1" path="$2" branch="$3" dest
     [[ -d "$path/.feature" ]] || return 0
     dest=$(feature_archive_dir "$repo" "$path" "$branch")
+    rm -rf "$dest" || return 1
     mkdir -p "$dest" || return 1
     cp -R "$path/.feature/." "$dest/" || return 1
     return 0
@@ -1067,7 +1067,8 @@ sweep_row() {
     # removal, and a failed copy costs the removal, not the history.
     if [[ "$APPLY" == true ]] && ! archive_feature_dir "$repo" "$path" "$branch"; then
         CNT_SKIP=$((CNT_SKIP + 1))
-        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, .feature/ archive failed" "" "" ""
+        CNT_FAIL=$((CNT_FAIL + 1))
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, .feature/ archive FAILED" "" "" ""
         return 0
     fi
 
