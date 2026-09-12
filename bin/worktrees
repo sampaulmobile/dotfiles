@@ -22,6 +22,11 @@
 # safe to lose only if it is a regenerable cache (the copy-ignored exclude
 # list) or byte-identical to the hub's copy; anything else is worktree-unique
 # data — the worktree is SKIPPED and the files listed, unless --force.
+#
+# A pipeline's `.feature/` is the exception the guard waves through, so
+# --apply copies it to ~/.local/state/hq/runs/ first (feature_archive_dir)
+# and abandons that worktree's removal if the copy fails. The same directory
+# feeds the report's PIPELINE column (pipeline_state).
 set -uo pipefail
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
@@ -39,7 +44,10 @@ Report: every worktree of the repos in scope, bucketed LIVE / DIRTY / PRUNABLE /
 SHIPPED? (first match wins). Rows are grouped: MERGED, ABANDONED, PRUNABLE
 (act), then PARKED, SHIPPED? (surface), then DIRTY, IN-REVIEW, LIVE (in
 progress). Exit 0 when nothing is removable, 1 when at least one worktree is
-MERGED, ABANDONED or PRUNABLE.
+MERGED, ABANDONED or PRUNABLE. A worktree running a /feature or
+/address-review pipeline also shows a PIPELINE column, `<phase> r<round>
+<seat>` from the last line of its .feature/status.jsonl; the column is absent
+when no worktree in scope has one.
   --offline   skip gh entirely (every worktree's PR state -> pr:unknown)
   --all       every project (those with no linked worktree are omitted)
   -v          print, under each row, the command that would act on it
@@ -48,6 +56,9 @@ sweep: remove the MERGED worktrees, guarding against the loss of
 worktree-unique gitignored data. Dry-run by default: REMOVE rows first, then
 SKIP rows, each with the reason it was skipped. A skip for at-risk gitignored
 data lists one line per top-level dir with a file count (-v lists every file).
+A worktree with a .feature/ names, under its REMOVE row, the
+~/.local/state/hq/runs/ directory --apply copies that pipeline history to
+before removing it; the removal is abandoned if the copy fails.
 Exit 0 on a clean run; 2 on a removal failure under --apply.
   --apply     actually remove (default: dry-run — only print what would happen)
   --force     also remove MERGED worktrees that hold at-risk gitignored files
@@ -94,22 +105,24 @@ BUCKET_ORDER="MERGED ABANDONED PRUNABLE PARKED SHIPPED? DIRTY IN-REVIEW LIVE REM
 row_n=0
 rows_reset() {
     row_n=0
-    row_repo=() row_label=() row_c1=() row_c2=() row_c3=() row_c4=() row_c5=() row_detail=()
+    row_repo=() row_label=() row_c1=() row_c2=() row_c3=() row_c4=() row_c5=() row_c6=() row_detail=()
 }
-# rows_add <label> <c1> <c2> <c3> <c4> <c5> <detail> <sortkey>   (unused
-# columns: ""; the repo is the caller's $repo). <sortkey> is the age epoch,
-# a hidden key rows_render sorts each bucket by; not a displayed column.
+# rows_add <label> <c1> <c2> <c3> <c4> <c5> <c6> <detail> <sortkey>   (unused
+# columns: ""; the repo is the caller's $repo). A column left empty by every
+# row is not printed at all. <sortkey> is the age epoch, a hidden key
+# rows_render sorts each bucket by; not a displayed column.
 rows_add() {
     row_repo[row_n]="$repo"; row_label[row_n]="$1"
     row_c1[row_n]="$2"; row_c2[row_n]="$3"; row_c3[row_n]="$4"
-    row_c4[row_n]="$5"; row_c5[row_n]="$6"; row_detail[row_n]="$7"
-    row_sortkey[row_n]="${8:-0}"
+    row_c4[row_n]="$5"; row_c5[row_n]="$6"; row_c6[row_n]="$7"
+    row_detail[row_n]="$8"
+    row_sortkey[row_n]="${9:-0}"
     row_n=$((row_n + 1))
 }
 _row_cell() {
     case "$1" in
         0) cell="${row_c1[$2]}" ;; 1) cell="${row_c2[$2]}" ;; 2) cell="${row_c3[$2]}" ;;
-        3) cell="${row_c4[$2]}" ;; 4) cell="${row_c5[$2]}" ;;
+        3) cell="${row_c4[$2]}" ;; 4) cell="${row_c5[$2]}" ;; 5) cell="${row_c6[$2]}" ;;
     esac
 }
 # rows_render <label-width> — print every repo in $repos: a `== repo` header,
@@ -117,15 +130,15 @@ _row_cell() {
 # linked worktree, so every one has rows.
 rows_render() {
     local lw="$1" i c b w cell r have line
-    local -a widths=(0 0 0 0 0)
+    local -a widths=(0 0 0 0 0 0)
     for ((i = 0; i < row_n; i++)); do
-        for c in 0 1 2 3 4; do
+        for c in 0 1 2 3 4 5; do
             _row_cell "$c" "$i"
             if (( ${#cell} > widths[c] )); then widths[c]=${#cell}; fi
         done
     done
     local last=0
-    for c in 0 1 2 3 4; do if (( widths[c] )); then last=$c; fi; done
+    for c in 0 1 2 3 4 5; do if (( widths[c] )); then last=$c; fi; done
     (( ${#repos[@]} )) || return 0
     for r in "${repos[@]}"; do
         have=false
@@ -151,7 +164,7 @@ rows_render() {
             (( ${#order[@]} )) || continue
             for i in "${order[@]}"; do
                 line="  $(paint "$b" "$lw")"
-                for c in 0 1 2 3 4; do
+                for c in 0 1 2 3 4 5; do
                     w=${widths[c]}
                     (( w )) || continue
                     _row_cell "$c" "$i"
@@ -567,6 +580,30 @@ derive_worktree_facts() {
     f_age_epoch="${_age##*$'\n'}"; [[ -z "$f_age_epoch" ]] && f_age_epoch=0
 }
 
+# pipeline_state <worktree-path> — the PIPELINE column: `<phase> r<round>
+#   <seat>` from the LAST line of <path>/.feature/status.jsonl, the
+#   append-only status contract the /feature and /address-review pipelines
+#   write. Empty when the file is absent, unreadable, empty, or its last line
+#   carries no phase. Only the .jsonl is read: a worktree still holding the
+#   pre-jsonl .feature/status.json gets a blank column, never a stale state.
+pipeline_state() {
+    local wt="$1" l last="" out="" re f
+    f="$wt/.feature/status.jsonl"
+    [[ -r "$f" ]] || return 0
+    while IFS= read -r l || [[ -n "$l" ]]; do
+        [[ -n "$l" ]] && last="$l"
+    done < "$f"
+    [[ -n "$last" ]] || return 0
+    re='"phase"[[:space:]]*:[[:space:]]*"([^"]*)"'
+    [[ "$last" =~ $re ]] || return 0
+    out="${BASH_REMATCH[1]}"
+    re='"round"[[:space:]]*:[[:space:]]*([0-9]+)'
+    [[ "$last" =~ $re ]] && out+=" r${BASH_REMATCH[1]}"
+    re='"seat"[[:space:]]*:[[:space:]]*"([^"]*)"'
+    [[ "$last" =~ $re ]] && out+=" ${BASH_REMATCH[1]}"
+    printf '%s' "$out"
+}
+
 # Sourced (tests/test-worktrees.sh) rather than executed: hand back the pure
 # functions above and run none of the report or sweep below.
 
@@ -773,6 +810,31 @@ sweep_would_kill_own_session() {
     [[ "$cur_session" == "$session_name" ]]
 }
 
+# feature_archive_dir <repo> <path> <branch> — where a swept worktree's
+#   .feature/ run history is parked: ~/.local/state/hq/runs/<repo
+#   basename>/<branch slug>, the branch with "/" -> "-" (the sanitisation
+#   project-dirs-lib and worktrunk already use for session and sibling names,
+#   so a run is findable from its session name). A detached worktree has no
+#   branch; its directory basename stands in.
+feature_archive_dir() {
+    local repo="$1" path="$2" branch="$3" slug
+    slug="${branch:-${path##*/}}"
+    printf '%s/.local/state/hq/runs/%s/%s' "$HOME" "${repo##*/}" "${slug//\//-}"
+}
+
+# archive_feature_dir <repo> <path> <branch> — copy the worktree's .feature/
+#   to its archive dir, snapshot-style (a second sweep of the same branch
+#   overwrites it). Non-zero when the copy fails, and the caller must then
+#   leave the worktree in place: the run history is worth more than the sweep.
+archive_feature_dir() {
+    local repo="$1" path="$2" branch="$3" dest
+    [[ -d "$path/.feature" ]] || return 0
+    dest=$(feature_archive_dir "$repo" "$path" "$branch")
+    mkdir -p "$dest" || return 1
+    cp -R "$path/.feature/." "$dest/" || return 1
+    return 0
+}
+
 # Sourced (tests/test-worktree-sweep.sh) rather than executed: hand back the
 # guard functions above and run none of the sweep below.
 
@@ -934,7 +996,7 @@ report_row() {
     if [[ "$VERBOSE" == true ]]; then
         detail="      $(action_for "$bucket" "$repo" "$path" "$branch" "$locked")"
     fi
-    rows_add "$bucket" "${branch:-(detached)}" "$f_pr_disp" "$flags" "$f_age" "$(where_for "$path" "$repo")" "$detail" "$f_age_epoch"
+    rows_add "$bucket" "${branch:-(detached)}" "$f_pr_disp" "$flags" "$f_age" "$(where_for "$path" "$repo")" "$(pipeline_state "$path")" "$detail" "$f_age_epoch"
 }
 
 # sweep_row <path> <branch> <locked> <prunable> <wt_head>
@@ -958,7 +1020,7 @@ sweep_row() {
         else
             reason="merged, unpushed (no remote)"
         fi
-        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "$reason" "" ""
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "$reason" "" "" ""
         return 0
     fi
 
@@ -971,14 +1033,14 @@ sweep_row() {
         else
             listing=$(printf '%s\n' "$at_risk" | summarize_at_risk)
         fi
-        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, has gitignored data" "" "$listing"
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, has gitignored data" "" "" "$listing"
         return 0
     fi
 
     # The post-remove hook would kill the session this sweep runs in.
     if sweep_would_kill_own_session "$repo" "$path" "$branch"; then
         CNT_SKIP=$((CNT_SKIP + 1))
-        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, in this session" "" ""
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, in this session" "" "" ""
         return 0
     fi
 
@@ -988,15 +1050,26 @@ sweep_row() {
         init_liveness
         if is_live "$path"; then
             CNT_SKIP=$((CNT_SKIP + 1))
-            rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, now live" "" ""
+            rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, now live" "" "" ""
             return 0
         fi
+    fi
+
+    # Run history outlives the worktree: the copy must be on disk before the
+    # removal, and a failed copy costs the removal, not the history.
+    if [[ "$APPLY" == true ]] && ! archive_feature_dir "$repo" "$path" "$branch"; then
+        CNT_SKIP=$((CNT_SKIP + 1))
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, .feature/ archive failed" "" "" ""
+        return 0
     fi
 
     CNT_REMOVE=$((CNT_REMOVE + 1))
     detail=""
     if [[ -n "$at_risk" ]]; then
         detail="      --force: dropping at-risk gitignored files"
+    fi
+    if [[ -d "$path/.feature" ]]; then
+        detail+="${detail:+$nl}      .feature/ -> $(shorten "$(feature_archive_dir "$repo" "$path" "$branch")")"
     fi
     if [[ "$APPLY" == true ]]; then
         if remove_worktree "$repo" "$path" "$branch" "$locked"; then
@@ -1008,7 +1081,7 @@ sweep_row() {
     elif [[ "$VERBOSE" == true ]]; then
         detail+="${detail:+$nl}      would run: $(sweep_remove_cmd "$repo" "$path" "$branch" "$locked")"
     fi
-    rows_add REMOVE "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" "$detail"
+    rows_add REMOVE "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" "" "$detail"
 }
 
 on_worktree_block() {

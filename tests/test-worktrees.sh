@@ -265,6 +265,43 @@ else
     fail=$(( fail + 1 ))
 fi
 
+echo "── pipeline_state: the PIPELINE column comes from the LAST jsonl line"
+# pipeline_ <label> <want>   (fixture worktree: $pwt)
+pwt="$dtmp/pipe-wt"
+mkdir -p "$pwt/.feature"
+pipeline_() {
+    local label="$1" want="$2" got
+    got=$(pipeline_state "$pwt")
+    if [[ "$got" == "$want" ]]; then
+        printf '  ok   %s -> [%s]\n' "$label" "$got"
+        pass=$(( pass + 1 ))
+    else
+        printf '  FAIL %s\n       got [%s] want [%s]\n' "$label" "$got" "$want"
+        fail=$(( fail + 1 ))
+    fi
+}
+cat > "$pwt/.feature/status.jsonl" <<'JSONL'
+{"repo":"proj","branch":"feat/x","pr":null,"phase":"plan","round":1,"seat":"orchestrator","task":"plan it"}
+{"repo":"proj","branch":"feat/x","pr":null,"phase":"implement","round":1,"seat":"implementer","task":"build it"}
+{"repo":"proj","branch":"feat/x","pr":null,"phase":"review","round":2,"seat":"reviewer","task":"review it"}
+JSONL
+pipeline_ "three lines -> the last one" "review r2 reviewer"
+# A run that ended mid-write leaves a final line with no newline.
+printf '{"phase":"ship","round":3,"seat":"orchestrator"}' >> "$pwt/.feature/status.jsonl"
+pipeline_ "unterminated last line still read" "ship r3 orchestrator"
+printf '{"phase":"gate","seat":"orchestrator"}\n' > "$pwt/.feature/status.jsonl"
+pipeline_ "no round -> phase and seat only" "gate orchestrator"
+printf 'not json at all\n' > "$pwt/.feature/status.jsonl"
+pipeline_ "unparseable last line -> blank" ""
+: > "$pwt/.feature/status.jsonl"
+pipeline_ "empty file -> blank" ""
+rm -f "$pwt/.feature/status.jsonl"
+# The pre-jsonl contract: present, never read, column stays blank.
+printf '{"phase":"implement","round":1,"seat":"implementer"}\n' > "$pwt/.feature/status.json"
+pipeline_ "stale status.json (no jsonl) -> blank" ""
+rm -rf "$pwt/.feature"
+pipeline_ "no .feature dir -> blank" ""
+
 # ============================================================================
 # sweep half
 # parse_copy_ignored_excludes / classify_ignored_file / worktree_ignored_at_risk
@@ -601,6 +638,46 @@ if [[ "$got" == "$want" ]]; then
     ok "paths with spaces are shell-quoted (paste-safe)"
 else
     bad "sweep_remove_cmd quoting" "got [$got] want [$want]"
+fi
+
+echo "── feature_archive_dir: where sweep --apply parks a removed worktree's .feature/"
+got=$(HOME=/h feature_archive_dir /r/myrepo /r/myrepo.feat-x feat/x)
+if [[ "$got" == "/h/.local/state/hq/runs/myrepo/feat-x" ]]; then
+    ok "branch slashes sanitized to '-', keyed by repo basename"
+else
+    bad "feature_archive_dir branch" "got [$got]"
+fi
+got=$(HOME=/h feature_archive_dir /r/myrepo /r/myrepo/.claude/worktrees/agent-7 "")
+if [[ "$got" == "/h/.local/state/hq/runs/myrepo/agent-7" ]]; then
+    ok "detached worktree (no branch) -> its directory basename"
+else
+    bad "feature_archive_dir detached" "got [$got]"
+fi
+
+echo "── archive_feature_dir: copies .feature/ out, and only then may the worktree go"
+awt="$tmp/archive-wt"
+mkdir -p "$awt/.feature"
+printf 'line one\n' > "$awt/.feature/status.jsonl"
+printf 'notes\n' > "$awt/.feature/NOTES.md"
+if HOME="$tmp/home" archive_feature_dir /r/myrepo "$awt" feat/y \
+    && [[ -f "$tmp/home/.local/state/hq/runs/myrepo/feat-y/status.jsonl" ]] \
+    && [[ -f "$tmp/home/.local/state/hq/runs/myrepo/feat-y/NOTES.md" ]]; then
+    ok "state tree created and every .feature/ file copied"
+else
+    bad "archive_feature_dir copy" "expected status.jsonl and NOTES.md under $tmp/home/.local/state/hq/runs/myrepo/feat-y"
+fi
+if HOME="$tmp/home" archive_feature_dir /r/myrepo "$tmp/no-such-worktree" feat/z; then
+    ok "worktree without a .feature/ -> nothing to archive, success"
+else
+    bad "archive_feature_dir absent" "expected rc 0 when there is no .feature/"
+fi
+# An unwritable destination must FAIL, so the caller keeps the worktree.
+blocked="$tmp/blocked"
+printf 'not a dir\n' > "$blocked"
+if ! HOME="$blocked" archive_feature_dir /r/myrepo "$awt" feat/y 2>/dev/null; then
+    ok "a failed copy reports failure (the worktree is then not removed)"
+else
+    bad "archive_feature_dir failure" "expected non-zero when the destination cannot be created"
 fi
 
 echo "── B5: a clean --apply run (no removals, no failures) exits 0"
