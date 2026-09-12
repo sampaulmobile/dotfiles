@@ -19,4 +19,7 @@
 - When THIS session delegates work out: make the task message self-contained
   (the receiver has none of this conversation), name yourself as the
   report-back address, and never re-ask a peer to do something this session
-  was denied permission for.
+  was denied permission for. The shape of every delegated task is the brief
+  block in the `hq` skill's step 4 (GOAL, SCOPE, CONTEXT, ACCEPTANCE, VERIFY,
+  FORBIDDEN, FLAGS, REPORT) — a field you cannot fill is a task not yet
+  scoped.
