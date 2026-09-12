@@ -132,6 +132,7 @@ writer, so a session's conversation is never the only copy of anything.
 - `dots/claude/skills/address-review/SKILL.md`
 - `dots/claude/rules/delegation.md`
 - `bin/worktrees`, `tests/` (worktrees suite + fixture)
+- `bin/profile-lib` (new: the one stage timer the three scripts share)
 - `bin/prs`, `bin/tmux-claude-dashboard` (profile timestamps only)
 - `CLAUDE.md` (bin/worktrees description: PIPELINE column, sweep archive)
 
@@ -243,5 +244,56 @@ writer, so a session's conversation is never the only copy of anything.
 
 ## Status
 
-- 2026-09-12: drafted, uncommitted. Profile numbers to be filled in during
-  step 6.
+- 2026-09-12: drafted, uncommitted.
+- 2026-09-12: implemented (steps 1–7). Profile numbers below.
+
+### Profile pass (step 6)
+
+Instrumentation is `bin/profile-lib`, sourced by all three scripts:
+`prof_init <tag> "$<SCRIPT>_PROFILE"` once, `prof <stage>` at each boundary.
+Unset, it is one string comparison per stage and no fork. Measured on bash
+3.2 (no `EPOCHREALTIME`), so the clock is a `perl` fork per boundary and every
+stage reads roughly 10ms long.
+
+`WORKTREES_PROFILE=1 bin/worktrees --all --offline` — 21 worktrees, 5 repos:
+
+| stage | elapsed |
+|---|---|
+| liveness (lsof) | 225ms |
+| project dirs | 15ms |
+| worktree lists | 491ms |
+| pr prefetch | 14ms (skipped, offline) |
+| rows | 3856ms |
+| render | 333ms |
+| **total** | **4934ms** |
+
+Same run online (`--all`): pr prefetch 2018ms, rows 4203ms, total 7496ms.
+
+`PRS_PROFILE=1 bin/prs --all`:
+
+| stage | elapsed |
+|---|---|
+| searches launched | 23ms |
+| local scope | 490ms |
+| gh searches (wait) | 1939ms |
+| render | 139ms |
+| **total** | **2591ms** |
+
+`bin/tmux-claude-dashboard` is a full-screen TUI blocking on `read -rsn1`; a
+pipeline agent has no tty, so its number is NOT collected here. The command a
+human runs (press `q` once it has drawn, then read the file):
+
+```
+DASHBOARD_PROFILE=1 bin/tmux-claude-dashboard 2>/tmp/dash.prof
+```
+
+Findings, for the step-2 collector rather than this PR:
+
+- `rows` dominates `bin/worktrees` — ~3.9s over 21 worktrees, ~185ms each,
+  all of it the several git forks per worktree in `derive_worktree_facts`
+  (status, rev-parse, rev-list, reflog, merge-base, log). Batching those per
+  repo is the fix, and it is neither local nor obvious. `pipeline_state` adds
+  no fork.
+- `pr prefetch` costs 2s online, one parallel `gh pr list` per repo already.
+- In `bin/prs` the local scope enumeration (490ms) runs while the searches are
+  in flight, so it is already free; the run is its two GitHub searches.
