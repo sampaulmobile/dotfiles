@@ -30,6 +30,8 @@
 set -uo pipefail
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+# shellcheck source=/dev/null
+source "$DOTFILES/bin/profile-lib"
 
 usage() {
     cat <<'EOF'
@@ -67,6 +69,8 @@ Exit 0 on a clean run; 2 on a removal failure under --apply.
               left alone — the safe direction)
   -v          under each REMOVE row, the exact command --apply runs; under a
               guard SKIP, the full at-risk file list instead of the summary
+
+WORKTREES_PROFILE=1 adds a stderr line per stage with its elapsed time.
 EOF
 }
 
@@ -912,7 +916,10 @@ if [[ "$APPLY" == true ]] && ! command -v wt >/dev/null 2>&1; then
     exit 2
 fi
 
+prof_init worktrees "${WORKTREES_PROFILE:-}"
+
 init_liveness
+prof "liveness (lsof)"
 
 # Without lsof every worktree looks not-live, and the one guard against
 # removing out from under a live agent/editor is silently off. Refuse --apply.
@@ -932,6 +939,7 @@ fi
 # shellcheck source=/dev/null
 source "$DOTFILES/bin/project-dirs-lib"
 project_dirs
+prof "project dirs"
 
 repos=()
 repos_seen=$'\n'
@@ -1106,8 +1114,10 @@ for repo in "${repos[@]}"; do
 done
 repos=()
 (( ${#_with_wts[@]} )) && repos=("${_with_wts[@]}")
+prof "worktree lists"
 if (( ${#repos[@]} )); then
     prefetch_pr_lists "${repos[@]}"
+    prof "pr prefetch"
     rows_reset
     for _i in "${!repos[@]}"; do
         repo="${repos[_i]}"
@@ -1116,7 +1126,9 @@ if (( ${#repos[@]} )); then
         # the counters and, under --apply, the removals take effect here.
         parse_porcelain_blocks "$repo" <<< "${_porc[_i]}"
     done
+    prof "rows"
     if [[ "$MODE" == sweep ]]; then rows_render 6; else rows_render 9; fi
+    prof "render"
     [[ -n "$PR_PREFETCH_DIR" ]] && rm -rf "$PR_PREFETCH_DIR"
 fi
 fi

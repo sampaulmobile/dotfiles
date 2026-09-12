@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# profile-lib — opt-in stage timings for the scripts whose speed is a feature
+# (bin/worktrees, bin/prs, bin/tmux-claude-dashboard). Sourceable, never run.
+#
+#   source "$DOTFILES/bin/profile-lib"
+#   prof_init worktrees "${WORKTREES_PROFILE:-}"   # once, before stage 1
+#   prof "pr prefetch"                             # at each stage boundary
+#
+# With the caller's env var unset, prof is one string comparison and no fork,
+# so the no-fork-per-item discipline those scripts keep survives being
+# instrumented. Enabled, each call prints one stderr line: ms since the
+# previous call, and ms since prof_init.
+#
+# Clock, best first: bash 5's EPOCHREALTIME (fork-free, sub-ms); perl's
+# Time::HiRes (one fork per stage boundary, so a stage reads ~10ms long —
+# bash 3.2 has no sub-second clock of its own and macOS `date` has no %N);
+# $SECONDS (whole seconds) when there is no perl either.
+
+PROF_ON=false
+PROF_TAG=""
+PROF_T0=0
+PROF_PREV=0
+PROF_NOW=0
+PROF_PERL=false
+
+_prof_now() {
+    local secs frac
+    if [[ -n "${EPOCHREALTIME:-}" ]]; then
+        secs="${EPOCHREALTIME%%[.,]*}"
+        frac="${EPOCHREALTIME#*[.,]}"
+        PROF_NOW=$(( secs * 1000 + 10#${frac:0:3} ))
+    elif [[ "$PROF_PERL" == true ]]; then
+        PROF_NOW=$(perl -MTime::HiRes -e 'printf "%.0f", Time::HiRes::time() * 1000')
+    else
+        PROF_NOW=$(( SECONDS * 1000 ))
+    fi
+}
+
+# prof_init <tag> <enable> — profiling is on when <enable> is non-empty.
+prof_init() {
+    PROF_TAG="$1"
+    PROF_ON=false
+    [[ -n "${2:-}" ]] || return 0
+    PROF_ON=true
+    if [[ -z "${EPOCHREALTIME:-}" ]] && command -v perl >/dev/null 2>&1; then
+        PROF_PERL=true
+    fi
+    _prof_now
+    PROF_T0=$PROF_NOW
+    PROF_PREV=$PROF_NOW
+}
+
+prof() {
+    [[ "$PROF_ON" == true ]] || return 0
+    _prof_now
+    printf 'prof %s %-20s +%sms  total %sms\n' \
+        "$PROF_TAG" "$1" "$(( PROF_NOW - PROF_PREV ))" "$(( PROF_NOW - PROF_T0 ))" >&2
+    PROF_PREV=$PROF_NOW
+}
