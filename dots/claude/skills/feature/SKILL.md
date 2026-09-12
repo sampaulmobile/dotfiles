@@ -15,7 +15,7 @@ Run the end-to-end feature pipeline. The argument is either a short description 
 
 **Behavior**
 - `--quick` — trivial task: skip the workplan doc, the plan gate and the review loop entirely (one implementer seat, no orchestrator/reviewer).
-- `--go` — skip the plan gate: implement straight from the digest instead of waiting for the requester to approve it. Pass it on any dispatch whose brief already carries acceptance criteria.
+- `--go` — skip the plan gate: implement straight from the digest instead of waiting for the requester to approve it. Pass it when the brief's acceptance criteria already settle the plan.
 - `--no-workplan` — keep the plan at `.feature/plan.md` instead of committing `workplans/<slug>-plan.md`; the review loop still runs (unlike `--quick`, which skips review entirely). Same effect as `[<repo>].workplans = false` in `~/.claude/repo-props.toml` for the target repo (see **Plan** in the full pipeline below).
 - `--rounds N` — review/fix rounds before escalating (default 3). The loop always runs until a review returns CLEAN; hitting the cap with blockers still open stops and reports for a human decision — it never ships at the cap.
 - `--strict` — reviewer blocks on ANY finding with a concrete failure scenario (default: only what a senior human reviewer would request changes for).
@@ -61,9 +61,9 @@ Spawn ONE background orchestrator agent (`subagent_type: "<ORCH_EFFORT>"`, `mode
 
 Multiple `/feature` invocations may run concurrently — each gets its own orchestrator and worktree.
 
-Unless `--go`, the orchestrator's FIRST message back is the plan digest, and it then ends its turn. Relay the digest verbatim — to the user, and to the dispatching session when a dispatch started this run — and stop. On a go, resume that orchestrator BY NAME with `SendMessage` ("go", plus any correction) — a new `/feature` would start over. Everything said about the plan goes back the same way.
+Unless `--go`, the orchestrator's FIRST message back is the plan digest, and it then ends its turn with the one line `digest sent, awaiting go` as its result. Relay the digest verbatim — to the user, and to the dispatching session when a dispatch started this run — and stop. On a go, resume that orchestrator BY NAME with `SendMessage` ("go", plus any correction) — a new `/feature` would start over. Everything said about the plan goes back the same way.
 
-When the orchestrator reports back at the end, relay to the user: the PR URL, the summary, rounds used, any deferred non-blocking notes, and the Lessons block — or, if the loop escalated instead of shipping, the branch/worktree and open blockers awaiting a human decision. Keep the hub conversation clean — do not pull implementation details into it.
+When the orchestrator reports back at the end, relay to the user: the PR URL, the summary, rounds used, any deferred non-blocking notes, and the Lessons block — or, if the loop escalated instead of shipping, the branch/worktree and open blockers awaiting a human decision. Apply the `wiki` and `backlog` lessons here after relaying them; the orchestrator is worktree-isolated and cannot commit in another tree. Keep the hub conversation clean — do not pull implementation details into it.
 
 ### Orchestrator prompt template
 
@@ -110,7 +110,7 @@ Max review rounds: <MAX_ROUNDS>. Default branch: <DEFAULT_BRANCH>. Strict review
 - Commit the workplan on its own before implementation starts — skip this when workplans are disabled; `.feature/plan.md` is never committed.
 
 **1b. Gate** — skipped entirely when <GO> is true; go straight to step 2.
-- Append a `phase: gate` line to `.feature/status.jsonl`, then `SendMessage` the digest verbatim to the session that spawned you (`to: "main"`) and END YOUR TURN. You cannot block mid-turn waiting for an answer; the digest is on disk in the plan either way, so nothing is lost if you are never resumed.
+- Append a `phase: gate` line to `.feature/status.jsonl`, then `SendMessage` the digest verbatim to the session that spawned you (`to: "main"`) and END YOUR TURN — final text one line, `digest sent, awaiting go`, since that text reaches the same session as your result and the digest must not arrive twice. You cannot block mid-turn waiting for an answer, and with workplans disabled the plan is the uncommitted `.feature/plan.md` — the digest in that message is the copy the requester keeps.
 - That session relays the digest and, on a go, resumes you by name. Resume at step 2. A correction arrives the same way: fold it into the workplan, commit the amendment, and only then implement. A correction that changes the goal means re-planning, not implementing around it.
 
 **2. Implement (round N)**
@@ -138,15 +138,16 @@ Spawn a FRESH reviewer subagent (`subagent_type: "<REVIEWER_EFFORT>"`, `model: "
 - <MAX_ROUNDS> rounds used and the latest review still has BLOCKING findings → the loop is not converging: do NOT ship. Stop and report back instead — branch, worktree path, rounds used, and the open blockers verbatim — so a human decides (ship anyway, grant more rounds, or take over).
 
 **5. Ship**
+- Write the Lessons (below) FIRST, so a `repo` lesson's CLAUDE.md edit is in the diff the PR opens with and nothing is added to the branch after this step.
 - Invoke the `pr` skill (it commits anything outstanding, pushes, opens the PR) and give it the body material in that skill's sections.
 - "Open for the reviewer" carries what a human still has to judge: assumptions the run never verified, the deferred reviewer notes that matter, product decisions taken on the pipeline's own authority, and any surface that could not be verified. The remaining deferred notes go in the commit body, not the PR.
 
 **6. Report**
 Reply with ONLY: the PR URL (raw, on its own line), a 2-line summary of what was built, rounds used, count of unresolved findings, the worktree path, and the Lessons block below.
 
-**Lessons** — at most three, each a FACT the run learned (a gotcha, a convention, a follow-up), never a preference about how the user wants work done. Tag each `repo`, `wiki`, `backlog`, `dotfiles` or `none`:
-- `repo` — write it into the repo's CLAUDE.md in this same PR.
-- `wiki` — append it to the repo's module page in the vault and commit, per the knowledge rule.
-- `backlog` — append it to the hq backlog as an inbox item.
+**Lessons** — at most three, each a FACT the run learned (a gotcha, a convention, a follow-up), never a preference about how the user wants work done. Written at step 5, before the push. Tag each `repo`, `wiki`, `backlog`, `dotfiles` or `none`:
+- `repo` — write it into the repo's CLAUDE.md and name it under "Open for the reviewer": prose the human on the PR judges.
+- `wiki` — report it; the hub session appends it to the repo's module page in the vault and commits, per the knowledge rule.
+- `backlog` — report it; the hub session appends it to the hq backlog as an inbox item.
 - `dotfiles` — propose it in the report only. Never apply it.
 - `none` — worth saying once, worth writing nowhere.

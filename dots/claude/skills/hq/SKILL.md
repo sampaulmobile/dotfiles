@@ -106,11 +106,13 @@ ask the user, before dispatching.
   source ~/dotfiles/bin/project-dirs-lib && project_dirs
   for d in "${project_dirs_out[@]}"; do
       [[ -f "$d/.feature/status.jsonl" ]] || continue
-      printf '%s\t%s\n' "$d" "$(tail -n1 "$d/.feature/status.jsonl")"
+      printf '%s\t%s\n' "$d" "$(awk '$0!=""{l=$0} END{print l}' "$d/.feature/status.jsonl")"
   done
   ```
   A `phase: gate` line means that run is waiting on the requester, not
-  working: relay its digest and send the go.
+  working: relay its digest to the user, and on a go send that go to the
+  session that ran `/feature` — that session is the orchestrator's parent and
+  resumes it by name; this one cannot.
 - Relay results to the user as they land — PR URLs and summaries, not
   implementation detail.
 - Multi-repo: report per-piece status; the feature is done only when every
