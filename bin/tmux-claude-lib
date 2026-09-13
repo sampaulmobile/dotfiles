@@ -105,8 +105,8 @@ new_agent_session() {
 #   address (ListAgents/SendMessage), stable across --resume. A main checkout
 #   (.git is a directory) gets "<session>-hub"; a worktree session (.git is a
 #   file) keeps the bare session name. Only this front-door window is named;
-#   extra claude windows (tmux-claude-window) stay unnamed (<dir>-NN). codex:
-#   no equivalent.
+#   extra claude windows (tmux-claude-window) stay unnamed (<dir>-NN) so the
+#   session has exactly one peer address. codex: no equivalent.
 new_hub_session() {
     local name="$1" dir="$2" agent="${3:-}"
     local peer
