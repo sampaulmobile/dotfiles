@@ -128,6 +128,7 @@ When it reports back, report the PR URL per step 6. Done — the rest of this fi
 - worktrunk's `pre-start` hook copies the repo's gitignored ENV/secrets/config into a new worktree but EXCLUDES the fat regenerable caches (`.venv`, `node_modules`, build dirs). So `.env.*`, certs and config are here already; a step that has to RUN the stack regenerates the caches inside this worktree (`uv sync` / `npm i` / `flutter pub get`), or runs a full `wt step copy-ignored` when it deliberately wants them copied. Tell any subagent that will run or test the same. Never hand-copy secrets or paste them into prompts.
 
 **1. Plan**
+- FIRST, append a `phase: plan` line to `.feature/status.jsonl` (`round: 1`, `seat: orchestrator`, `task` = the request in one line, `pr: null`, `started_by` set; Launch already made the dir and excluded it). Until this line exists the run is invisible to `bin/worktrees`, Ctrl+G and hq, and a `/clear` on the requester loses track of it.
 - BEFORE reading any code, write the RESTATEMENT — Task (one sentence), Done means, Assuming — in your own words, from the request alone. A misread request is cheapest to catch here, and the restatement is what the digest below is checked against.
 - Decide whether workplans are disabled for this repo: true if `--no-workplan` was passed, or if `~/.claude/repo-props.toml` sets `[<key>].workplans` to `false` for `<key>` = the repo's main-checkout directory basename. Resolve `<key>` and run the check with:
   ```
