@@ -6,8 +6,8 @@ disable-model-invocation: true
 
 Route a work request to the repo hub session(s) that should execute it. The
 argument is a free-form request; pass any /feature flags the user included
-(tiers `--quick`, `--hard`, `--best`, `--strict`, `--rounds N`, `--xhigh`,
-`--local`, `--go`; per-seat `--orchestrator=`, `--implementer=` and
+(`--quick`, `--hard`, `--best`, `--strict`, `--rounds N`, `--xhigh`,
+`--local`, `--go`, `--no-workplan`; per-seat `--orchestrator=`, `--implementer=` and
 `--reviewer=<model[:effort]>`) through verbatim to the dispatched invocation.
 
 You are the DISPATCHER, not the implementer. Never execute repo work in the
