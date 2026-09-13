@@ -115,7 +115,7 @@ From `pipeline-state-and-pr-shape-plan.md` (Status → Profile pass), measured
   GitHub searches (~2.0s) and `bin/worktrees`' per-repo `gh pr list`
   prefetch (~2.8s online).
 - Fixed in the script, not hidden behind the snapshot (script-local waste):
-  `bin/worktrees`' `rows` stage, ~3.9s = six git forks per worktree in
+  `bin/worktrees`' `rows` stage, ~3.9s = up to eight git forks per worktree in
   `derive_worktree_facts` (status, rev-parse, rev-list, reflog, merge-base,
   log). Batch per repo — one `git for-each-ref` with the needed fields and
   one `git status --porcelain` per worktree at most — so the collector's
@@ -198,9 +198,11 @@ From `pipeline-state-and-pr-shape-plan.md` (Status → Profile pass), measured
   (`runs/`, `bin/worktrees:884`), and `bin/worktrees`' header states the
   invariant: "the archive under ~/.local/state/hq is append-only".
   `snapshot/` joins that existing rule rather than inventing one.
-- VERIFIED: `derive_worktree_facts` (`bin/worktrees`) forks six git commands
-  per worktree — `status --porcelain`, `rev-parse --verify
-  refs/remotes/origin/<branch>`, `rev-list --count`, `reflog show`,
+- VERIFIED (corrected during implementation: up to EIGHT, not six — the
+  reflog's own rev-list and a HEAD-age log were missed on the first read):
+  `derive_worktree_facts` (`bin/worktrees`) forked per worktree — `status
+  --porcelain`, `rev-parse --verify refs/remotes/origin/<branch>`,
+  `rev-list --count`, `reflog show` plus its rev-list, `log -1` for the age,
   `rev-parse <default_ref>` and `merge-base --is-ancestor`. `<default_ref>`'s
   sha is a per-REPO constant recomputed per worktree; that and the ref
   existence check are the cheapest part of the batching win.
