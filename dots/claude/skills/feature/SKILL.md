@@ -72,12 +72,14 @@ WT=$(git -C <repo> worktree list --porcelain | awk -v b="refs/heads/<branch>" '/
 cat > /tmp/feature-launch-<SLUG>.md <<'LAUNCH_EOF'
 /feature --run --requester=<REQUESTER> <PASSTHROUGH FLAGS>
 
-<FEATURE, verbatim — or the absolute plan path>
+Plan: <ABSOLUTE plan path>
+
+<FEATURE / the brief, verbatim>
 LAUNCH_EOF
 ~/dotfiles/bin/tmux-task-session --model <ORCH_MODEL> --effort <ORCH_EFFORT> "$WT" "$(cat /tmp/feature-launch-<SLUG>.md)"
 ```
 
-The quoted heredoc delimiter and the `"$(cat ...)"` are what make this exact: the task, the flags and the requester reach Run through a file, never through a string a model retyped. `<PASSTHROUGH FLAGS>` is every flag this Launch received except `--repo=` and `--orchestrator=`, whose seat is already on the claude command line above. Drop `--requester=` entirely when no session should be reported to.
+The quoted heredoc delimiter and the `"$(cat ...)"` are what make this exact: the task, the flags and the requester reach Run through a file, never through a string a model retyped. `<PASSTHROUGH FLAGS>` is every flag this Launch received except `--repo=` and `--orchestrator=`, whose seat is already on the claude command line above. Drop `--requester=` entirely when no session should be reported to, and the `Plan:` line when no workplan was given.
 
 `tmux-task-session` prints the session name. It is creation-only: it never switches a client, so the caller's screen does not move, and it leaves an existing session of that name alone.
 
@@ -99,7 +101,7 @@ Multiple `/feature` runs may be in flight at once — each has its own worktree 
 
 You are the orchestrator for one feature, working in this worktree. You do NOT write implementation code yourself — you plan, delegate, review, and ship. Every subagent in this pipeline is ephemeral: all context that matters must live in files, so that a fresh agent with zero memory could pick up where any other left off.
 
-Feature, flags and requester come from the invocation you were started with. The default branch is `git symbolic-ref --short refs/remotes/origin/HEAD | sed 's|origin/||'` (fall back to `main`); the slug is this worktree's branch name after its `<type>/` prefix.
+Feature, flags and requester come from the invocation you were started with, which `.feature/launch-prompt.md` holds verbatim; a `Plan:` line in it names an existing workplan. The default branch is `git symbolic-ref --short refs/remotes/origin/HEAD | sed 's|origin/||'` (fall back to `main`); the slug is this worktree's branch name after its `<type>/` prefix.
 
 **State files**
 - `mkdir -p .feature` at the worktree root, and ensure it is ignored: append `.feature/` to `$(git rev-parse --git-common-dir)/info/exclude` if not already present. NEVER commit anything under `.feature/`.
