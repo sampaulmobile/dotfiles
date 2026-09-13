@@ -237,11 +237,13 @@ Launch helper only for the tmux-session naming it already shares.
 
 ## Assumptions
 
-- ASSUMED: `claude -n <name> '<prompt>'` starts an interactive session whose
-  first turn is that prompt. This is what makes Launch's typed invocation
-  atomic (no send-keys race against claude's startup). Verify on a throwaway
-  `tmux -L` server before the skill text depends on it; if it is false, the
-  fallback is a second `send-keys` after polling for claude's prompt.
+- VERIFIED (2026-09-13, round 1): `claude -n <name> '<prompt>'` starts an
+  interactive session whose first turn is that prompt, which is what makes
+  Launch's typed invocation atomic (no send-keys race against claude's
+  startup). Evidence: on a throwaway `tmux -L task-session-test-1` server the
+  typed line brought up a claude whose banner read `Opus 5 with high effort`
+  and whose first turn was the multi-line brief verbatim, apostrophe and
+  double quote intact. No polling fallback was needed.
 - ASSUMED: `SendMessage` to a peer session by name works from a claude that
   was started by typing into a tmux window (same as the sessionizer path).
   Believed true since hq already messages sessions started that way. Verified
