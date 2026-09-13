@@ -247,6 +247,12 @@ writer, so a session's conversation is never the only copy of anything.
 
 - 2026-09-12: drafted, uncommitted.
 - 2026-09-12: implemented (steps 1–7). Profile numbers below.
+- 2026-09-12: review round 3 (fix). The sweep's `.feature/` archive is staged
+  beside its destination and swapped in only once the copy is whole, and both
+  path components under `runs/` are guarded against `.`, `..` and empty, so
+  the `rm -rf` no longer depends on git's output format. An archive failure is
+  counted once, as FAILED. `sweep_row` sits above the sourcing guard, so both
+  of the sweep's failure counters are unit-tested (suite: 95 cases, 7 new).
 
 ### Profile pass (step 6)
 
