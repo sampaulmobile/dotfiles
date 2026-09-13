@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
 # aggregate_session_status and window_status_from_panes — the two pure folds
-# over scan_agent_panes output that feed status.tsv (per session) and the
-# @agent_status window option (per window). No tmux server: the pane lines
-# are literal here.
+# over scan_agent_panes output that feed the snapshot's sessions source (per
+# session) and the @agent_status window option (per window). No tmux server:
+# the pane lines are literal here.
 #
 #   tests/test-window-status.sh          # or: /bin/bash tests/test-window-status.sh
 

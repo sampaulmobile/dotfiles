@@ -1412,9 +1412,6 @@ render_snapshot_rows() {
     return 0
 }
 
-# The report renders the snapshot when there is a usable one; sweep never
-# does, because it acts on what it sees. --snapshot is the collector's own
-# entry and computes live by definition.
 # The degraded-source state of the collection run, so a screen rendering the
 # records prints the same warnings the live path would have.
 if [[ "$EMIT" == true ]]; then

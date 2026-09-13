@@ -15,8 +15,9 @@
 # Side effects, every tick: the snapshot's sessions source (per-session
 # "<session>\t<status>\t<pane>", the pane being the one exhibiting the worst
 # status) for the sessionizer, a bin/hq-snapshot tick for the other sources,
-# and the @agent_status window option for the tab tint in dots/tmux.conf —
-# deltas only, so a steady state writes nothing.
+# and the @agent_status window option for the tab tint in dots/tmux.conf. The
+# source and the tick are written every tick; the option is set only on the
+# windows whose status changed.
 
 source ~/dotfiles/bin/tmux-claude-lib
 source ~/dotfiles/bin/hq-snapshot

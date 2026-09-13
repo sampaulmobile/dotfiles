@@ -121,6 +121,11 @@ From `pipeline-state-and-pr-shape-plan.md` (Status → Profile pass), measured
   one `git status --porcelain` per worktree at most — so the collector's
   worktrees tick is cheap too. Keep the report byte-identical (the existing
   master-vs-branch `NO_COLOR=1 --all --offline` comparison is the check).
+  Landed at 1.8s on the same 21 worktrees, not the sub-second target: the
+  floor is one `git status` per worktree plus the `is_live` lsof check, the
+  guard `sweep --apply` relies on, neither of which batches. The report
+  itself renders from the snapshot in 0.45s, so the target is met where a
+  keypress pays for it and the live floor is the collector's cost.
 - Not worth touching: the dashboard (634ms end to end), `bin/prs`' local
   scope (runs while the searches are in flight).
 
@@ -225,3 +230,6 @@ From `pipeline-state-and-pr-shape-plan.md` (Status → Profile pass), measured
 - 2026-09-13: planned for implementation on `feat/option-c-topology` after 2a
   (base cca562a). Gate skipped by explicit instruction; restatement, digest and
   the code-read Assumptions added.
+- 2026-09-13: implemented on `feat/option-c-topology`. Deviation: the `rows`
+  stage landed at 1.8s, not under 1s (see Decisions); the report reads the
+  snapshot in 0.45s.

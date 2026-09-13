@@ -51,16 +51,19 @@ check "unknown mergeable, no review" "$(pr_tag false UNKNOWN none '')"          
 echo "--open-only / --merged-only over a snapshot"
 # The snapshot holds BOTH halves whatever the flags; the flags choose which of
 # them the render prints, the same choice the live path makes by running only
-# one search.
+# one search. The window is a fixed date passed to the child too: with the
+# default (today) computed on both sides, a midnight rollover between them
+# would make the snapshot mismatch and the run reach gh.
+since=2026-09-01
 printf '%s\n' \
     "meta"$'\t'"author"$'\t'"@me" \
-    "meta"$'\t'"since"$'\t'"$(date +%Y-%m-%d)" \
+    "meta"$'\t'"since"$'\t'"$since" \
     "open"$'\t'"org/repo"$'\t'"11"$'\t'"false"$'\t'"MERGEABLE"$'\t'"green"$'\t'"APPROVED"$'\t'"900"$'\t'"an open one"$'\t'"https://example.invalid/11" \
     "merged"$'\t'"org/repo"$'\t'"12"$'\t'"09:30"$'\t'"a merged one"$'\t'"https://example.invalid/12" \
     | snapshot_write prs
 run_prs() {
     HOME="$work/home" PROJECT_DIRS_LOCAL=/nonexistent NO_COLOR=1 \
-        "$repo/bin/prs" --any-repo "$@" 2>&1
+        "$repo/bin/prs" --any-repo --since "$since" "$@" 2>&1
 }
 shows() {   # shows <label> <output> <needle> <yes|no>
     local got=no
