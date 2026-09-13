@@ -13,7 +13,7 @@ Personal dotfiles for macOS (Apple Silicon). Managed with symlinks, no fancy fra
 - `etc/` — Brewfiles: `Brewfile_mac` (base, all machines), `Brewfile_other` (supplemental, installed by `setup_other.sh`)
 - `dots/claude/` — the generic, tracked Claude Code layer: `skills/`, `rules/`, `agents/`. Layered into `~/.claude/` by `bin/symlink_files.sh` as per-item links inside the `other/claude/` dirs, so tracked and private entries coexist. Promote a private item by moving it here and re-running the script.
 - `dots/codex/` — the generic, tracked Codex layer: `hooks.json` (the tmux attention hooks) and `shared-skills` (which `dots/claude/skills/` entries are also linked into `~/.agents/skills`). Private codex config lives in `other/codex/`. See `notes/codex.md`.
-- `tests/` — one offline suite per pure function in the agent layer (the pane-status classifiers, the per-session/per-window status folds, the hook payload schemas, the codex rollout reader, the agent-per-tty parse, the sessionizer's fzf `--expect` parse, the subagent snippet, the pipe-truncate guard, the settings-drift check, `bin/project-dirs-lib`'s enumeration/naming, `bin/worktrees`'s buckets, gitignored-data guard, pipeline-state column and sweep archive) plus fixtures. `tests/run.sh` runs everything under both `/bin/bash` (3.2) and the default bash. No tmux server is started or touched. `tests/check-prose-only.sh <base-ref>` is the tripwire for comment-only passes: it fails if a changed `bin/` or `tests/` file differs once full-line comments and blank lines are stripped.
+- `tests/` — one offline suite per pure function in the agent layer (the pane-status classifiers, the per-session/per-window status folds, the hook payload schemas, the codex rollout reader, the agent-per-tty parse, the sessionizer's fzf `--expect` parse, the subagent snippet, the pipe-truncate guard, the settings-drift check, `bin/project-dirs-lib`'s enumeration/naming, `bin/worktrees`'s buckets, gitignored-data guard, pipeline-state column and sweep archive, `bin/tmux-task-session`'s naming and command building) plus fixtures. `tests/run.sh` runs everything under both `/bin/bash` (3.2) and the default bash. No tmux server is started or touched. `tests/check-prose-only.sh <base-ref>` is the tripwire for comment-only passes: it fails if a changed `bin/` or `tests/` file differs once full-line comments and blank lines are stripped.
 - `templates/` — scaffolds copied to new locations by `bin/` scripts: `templates/hq/` → `bin/hq-init` (the `/hq` dispatcher repo, default `~/dev/hq`)
 - `other/` — machine-local config, gitignored except `*.example` templates and README. Consumed via: zshrc sources `other/zshrc.local` last; gitconfig includes `other/gitconfig.local`; `bin/project-dirs-lib` sources `other/tmux-sessionizer.local` (can redefine `search_dirs`); `other/claude/` symlinked into `~/.claude/` by `bin/symlink_files.sh` (settings.json and repo-props.toml file links; `skills/`, `rules/`, `agents/` dir links — anything dropped into `~/.claude/{skills,rules,agents}` therefore lands here, private by default); `other/codex/` the same way for codex (config.toml, AGENTS.md, skills/); `other/tmux-agent-default` picks the default agent for new sessions
 - `archive/` — old/unused configs kept for reference
@@ -63,27 +63,32 @@ needs to find them and to change them safely.
 - `bin/tmux-claude-statusbar` — ambient attention layer in the status bar, refreshed every ~5s; the glyph legend is the script's header. The scan is `scan_agent_panes` in `bin/tmux-claude-lib` (per agent pane), folded per session by `aggregate_session_status` — `scan_claude_sessions`, shared with Ctrl+Y — and per window by `window_status_from_panes`. Each tick publishes both: `~/.cache/claude-attention/status.tsv` (`<session>\t<status>\t<pane>`, written atomically), which the sessionizer's row colors read instead of scanning, and the `@agent_status` window option (`permission|working|done|idle`, unset on windows without an agent), which `dots/tmux.conf` tints the window tab from. `tmux-claude-attention` flips the option itself on flag/clear/jump so a tab changes between ticks.
 - `bin/tmux-claude-attention` — flag-file backend for the attention layer: `~/.cache/claude-attention/<session>@<pane>.done`, one per finished-but-unseen agent PANE. Subcommands, the hooks that drive them and the settings.json snippet: the script's header. INVARIANT: everything is per pane, never per session — a session-level flag both suppresses an agent finishing in a background window of an attached session and clears a window nobody looked at. The same dir holds the statusbar's `status.tsv` and `codex/<pane>.tsv`, the pane → rollout map codex's SessionStart hook writes (codex records no tmux pane of its own).
 - `bin/tmux-claude-notify` — notification hook for both agents: terminal bell plus a macOS notification on permission prompts, titled after whichever agent asked. Reads Claude Code's Notification payload (`notification_type`) and codex's PermissionRequest payload (`hook_event_name`). Wired in `~/.claude/settings.json` for claude, `dots/codex/hooks.json` for codex.
-- `bin/tmux-claude-lib` — shared functions for the agent session manager scripts: the agent helpers (`agent_default`, `agent_other`, `session_agent`, `agent_window_name`), `new_hub_session` (the standard hub layout — agent, nvim, zsh — used by the sessionizer and `wt-tmux-jump`), `agent_ttys` (the single `ps` behind every liveness check) and `scan_claude_sessions` (the status scan behind the statusbar and Ctrl+Y: one `list-panes -a`, then one batched capture of agent panes only). Sources `bin/tmux-claude-lib-codex` at the end.
+- `bin/tmux-task-session` — the agent-callable launcher: builds a worktree's tmux session and starts a claude in its agent window with a given prompt as its first turn, printing the session name. `/feature` Launch's step 6 is this script. CREATION ONLY (tmux-safety): `new-session`, `new-window`, `set-option`, `select-window`, `send-keys` and `has-session` are the only tmux subcommands it may use — it never switches a client, so a caller's screen does not move, and an existing session of that name is left untouched. The prompt is written to `<worktree>/.feature/launch-prompt.md` and read back by the typed line's `"$(cat ...)"`, so an arbitrary multi-line brief survives with no shell-quoting hazard and the file stays as the record of what that session was asked. `--model`/`--effort` ride the typed `claude` line, never `settings.json`. See `tests/test-task-session.sh`.
+- `bin/tmux-claude-lib` — shared functions for the agent session manager scripts: the agent helpers (`agent_default`, `agent_other`, `session_agent`, `agent_window_name`), `new_agent_session` (the standard layout — agent, nvim, zsh — taking the command to type into the agent window, so `tmux-task-session` and `new_hub_session` build the same thing) and its human-side caller `new_hub_session` (used by the sessionizer and `wt-tmux-jump`, and the only place the `-hub` peer suffix is given), `agent_ttys` (the single `ps` behind every liveness check) and `scan_claude_sessions` (the status scan behind the statusbar and Ctrl+Y: one `list-panes -a`, then one batched capture of agent panes only). Sources `bin/tmux-claude-lib-codex` at the end.
 - `bin/tmux-claude-lib-codex` — the codex half: `classify_codex_pane_status` (its own TUI strings — approval overlays, the two trust prompts, "esc to interrupt", the composer placeholder) and the rollout reader (`codex_find_pane_jsonl`, `codex_get_context_and_model`, `codex_get_totals`). Separate so the claude classifier, which the whole attention layer leans on, stays untouched.
 - `bin/claude-tokens` — offline token/cost analyzer over the `~/.claude/projects` transcripts; claude only, no tmux, full-parses every file it reports on (seconds, not dashboard speed). Grains, flags, cost marks and the resume-chain collapsing: `--help` (the script's header). The transcript facts it and the dashboard both depend on — one assistant record per content block (dedupe per requestId) and a resume copying the whole history into a new file (`session_id` keeps the original id, `sessionId` is rewritten) — are documented at the code in `bin/tmux-claude-lib`'s `get_totals_incremental` and `claude-tokens`' `merge_chains`.
 
-## Worktrees: hub model (worktrunk)
+## Worktrees and task sessions (worktrunk)
 
 The generic worktrunk flow (`wt switch -c`, `wt step copy-ignored`, sibling
-naming, run-inside-the-worktree discipline, hub-vs-worktree context) lives in
-the global `dots/claude/rules/worktrees.md` rule — loaded into every session, so
-it is NOT repeated here. This section is only the DOTFILES-specific glue.
+naming, run-inside-the-worktree discipline) lives in the global
+`dots/claude/rules/worktrees.md` rule — loaded into every session, so it is NOT
+repeated here. This section is only the DOTFILES-specific glue.
 
 ```
-~/dev/myproject/                # hub: normal clone, main checked out — you live here
+~/dev/myproject/                # main checkout, default branch
 ~/dev/myproject.feat-x/         # worktree for branch feat/x (slashes sanitized)
 ```
 
-- Daily entry: `Ctrl+F` to the hub → `wt switch -c <branch>` (post-switch hook
+- Daily entry: `Ctrl+F` to the repo → `wt switch -c <branch>` (post-switch hook
   drops you into the worktree's tmux session) → `Ctrl+Space` for claude there.
+- Every branch gets its own worktree AND its own tmux session; no session
+  outlives the branch it was made for, and none is a privileged home for a
+  repo. A `/feature` run is one such session, built by `bin/tmux-task-session`
+  instead of a keypress.
 - Glue: `dots/worktrunk.toml` (user-level hooks) + `bin/wt-tmux-jump` /
   `bin/wt-tmux-cleanup`. `wt-tmux-jump` builds new worktree sessions with
-  the same `new_hub_session` layout as the sessionizer (human shells only:
+  the same `new_agent_session` layout as the sessionizer (human shells only:
   it exits early under `CLAUDECODE`); the zshrc `wt()`
   wrapper passes `--no-cd` on switch so the invoking pane never moves.
   `wt-tmux-cleanup` kills the removed worktree's session. Session naming
@@ -98,7 +103,7 @@ during the transition off that layout); its scripts are in `archive/`.
 ## Conventions
 
 - **Confirm before commit, topic branch always.** Any agent session editing this repo (from here or from another repo's session) shows the diff and waits for a yes, then commits on a `<type>/<kebab-slug>` branch — never directly on master. Rules/skills/agents here load into every session's prompt, so each change needs a review point; the PUBLIC sweep above applies to the diff and the commit message.
-- Branch names: `<type>/<kebab-slug>` with `type` ∈ `feat`, `fix`, `chore`, `docs` — the same prefixes as commit types. `/feature` reads this line when it renames its worktree branch; older branches predate it.
+- Branch names: `<type>/<kebab-slug>` with `type` ∈ `feat`, `fix`, `chore`, `docs` — the same prefixes as commit types. `/feature` Launch reads this line when it names its worktree branch; older branches predate it.
 - zshrc loads brew first, then auto-launches tmux. The outer shell skips everything after the tmux block (`&& return`). The inner shell (inside tmux) loads the full config.
 - Platform-specific zshrc: `zshrc` for macOS, `zshrc_linux` for Linux.
 - GHA runners run locally — never add `[safe] directory` to the global gitconfig. Set it in the runner's local `.git/config` instead.
