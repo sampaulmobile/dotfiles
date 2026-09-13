@@ -12,15 +12,14 @@
 # session with two working claudes is one ●); ✅ counts per pane, since each
 # flag is an independent "go look at this".
 #
-# Side effects, every tick: ~/.cache/claude-attention/status.tsv (per-session
+# Side effects, every tick: the snapshot's sessions source (per-session
 # "<session>\t<status>\t<pane>", the pane being the one exhibiting the worst
-# status, rewritten atomically) for the sessionizer, and the @agent_status
-# window option for the tab tint in dots/tmux.conf — deltas only, so a steady
-# state writes nothing.
+# status) for the sessionizer, a bin/hq-snapshot tick for the other sources,
+# and the @agent_status window option for the tab tint in dots/tmux.conf —
+# deltas only, so a steady state writes nothing.
 
 source ~/dotfiles/bin/tmux-claude-lib
-
-STATUS_DIR="$HOME/.cache/claude-attention"
+source ~/dotfiles/bin/hq-snapshot
 
 pane_lines=$(scan_agent_panes)
 status_lines=$(aggregate_session_status "$pane_lines")
@@ -37,13 +36,12 @@ if [[ -n "$status_lines" ]]; then
     done <<< "$status_lines"
 fi
 
-# Atomic (tmp + mv), and written even when empty so a consumer never acts on
-# sessions that no longer run an agent. The sessionizer additionally ignores
-# the file once its mtime is stale.
-mkdir -p "$STATUS_DIR"
-if { [[ -z "$status_lines" ]] || printf '%s\n' "$status_lines"; } > "${STATUS_DIR}/.status.$$.tmp" 2>/dev/null; then
-    mv -f "${STATUS_DIR}/.status.$$.tmp" "${STATUS_DIR}/status.tsv"
-fi
+# Written even when empty, so a consumer never acts on sessions that no
+# longer run an agent; the reader additionally ignores it once it is stale.
+# This tick is the only producer that already holds the scan, so it publishes
+# the source itself rather than making `hq-snapshot tick` scan a second time.
+{ [[ -z "$status_lines" ]] || printf '%s\n' "$status_lines"; } | snapshot_write sessions
+~/dotfiles/bin/hq-snapshot tick >/dev/null 2>&1 &
 
 done_list=$(~/dotfiles/bin/tmux-claude-attention list 2>/dev/null)
 done_count=$(printf '%s' "$done_list" | grep -c .)

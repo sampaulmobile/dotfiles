@@ -19,7 +19,7 @@
 #   for dirs).
 #
 # Invariant: nothing is scanned at keypress time. Row status comes only from
-# caches — ~/.cache/claude-attention/status.tsv, published every ~5s by
+# caches — the snapshot's sessions source, published every ~5s by
 # bin/tmux-claude-statusbar and ignored when stale, plus the attention layer's
 # .done flags — and rows stream into fzf as they are produced, so the picker
 # draws immediately. Anything added here that forks per project dir breaks it.
@@ -84,9 +84,11 @@ if [[ "$1" == "--preview" ]]; then
     exit 0
 fi
 
-# Agent helpers + new_hub_session. Deliberately sourced BELOW the --preview
-# exit, so the per-row preview invocations never pay for it.
+# Agent helpers + new_hub_session, and the snapshot reader behind the row
+# colors. Deliberately sourced BELOW the --preview exit, so the per-row
+# preview invocations never pay for them.
 source "$HOME/dotfiles/bin/tmux-claude-lib"
+source "$HOME/dotfiles/bin/hq-snapshot"
 
 new_agent=""   # non-empty = the override key picked the other agent
 
@@ -102,29 +104,26 @@ else
         sort -rn |
         awk -v skip="$current_session" '$2 != skip {print $2}')
 
-    # status.tsv is ignored when stale (statusbar not ticking); the .done
-    # flags are event-driven (Stop hook), so they need no freshness test.
+    # The sessions snapshot is ignored when stale (statusbar not ticking);
+    # the .done flags are event-driven (Stop hook), so they need no
+    # freshness test.
     perm_list=$'\n'
     work_list=$'\n'
     done_list=$'\n'
     idle_list=$'\n'
     if [[ "$SHOW_STATUS_INDICATORS" == true ]]; then
-        status_cache="$ATTN_DIR/status.tsv"
-        if [[ -f "$status_cache" ]]; then
-            cache_mtime=$(stat -f '%m' "$status_cache" 2>/dev/null || stat -c '%Y' "$status_cache" 2>/dev/null)
-            if [[ -n "$cache_mtime" ]] && (( $(date +%s) - cache_mtime <= 15 )); then
-                # 3rd field (worst-status pane) is for C-y's jump, not rows
-                while IFS=$'\t' read -r _name _status _; do
-                    [[ -z "$_name" ]] && continue
-                    case "$_status" in
-                        permission)   perm_list+="${_name}"$'\n' ;;
-                        working)      work_list+="${_name}"$'\n' ;;
-                        # unknown = an agent pane that didn't classify; still
-                        # "has an agent in it" as far as the tint cares
-                        idle|unknown) idle_list+="${_name}"$'\n' ;;
-                    esac
-                done < "$status_cache"
-            fi
+        if [[ "$(snapshot_verdict "$(snapshot_age sessions)" "$(snapshot_cadence sessions)")" == fresh ]]; then
+            # 3rd field (worst-status pane) is for C-y's jump, not rows
+            while IFS=$'\t' read -r _name _status _; do
+                [[ -z "$_name" ]] && continue
+                case "$_status" in
+                    permission)   perm_list+="${_name}"$'\n' ;;
+                    working)      work_list+="${_name}"$'\n' ;;
+                    # unknown = an agent pane that didn't classify; still
+                    # "has an agent in it" as far as the tint cares
+                    idle|unknown) idle_list+="${_name}"$'\n' ;;
+                esac
+            done < <(snapshot_read sessions)
         fi
         shopt -s nullglob
         for _f in "$ATTN_DIR"/*.done; do
