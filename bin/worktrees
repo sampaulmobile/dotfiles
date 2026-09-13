@@ -35,6 +35,8 @@ set -uo pipefail
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 # shellcheck source=/dev/null
 source "$DOTFILES/bin/profile-lib"
+# shellcheck source=/dev/null
+source "$DOTFILES/bin/hq-snapshot"
 
 usage() {
     cat <<'EOF'
@@ -53,8 +55,14 @@ MERGED, ABANDONED or PRUNABLE. A worktree running a /feature or
 /address-review pipeline also shows a PIPELINE column, `<phase> r<round>
 <seat>` from the last line of its .feature/status.jsonl; the column is absent
 when no worktree in scope has one.
+
+The report renders bin/hq-snapshot's worktrees source and says how old it is;
+with no snapshot, or one past its cadence, it computes live and says that
+instead. sweep always computes live — it acts on what it sees.
   --offline   skip gh entirely (every worktree's PR state -> pr:unknown)
   --all       every project (those with no linked worktree are omitted)
+  --fresh     recollect the snapshot before rendering
+  --snapshot  print the row records bin/hq-snapshot stores, and nothing else
   -v          print, under each row, the command that would act on it
 
 sweep: remove the MERGED worktrees, guarding against the loss of
@@ -210,6 +218,7 @@ count_cell() {
 # data source the run had to do without. Silent otherwise: a healthy
 # everything-run needs no footer.
 source_warnings() {
+    [[ -n "${SNAPSHOT_NOTE:-}" ]] && printf '%s\n' "$SNAPSHOT_NOTE"
     if [[ -n "${SCOPED:-}" ]]; then
         if [[ -n "$C_RESET" ]]; then
             printf '\033[2mscope: %s  (--all for every project)%s\n' "$(shorten "$SCOPED")" "$C_RESET"
@@ -328,16 +337,17 @@ action_for() {
     esac
 }
 
-# parse_porcelain_blocks <repo>
+# parse_porcelain_blocks <repo> [<callback>]
 #   Reads `git worktree list --porcelain` from stdin and calls
-#   on_worktree_block <path> <branch> <locked> <prunable> <wt_head> once per
-#   block, skipping <repo> itself (the main worktree, always listed first by
-#   git) and flushing a trailing block that has no blank line after it.
+#   <callback> (default on_worktree_block) with
+#   <path> <branch> <locked> <prunable> <wt_head> once per block, skipping
+#   <repo> itself (the main worktree, always listed first by git) and
+#   flushing a trailing block that has no blank line after it.
 #   on_worktree_block belongs to the CALLER, not this file: the report below
 #   defines the real one, tests/test-worktrees.sh a recording stub —
 #   which is what lets the parser be exercised with no git and no gh.
 parse_porcelain_blocks() {
-    local repo="$1"
+    local repo="$1" cb="${2:-on_worktree_block}"
     local path="" branch="" locked=false prunable=false wt_head=""
     local have_block=false
 
@@ -345,7 +355,7 @@ parse_porcelain_blocks() {
         [[ "$have_block" == true ]] || return 0
         have_block=false
         [[ "$path" == "$repo" ]] && return 0
-        on_worktree_block "$path" "$branch" "$locked" "$prunable" "$wt_head"
+        "$cb" "$path" "$branch" "$locked" "$prunable" "$wt_head"
     }
 
     while IFS= read -r line; do
@@ -512,6 +522,123 @@ porcelain_untracked_only() {
     return 0
 }
 
+# ---- per-repo fact cache ----
+# Three of derive_worktree_facts' questions are answerable for a whole repo at
+# once: the origin ref of each worktree branch, the default ref's commit, and
+# which worktree branches are reachable from it. prime_repo_facts asks them in
+# three git processes per REPO; the repo_fact_* accessors read the answers, or
+# fork exactly the call they replace when this repo was never primed (which is
+# how tests/test-worktrees.sh drives derive_worktree_facts directly).
+REPO_FACTS_REPO=""
+REPO_FACTS_REFS=""
+REPO_FACTS_MERGED=$'\n'
+REPO_FACTS_AGES=""
+REPO_FACTS_DEFAULT_SHA=""
+
+# collect_worktree_block — a parse_porcelain_blocks callback that only records
+# the branch and HEAD of each live block, for prime_repo_facts to batch over.
+_cw_branches=()
+_cw_heads=()
+collect_worktree_block() {
+    local branch="$2" prunable="$4" wt_head="$5"
+    [[ "$prunable" == true ]] && return 0
+    [[ -n "$branch" ]] && _cw_branches+=("$branch")
+    # An unborn HEAD's all-zero sha is no object: batching it would fail the
+    # whole `show -s` and cost every worktree the per-worktree fallback.
+    case "$wt_head" in
+        *[!0]*) _cw_heads+=("$wt_head") ;;
+    esac
+    return 0
+}
+
+# prime_repo_facts <repo> — fill the cache for <repo> from _cw_branches /
+# _cw_heads. Reads $default_ref from the caller.
+prime_repo_facts() {
+    local repo="$1" b r pats=()
+    REPO_FACTS_REPO="$repo"
+    REPO_FACTS_REFS=""; REPO_FACTS_MERGED=$'\n'; REPO_FACTS_AGES=""; REPO_FACTS_DEFAULT_SHA=""
+
+    if (( ${#_cw_branches[@]} )); then
+        for b in "${_cw_branches[@]}"; do pats+=("refs/heads/$b" "refs/remotes/origin/$b"); done
+        REPO_FACTS_REFS=$(git -C "$repo" for-each-ref --format='%(refname)%09%(objectname)' "${pats[@]}" 2>/dev/null)
+    fi
+
+    if [[ -n "$default_ref" ]]; then
+        REPO_FACTS_DEFAULT_SHA=$(git -C "$repo" rev-parse --verify -q "$default_ref" 2>/dev/null)
+        if [[ -n "$REPO_FACTS_DEFAULT_SHA" ]] && (( ${#_cw_branches[@]} )); then
+            pats=()
+            for b in "${_cw_branches[@]}"; do pats+=("refs/heads/$b"); done
+            while IFS= read -r r; do
+                [[ -n "$r" ]] && REPO_FACTS_MERGED+="$r"$'\n'
+            done < <(git -C "$repo" for-each-ref --merged="$default_ref" --format='%(refname)' "${pats[@]}" 2>/dev/null)
+        fi
+    fi
+
+    # One `show -s` for every worktree HEAD. A sha git cannot read makes the
+    # whole call fail, which only costs the per-worktree fallback below.
+    if (( ${#_cw_heads[@]} )); then
+        REPO_FACTS_AGES=$(git -C "$repo" show -s --format='%H%x09%cr%x09%ct' "${_cw_heads[@]}" 2>/dev/null)
+    fi
+}
+
+# repo_fact_ref_sha <refname> — <refname>'s commit, empty when it has none.
+repo_fact_ref_sha() {
+    local want="$1" line
+    if [[ "$REPO_FACTS_REPO" == "$repo" ]]; then
+        while IFS= read -r line; do
+            [[ "${line%%$'\t'*}" == "$want" ]] || continue
+            printf '%s' "${line#*$'\t'}"
+            return 0
+        done <<< "$REPO_FACTS_REFS"
+        return 0
+    fi
+    git -C "$repo" rev-parse --verify -q "$want" 2>/dev/null
+}
+
+# repo_fact_default_sha — $default_ref's commit, empty when it has none.
+repo_fact_default_sha() {
+    if [[ "$REPO_FACTS_REPO" == "$repo" ]]; then
+        printf '%s' "$REPO_FACTS_DEFAULT_SHA"
+        return 0
+    fi
+    git -C "$repo" rev-parse --verify -q "$default_ref" 2>/dev/null
+}
+
+# repo_fact_merged_into_default <branch> <wt_head> — true when <wt_head> is
+# reachable from $default_ref. The batch answers that for refs/heads/<branch>,
+# so it stands in only while that ref IS <wt_head>; an unprimed repo, a
+# branch git never had, or a ref that has moved falls through to the ancestry
+# test itself.
+repo_fact_merged_into_default() {
+    local branch="$1" wt_head="$2"
+    if [[ "$REPO_FACTS_REPO" == "$repo" ]] && [[ -n "$wt_head" ]] \
+        && [[ "$(repo_fact_ref_sha "refs/heads/$branch")" == "$wt_head" ]]; then
+        case "$REPO_FACTS_MERGED" in
+            *$'\n'"refs/heads/$branch"$'\n'*) return 0 ;;
+        esac
+        return 1
+    fi
+    git -C "$repo" merge-base --is-ancestor "$wt_head" "$default_ref" 2>/dev/null
+}
+
+# repo_fact_age <sha> <path> — "<%cr>\t<%ct>" for the worktree's HEAD commit,
+# empty when there is no commit to read.
+repo_fact_age() {
+    local sha="$1" path="$2" line
+    if [[ -n "$sha" ]]; then
+        if [[ "$REPO_FACTS_REPO" == "$repo" ]]; then
+            while IFS= read -r line; do
+                [[ "${line%%$'\t'*}" == "$sha" ]] || continue
+                printf '%s' "${line#*$'\t'}"
+                return 0
+            done <<< "$REPO_FACTS_AGES"
+        fi
+        git -C "$path" log -1 --format='%cr%x09%ct' "$sha" 2>/dev/null
+        return 0
+    fi
+    git -C "$path" log -1 --format='%cr%x09%ct' 2>/dev/null
+}
+
 # derive_worktree_facts <path> <branch> <prunable> <wt_head>
 #   Compute the per-worktree facts classify_worktree needs, into the globals
 #   f_live f_dirty f_untracked_only f_unpushed f_merged_local f_pr_state
@@ -544,13 +671,17 @@ derive_worktree_facts() {
     fi
 
     if [[ -n "$branch" ]]; then
-        if git -C "$repo" rev-parse --verify -q "refs/remotes/origin/$branch" >/dev/null 2>&1; then
+        local origin_sha
+        origin_sha=$(repo_fact_ref_sha "refs/remotes/origin/$branch")
+        if [[ -z "$origin_sha" ]]; then
+            f_unpushed=true
+        elif [[ "$origin_sha" == "$wt_head" ]]; then
+            f_unpushed=false
+        else
             local ahead
             ahead=$(git -C "$repo" rev-list --count "origin/$branch..$wt_head" 2>/dev/null)
             [[ -z "$ahead" ]] && ahead=0
             if (( ahead > 0 )); then f_unpushed=true; else f_unpushed=false; fi
-        else
-            f_unpushed=true
         fi
         # --is-ancestor is trivially true for a branch that never diverged
         # (fresh `wt switch -c`, parked before its first commit), and the ref
@@ -559,21 +690,25 @@ derive_worktree_facts() {
         # branch reflog exists (oldest entry = creation point; reflogs are in
         # the common dir, visible from the hub) — the branch must have a
         # commit of its own since creation. Reset-to-creation reads as none.
+        # The reflog is read only once ancestry says the branch is folded in,
+        # so it and its rev-list cost nothing on an unmerged branch.
         local default_sha created own
-        default_sha=$(git -C "$repo" rev-parse --verify -q "$default_ref" 2>/dev/null)
-        created=""
-        while IFS= read -r _sha; do created="$_sha"; done \
-            < <(git -C "$repo" reflog show --format=%H "refs/heads/$branch" 2>/dev/null)
-        own=""
-        if [[ -n "$created" ]]; then
-            own=$(git -C "$repo" rev-list --count "$created..$wt_head" 2>/dev/null)
-        fi
+        default_sha=$(repo_fact_default_sha)
+        f_merged_local=false
         if [[ -n "$default_ref" ]] && [[ -n "$default_sha" ]] && [[ "$wt_head" != "$default_sha" ]] \
-            && [[ "$own" != 0 ]] \
-            && git -C "$repo" merge-base --is-ancestor "$wt_head" "$default_ref" 2>/dev/null; then
-            f_merged_local=true
-        else
-            f_merged_local=false
+            && repo_fact_merged_into_default "$branch" "$wt_head"; then
+            created=""
+            while IFS= read -r _sha; do created="$_sha"; done \
+                < <(git -C "$repo" reflog show --format=%H "refs/heads/$branch" 2>/dev/null)
+            own=""
+            if [[ -n "$created" ]]; then
+                if [[ "$created" == "$wt_head" ]]; then
+                    own=0
+                else
+                    own=$(git -C "$repo" rev-list --count "$created..$wt_head" 2>/dev/null)
+                fi
+            fi
+            [[ "$own" != 0 ]] && f_merged_local=true
         fi
     else
         # Detached HEAD has no branch to push or diff against a default.
@@ -617,12 +752,12 @@ derive_worktree_facts() {
         fi
     fi
 
-    # One log call for both age forms: %cr for display, %ct as the sort key
-    # (%cr "7 weeks ago" is unsortable). "-"/0 when there is no commit to read.
+    # Both age forms at once: %cr for display, %ct as the sort key (%cr
+    # "7 weeks ago" is unsortable). "-"/0 when there is no commit to read.
     local _age
-    _age=$(git -C "$path" log -1 --format='%cr%n%ct' 2>/dev/null)
-    f_age="${_age%%$'\n'*}"; [[ -z "$f_age" ]] && f_age="-"
-    f_age_epoch="${_age##*$'\n'}"; [[ -z "$f_age_epoch" ]] && f_age_epoch=0
+    _age=$(repo_fact_age "$wt_head" "$path")
+    f_age="${_age%%$'\t'*}"; [[ -z "$f_age" ]] && f_age="-"
+    f_age_epoch="${_age##*$'\t'}"; [[ -z "$f_age_epoch" ]] && f_age_epoch=0
 }
 
 # pipeline_state <worktree-path> — the PIPELINE column: `<phase> r<round>
@@ -1056,12 +1191,21 @@ VERBOSE=false
 SHOW_ALL=false
 APPLY=false
 FORCE=false
+FRESH=false
+EMIT=false
+SNAPSHOT_NOTE=""
 for arg in "$@"; do
     case "$arg" in
         --offline) OFFLINE=true ;;
         -v|--verbose) VERBOSE=true ;;
         -h|--help) usage; exit 0 ;;
         --all) SHOW_ALL=true ;;
+        --fresh)
+            [[ "$MODE" == report ]] || { echo "worktrees: --fresh is a report flag; sweep always computes live" >&2; exit 2; }
+            FRESH=true ;;
+        --snapshot)
+            [[ "$MODE" == report ]] || { echo "worktrees: --snapshot is a report flag" >&2; exit 2; }
+            EMIT=true; SHOW_ALL=true ;;
         --apply)
             [[ "$MODE" == sweep ]] || { echo "worktrees: --apply needs the sweep verb: worktrees sweep --apply" >&2; exit 2; }
             APPLY=true ;;
@@ -1090,6 +1234,26 @@ fi
 
 prof_init worktrees "${WORKTREES_PROFILE:-}"
 
+# The report renders bin/hq-snapshot's worktrees source when there is a
+# usable one; sweep never does, because it acts on what it sees, --snapshot
+# is the collector's own entry, and --offline says "ask git only, now",
+# where the flag can still mean something.
+USE_SNAPSHOT=false
+if [[ "$MODE" == report && "$EMIT" == false && "$OFFLINE" == false ]]; then
+    [[ "$FRESH" == true ]] && "$DOTFILES/bin/hq-snapshot" worktrees >/dev/null 2>&1
+    _sv=$(snapshot_verdict "$(snapshot_age worktrees)" "$(snapshot_cadence worktrees)")
+    if [[ "$_sv" == fresh ]]; then
+        USE_SNAPSHOT=true
+        SNAPSHOT_NOTE="snapshot: $(fmt_secs "$(snapshot_age worktrees)") old  (--fresh to recollect)"
+    else
+        SNAPSHOT_NOTE="snapshot $_sv — computed live  (bin/hq-snapshot worktrees writes one)"
+    fi
+fi
+prof "snapshot"
+
+# lsof, the project enumeration and the worktree lists are the live path's
+# inputs; rendering records asks for none of them.
+if [[ "$USE_SNAPSHOT" == false ]]; then
 init_liveness
 prof "liveness (lsof)"
 
@@ -1116,6 +1280,7 @@ fi
 source "$DOTFILES/bin/project-dirs-lib"
 project_dirs
 prof "project dirs"
+fi
 
 repos=()
 repos_seen=$'\n'
@@ -1130,7 +1295,7 @@ if [[ "$SHOW_ALL" == false && -n "$_cwd_common" ]]; then
     repos=("$SCOPED")
 # Guarded on element count, not just "declared": bash 3.2 treats
 # "${arr[@]}" on a zero-element array as unbound under `set -u`.
-elif (( ${#project_dirs_out[@]} )); then
+elif [[ "$USE_SNAPSHOT" == false ]] && (( ${#project_dirs_out[@]} )); then
     for _cand in "${project_dirs_out[@]}"; do
         [[ -d "$_cand/.git" ]] || continue
         [[ "$repos_seen" == *$'\n'"$_cand"$'\n'* ]] && continue
@@ -1167,7 +1332,6 @@ report_row() {
 
     local bucket flags
     bucket=$(classify_worktree "$f_live" "$f_dirty" "$prunable" "$f_pr_state" "$f_unpushed" "$f_merged_local")
-    count_bucket "$bucket"
 
     flags=""
     [[ "$locked" == true ]] && flags+="locked "
@@ -1176,9 +1340,30 @@ report_row() {
     flags="${flags% }"
     [[ -z "$flags" ]] && flags="-"
 
-    local detail="" sweepable_dirty=false
+    # Only -v and the snapshot need this, and it forks git: a plain report
+    # never asks.
+    local sweepable_dirty=false
+    if [[ "$bucket" == DIRTY ]] && [[ "$VERBOSE" == true || "$EMIT" == true ]] \
+        && merged_under_untracked "$prunable"; then
+        sweepable_dirty=true
+    fi
+
+    # "-" for an absent branch or pipeline, never an empty field: a tab is
+    # IFS whitespace, so `read` collapses a run of them and every later
+    # column would shift left.
+    if [[ "$EMIT" == true ]]; then
+        local pipe
+        pipe=$(pipeline_state "$path")
+        printf 'row\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$repo" "$bucket" "${branch:--}" "$f_pr_disp" "$flags" "$f_age" \
+            "$(where_for "$path" "$repo")" "${pipe:--}" "$f_age_epoch" \
+            "$path" "$locked" "$sweepable_dirty"
+        return
+    fi
+
+    count_bucket "$bucket"
+    local detail=""
     if [[ "$VERBOSE" == true ]]; then
-        if [[ "$bucket" == DIRTY ]] && merged_under_untracked "$prunable"; then sweepable_dirty=true; fi
         detail="      $(action_for "$bucket" "$repo" "$path" "$branch" "$locked" "$sweepable_dirty")"
     fi
     rows_add "$bucket" "${branch:-(detached)}" "$f_pr_disp" "$flags" "$f_age" "$(where_for "$path" "$repo")" "$(pipeline_state "$path")" "$detail" "$f_age_epoch"
@@ -1188,9 +1373,58 @@ on_worktree_block() {
     if [[ "$MODE" == sweep ]]; then sweep_row "$@"; else report_row "$@"; fi
 }
 
+# render_snapshot_rows — buffer every row record of bin/hq-snapshot's
+# worktrees source that is in scope, then print the same table the live path
+# does. The records ARE the live path's output (bin/worktrees --snapshot is
+# what the collector runs), so nothing here classifies anything.
+render_snapshot_rows() {
+    local kind r_repo bucket branch pr_disp flags age where pipe epoch path locked sweepable
+    rows_reset
+    repos=()
+    repos_seen=$'\n'
+    while IFS=$'\t' read -r kind r_repo bucket branch pr_disp flags age where pipe epoch path locked sweepable; do
+        case "$kind" in
+            meta)
+                case "$r_repo" in
+                    gh_ok) GH_OK="$bucket" ;;
+                    lsof)  LSOF_RAN="$bucket" ;;
+                esac
+                continue ;;
+            row) ;;
+            *) continue ;;
+        esac
+        [[ -n "${SCOPED:-}" && "$r_repo" != "$SCOPED" ]] && continue
+        [[ "$branch" == "-" ]] && branch=""
+        [[ "$pipe" == "-" ]] && pipe=""
+        if [[ "$repos_seen" != *$'\n'"$r_repo"$'\n'* ]]; then
+            repos_seen+="$r_repo"$'\n'
+            repos+=("$r_repo")
+        fi
+        count_bucket "$bucket"
+        local detail=""
+        if [[ "$VERBOSE" == true ]]; then
+            detail="      $(action_for "$bucket" "$r_repo" "$path" "$branch" "$locked" "$sweepable")"
+        fi
+        repo="$r_repo"
+        rows_add "$bucket" "${branch:-(detached)}" "$pr_disp" "$flags" "$age" "$where" "$pipe" "$detail" "$epoch"
+    done < <(snapshot_read worktrees)
+    (( ${#repos[@]} )) && rows_render 9
+    return 0
+}
+
+# The degraded-source state of the collection run, so a screen rendering the
+# records prints the same warnings the live path would have.
+if [[ "$EMIT" == true ]]; then
+    printf 'meta\tgh_ok\t%s\n' "$GH_OK"
+    printf 'meta\tlsof\t%s\n' "$LSOF_RAN"
+fi
+
+if [[ "$USE_SNAPSHOT" == true ]]; then
+    render_snapshot_rows
+    prof "render"
+elif (( ${#repos[@]} )); then
 # Guarded on element count, not just "declared" — see the note above the
 # same guard around project_dirs_out.
-if (( ${#repos[@]} )); then
 # One `git worktree list` per repo, cached. It decides which repos have a
 # linked worktree — the only ones queried, processed or shown — and feeds the
 # porcelain straight into the loop below. A repo with only its hub costs this
@@ -1214,12 +1448,24 @@ if (( ${#repos[@]} )); then
     for _i in "${!repos[@]}"; do
         repo="${repos[_i]}"
         default_ref=$(default_ref_for "$repo")
+        # Two passes over the same porcelain: the first only lists the repo's
+        # worktree branches and HEADs so prime_repo_facts can ask git about
+        # all of them at once, the second builds the rows.
+        _cw_branches=(); _cw_heads=()
+        parse_porcelain_blocks "$repo" collect_worktree_block <<< "${_porc[_i]}"
+        prime_repo_facts "$repo"
         # A herestring, not a pipe: on_worktree_block must run in this shell so
         # the counters and, under --apply, the removals take effect here.
         parse_porcelain_blocks "$repo" <<< "${_porc[_i]}"
     done
     prof "rows"
-    if [[ "$MODE" == sweep ]]; then rows_render 6; else rows_render 9; fi
+    if [[ "$EMIT" == true ]]; then
+        :
+    elif [[ "$MODE" == sweep ]]; then
+        rows_render 6
+    else
+        rows_render 9
+    fi
     prof "render"
     # Files this run wrote, then an empty-directory rmdir: no directory tree
     # is ever deleted by this script, so no path here needs proving safe.
@@ -1229,6 +1475,11 @@ if (( ${#repos[@]} )); then
     fi
 fi
 fi
+
+# --snapshot prints records and nothing else: no table, no summary, no
+# footer. Exit 0 whatever the buckets hold — the exit code belongs to the
+# report the collector is feeding, not to the collection.
+[[ "$EMIT" == true ]] && exit 0
 
 echo
 if [[ "$MODE" == sweep ]]; then

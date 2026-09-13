@@ -21,6 +21,9 @@ section "machine-local config (other/)"
 section "symlinks"
 "$DOTFILES/bin/symlink_files.sh" --check || failed=1
 
+section "status snapshot (~/.local/state/hq/snapshot)"
+"$DOTFILES/bin/hq-snapshot" --check || failed=1
+
 section "brew (etc/Brewfile_mac)"
 if command -v brew >/dev/null 2>&1; then
     # --verbose names the missing deps; plain output only says "can't satisfy".
