@@ -9,7 +9,9 @@
 # The report changes NOTHING: every git/gh call is a read and `wt` is only
 # printed. Removal needs both the `sweep` verb and --apply — a read-only mode
 # never grows a deleting flag. `git worktree remove` (remove_worktree) is this
-# script's ONLY removal: nothing outside a git worktree is ever deleted here.
+# script's ONLY removal of anything it did not write itself: the archive under
+# ~/.local/state/hq is append-only, and the one `rm -f` clears this run's own
+# mktemp scratch.
 #
 # Liveness comes from `lsof -d cwd -Fpn` (a live process's cwd), never from
 # git's worktree lock file (whose reason names the *hub session's* pid, which
