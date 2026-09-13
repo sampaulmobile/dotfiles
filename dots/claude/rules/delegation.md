@@ -13,10 +13,17 @@
   to the requester with the current state and what was superseded.
 - Run delegated repo work as BACKGROUND pipelines (worktree-isolated agents,
   e.g. /feature), never inline in this session's main loop — the main loop
-  must stay free to receive further delegations. Multiple concurrent
+  must stay free to receive further delegations. The same session never
+  hand-edits a pipeline's branch or PR to correct or complete its result:
+  that ships unreviewed code under the pipeline's name. Report the result as
+  it is and let the requester re-dispatch, resume the orchestrator with a
+  correction, or hand it to the human. Multiple concurrent
   delegations from different coordinators are normal: keep them straight by
   echoing the requester's session name + a short task tag in every report.
 - When THIS session delegates work out: make the task message self-contained
   (the receiver has none of this conversation), name yourself as the
   report-back address, and never re-ask a peer to do something this session
-  was denied permission for.
+  was denied permission for. The shape of every delegated task is the brief
+  block in the `hq` skill's step 4 (GOAL, SCOPE, CONTEXT, ACCEPTANCE, VERIFY,
+  FORBIDDEN, FLAGS, REPORT) — a field you cannot fill is a task not yet
+  scoped.

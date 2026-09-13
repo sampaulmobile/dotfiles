@@ -37,8 +37,13 @@
 # per-model table below; codex rows read ~/.codex rollouts, take their window
 # from the transcript itself, show rate-limit usage in COST, and have no
 # subagent tree.
+#
+# DASHBOARD_PROFILE=1 adds a stderr line per stage with its elapsed time. The
+# TUI owns stdout, so redirect stderr to read them:
+#   DASHBOARD_PROFILE=1 bin/tmux-claude-dashboard 2>/tmp/dash.prof
 
 source ~/dotfiles/bin/tmux-claude-lib
+source ~/dotfiles/bin/profile-lib
 
 CACHE_DIR="/tmp/claude-dashboard"
 mkdir -p "$CACHE_DIR/agents"
@@ -740,6 +745,7 @@ load_data() {
         agent_total_counts+=("0")
     done
     render
+    prof "placeholder frame"
 
     build_cwd_session_map
 
@@ -772,6 +778,7 @@ load_data() {
         ) &
     done
     wait
+    prof "per-row collect"
 
     local now
     now=$(date +%s)
@@ -809,6 +816,7 @@ load_data() {
     rm -rf "$parallel_dir"
     frame_at=0
     render
+    prof "frame"
 }
 
 # ── main loop ───────────────────────────────────────────
@@ -834,7 +842,10 @@ agents_forced=0
 frame_at=0
 frame_cols=0
 
+prof_init dashboard "${DASHBOARD_PROFILE:-}"
+
 reload_sessions
+prof "pane scan"
 
 if (( session_count == 0 )); then
     printf '\033[H\033[2J'

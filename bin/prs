@@ -18,6 +18,8 @@
 set -uo pipefail
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+# shellcheck source=/dev/null
+source "$DOTFILES/bin/profile-lib"
 
 usage() {
     cat <<'USAGE'
@@ -40,6 +42,8 @@ approved · review-required · open.
   --since X     merged window: a date (2026-09-01) or Nd (7d). Default: today.
   --author L    GitHub login (default: @me, the gh login).
   --open-only / --merged-only   print just that half.
+
+PRS_PROFILE=1 adds a stderr line per stage with its elapsed time.
 USAGE
 }
 
@@ -161,6 +165,8 @@ elif [[ "$SINCE" =~ ^([0-9]+)d$ ]]; then
     SINCE=$(date -v-"${n}"d +%Y-%m-%d 2>/dev/null || date -d "-${n} days" +%Y-%m-%d)
 fi
 
+prof_init prs "${PRS_PROFILE:-}"
+
 if ! command -v gh >/dev/null 2>&1; then
     echo "prs: gh not installed" >&2; exit 2
 fi
@@ -221,6 +227,7 @@ if [[ "$WANT_MERGED" == true ]]; then
     ( GH_ERRF="$TMPD/merged.err"; search_prs "is:pr is:merged archived:false author:$AUTHOR merged:>=$SINCE sort:updated-desc" "$MERGED_JQ" ) > "$TMPD/merged" &
     merged_pid=$!
 fi
+prof "searches launched"
 # Scope: "<slug>\t<dir>" per local repo, in bin/project-dirs-lib order. With
 # --any-repo the list still supplies dirs for headers, but no longer filters.
 # Computed AFTER the searches are launched: enumerating ~25 repos and reading
@@ -249,9 +256,12 @@ elif (( ${#project_dirs_out[@]} )); then
     done
 fi
 
+prof "local scope"
+
 failed=""
 [[ -n "$open_pid" ]] && { wait "$open_pid" || failed+=" open: $(gh_failed "$TMPD/open.err")"; }
 [[ -n "$merged_pid" ]] && { wait "$merged_pid" || failed+=" merged: $(gh_failed "$TMPD/merged.err")"; }
+prof "gh searches"
 [[ -n "$failed" ]] && { echo "prs: gh failed (after one retry):$failed" >&2; exit 1; }
 open_rows=""; merged_rows=""
 [[ -n "$open_pid" ]] && open_rows=$(cat "$TMPD/open")
@@ -308,4 +318,5 @@ while IFS= read -r slug; do
 done <<< "$slugs"
 
 [[ "$printed_any" == false ]] && echo "no PRs open or merged since $SINCE in scope (--any-repo widens it)"
+prof "render"
 exit 0

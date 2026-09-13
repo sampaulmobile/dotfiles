@@ -5,9 +5,10 @@ disable-model-invocation: true
 ---
 
 Route a work request to the repo hub session(s) that should execute it. The
-argument is a free-form request; pass any /feature tier flags the user
-included (`--quick`, `--hard`, `--best`, `--strict`, `--rounds N`, `--xhigh`,
-`--local`) through verbatim to the dispatched invocation.
+argument is a free-form request; pass any /feature flags the user included
+(`--quick`, `--hard`, `--best`, `--strict`, `--rounds N`, `--xhigh`,
+`--local`, `--go`, `--no-workplan`; per-seat `--orchestrator=`, `--implementer=` and
+`--reviewer=<model[:effort]>`) through verbatim to the dispatched invocation.
 
 You are the DISPATCHER, not the implementer. Never execute repo work in the
 invoking session — worktree isolation, repo config, and session identity all
@@ -74,21 +75,63 @@ do NOT start a second agent — fold this into the running work where it fits,
 drop what the user has since overridden, and reply with the current state."
 Fresh work (a new /feature) needs no check.
 
-SendMessage each hub a SELF-CONTAINED task — the receiver has none of this
-conversation:
+SendMessage each hub a SELF-CONTAINED brief — the receiver has none of this
+conversation. Every field, every time:
 
-- What to do: usually a `/feature <description> <tier flags>` invocation.
-  Include acceptance criteria and any context the hub lacks.
-- For multi-repo work: this piece's place in the whole — what the other repos
-  are doing, ordering constraints, interface contracts between the pieces.
-- Report-back address: "report milestones and the final result back to
-  <THIS session's name>" — invoker-only; results land wherever /hq was called
-  from.
+```
+GOAL        one sentence: what is true when this is done
+SCOPE       the repo; the paths it may touch, and the ones it may not
+CONTEXT     pointers only (PR, issue, wiki page, file path). For multi-repo
+            work: this piece's place in the whole — what the other repos are
+            doing, ordering, the interface between the pieces
+ACCEPTANCE  checkable lines, one per condition. State the END STATE
+            ("the section has no typos or grammar errors") and any change
+            the requester asked for by name. Do not state the specific
+            edits the dispatcher worked out while scoping ("add the missing
+            period on line 165"): deciding what to change is the
+            orchestrator's job in its plan step, with the whole file in front
+            of it. Written here, the dispatcher's guess becomes the standard
+            the run is graded against
+VERIFY      the commands to run, or the surface to verify on
+FORBIDDEN   what this task must not do, beyond the global rules
+FLAGS       the /feature flags to pass through verbatim. Add --go only when
+            ACCEPTANCE names the specific change, not just the target: a
+            task whose plan phase decides WHAT to change ("fix what you
+            find") keeps the gate, however small the target. Express a
+            small task through the flags the pipeline knows — --no-workplan
+            (plan stays uncommitted, gate and review still run) or --quick
+            (one seat, no review) — never through a FORBIDDEN line that
+            fights the pipeline's defaults, such as naming the only file
+            allowed to change when the pipeline commits a workplan.
+REPORT      the digest, then the PR URL, by SendMessage to <THIS session's
+            name>
+```
+
+A field you cannot fill is a task you have not scoped yet — scope it here, or
+ask the user, before dispatching.
 
 ## 5. Track and relay
 
-- Keep track of outstanding delegations (repo, short task tag, status); relay
-  results to the user as they land — PR URLs and summaries, not
+- In-flight state comes from the FILES the pipelines write, never from this
+  conversation and never from a ledger of your own: each worktree's
+  `.feature/status.jsonl`, whose LAST line is that run's current
+  phase/round/seat. `bin/worktrees` shows the same last line as its PIPELINE
+  column; to read them directly:
+  ```
+  source ~/dotfiles/bin/project-dirs-lib && project_dirs
+  for d in "${project_dirs_out[@]}"; do
+      [[ -f "$d/.feature/status.jsonl" ]] || continue
+      printf '%s\t%s\n' "$d" "$(awk '$0!=""{l=$0} END{print l}' "$d/.feature/status.jsonl")"
+  done
+  ```
+  A `phase: gate` line means that run is waiting on the requester, not
+  working: relay its digest to the user, and on a go send that go to the
+  session that ran `/feature` — that session is the orchestrator's parent and
+  resumes it by name; this one cannot. The scan yields the phase, never the
+  digest itself: for a run this session dispatched it is in the message sent
+  to the brief's REPORT address, and otherwise at the top of that worktree's
+  `workplans/<slug>-plan.md`, or of `.feature/plan.md` when workplans are off.
+- Relay results to the user as they land — PR URLs and summaries, not
   implementation detail.
 - Multi-repo: report per-piece status; the feature is done only when every
   piece lands.
