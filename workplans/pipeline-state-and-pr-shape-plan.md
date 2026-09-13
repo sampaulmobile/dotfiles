@@ -104,8 +104,10 @@ writer, so a session's conversation is never the only copy of anything.
   when present: `phase r<round> <seat>`. Blank otherwise. Header docs and
   `--help` updated.
 - `sweep --apply` copies `.feature/` to
-  `~/.local/state/hq/runs/<repo-basename>/<branch-slug>/` before removing a
-  worktree that has one, so run history survives the sweep.
+  `~/.local/state/hq/runs/<repo-basename>/<branch-slug>/<UTC-stamp>/` before
+  removing a worktree that has one, so run history survives the sweep. The
+  history is append-only: one stamp directory per sweep run, and the script
+  deletes nothing outside a git worktree.
 - Tests: extend `tests/test-worktrees.sh` (or the closest existing suite) with
   a fixture `status.jsonl` and assert the column renders from its last line
   and is blank when absent.
@@ -220,12 +222,14 @@ writer, so a session's conversation is never the only copy of anything.
   `/` → `-`, worktrunk's sibling-directory sanitisation. It is NOT
   `bin/project-dirs-lib`'s session name, which also prefixes the repo and maps
   `.` → `_` (`release/1.2` on `proj`: session `proj_release-1_2`, archive
-  `runs/proj/release-1.2`). Nothing reads the path back in this step, so a
-  mismatch is invisible until step 2's collector.
-- VERIFIED (2026-09-12, `tests/test-worktrees.sh`): the archive copy is a
-  snapshot. `archive_feature_dir` removes the destination before copying, so a
-  second sweep of the same repo and branch leaves no file of the first one's
-  behind — `cp -R src/. dest/` alone would have merged the two runs.
+  `runs/proj/release-1.2/<UTC-stamp>`). Nothing reads the path back in this
+  step, so a mismatch is invisible until step 2's collector, which takes the
+  newest stamp directory under the slug.
+- VERIFIED (2026-09-13, `tests/test-worktrees.sh`): the archive is append-only.
+  `archive_feature_dir` copies into `<slug>/<stamp>.partial` and renames it, so
+  a second sweep of the same repo and branch adds a directory and leaves the
+  first byte-identical; a copy that fails leaves its `.partial` and no stamp
+  directory.
 - ASSUMED: step 6's profile numbers cannot all be collected from inside this
   pipeline. `bin/worktrees` and `bin/prs` are non-interactive and read-only, so
   their numbers are real measurements taken here. `bin/tmux-claude-dashboard`
@@ -253,6 +257,7 @@ writer, so a session's conversation is never the only copy of anything.
   the `rm -rf` no longer depends on git's output format. An archive failure is
   counted once, as FAILED. `sweep_row` sits above the sourcing guard, so both
   of the sweep's failure counters are unit-tested (suite: 95 cases, 7 new).
+- 2026-09-13: archive made append-only (timestamp dir, no deletion).
 
 ### Profile pass (step 6)
 
