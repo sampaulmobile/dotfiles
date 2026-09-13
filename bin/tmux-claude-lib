@@ -67,39 +67,27 @@ agent_window_name() {
     printf '%s' "$1"
 }
 
-# new_hub_session <session-name> <dir> [agent]
-#   Creates a detached tmux session with the standard hub layout: 1 <agent>
-#   (warm) · 2 nvim · 3 zsh, landing on the agent. Only the agent window's
-#   name is pinned; nvim's is left on automatic-rename deliberately, so it
-#   tracks whatever runs there after nvim exits. [agent] defaults to
-#   agent_default and is recorded as the session's @agent.
-#   Shared by tmux-sessionizer and wt-tmux-jump so both build the same thing.
-#   The claude in window 1 is launched as `claude -n <session-name>-hub` for
-#   hubs / `claude -n <session-name>` for worktrees (see below).
-new_hub_session() {
-    local name="$1" dir="$2" agent="${3:-}"
+# new_agent_session <session-name> <dir> <agent> <agent-command>
+#   Creates a detached tmux session with the standard layout every launcher
+#   here builds: 1 <agent> (warm) · 2 nvim · 3 zsh, landing on the agent.
+#   Only the agent window's name is pinned; nvim's is left on
+#   automatic-rename deliberately, so it tracks whatever runs there after
+#   nvim exits. <agent> is recorded as the session's @agent.
+#   <agent-command> is TYPED into an initialized shell rather than passed as
+#   the tmux session command: a session command skips the zsh rc files, so
+#   other/zshrc.local env (ANTHROPIC_MODEL, TLS, ...) would be missing and
+#   the agent would come up on the wrong model.
+#   CREATION ONLY — no kill, no switch-client, no source-file, no set-hook.
+new_agent_session() {
+    local name="$1" dir="$2" agent="$3" cmd="$4"
     local nvim_win
-
-    [[ "$agent" == "claude" || "$agent" == "codex" ]] || agent=$(agent_default)
 
     tmux new-session -ds "$name" -c "$dir" -n "$(agent_window_name "$agent")"
     # plain name, no "=" prefix: set-option's target parser rejects the
     # exact-match form outright ("no such session: =name")
     tmux set-option -t "$name" @agent "$agent"
     tmux set-option -w -t "${name}:1" automatic-rename off
-    # Claude peer name: `claude -n` sets the display name AND the
-    # cross-session address (ListAgents/SendMessage), stable across --resume.
-    # Hubs (normal clones: .git is a directory) get "<session>-hub";
-    # worktree sessions (.git is a file) keep the bare session name. Only this
-    # front-door window is named; extra claude windows (tmux-claude-window)
-    # stay unnamed (<dir>-NN) so the hub is unambiguous. codex: no equivalent.
-    if [[ "$agent" == "claude" ]]; then
-        local peer="$name"
-        [[ -d "$dir/.git" ]] && peer="${name}-hub"
-        tmux send-keys -t "${name}:1" "claude -n '$peer'" Enter
-    else
-        tmux send-keys -t "${name}:1" "$agent" Enter
-    fi
+    tmux send-keys -t "${name}:1" "$cmd" Enter
 
     nvim_win=$(tmux new-window -t "${name}:" -c "$dir" -P -F '#{window_id}')
     tmux send-keys -t "$nvim_win" "nvim" Enter
@@ -107,6 +95,31 @@ new_hub_session() {
     # new-window selects what it creates, so come back to the agent
     tmux new-window -t "${name}:" -c "$dir"
     tmux select-window -t "${name}:1"
+}
+
+# new_hub_session <session-name> <dir> [agent]
+#   new_agent_session for the human launchers (tmux-sessionizer,
+#   wt-tmux-jump): same layout, with the agent's own bare start command.
+#   [agent] defaults to agent_default.
+#   Claude peer name: `claude -n` sets the display name AND the cross-session
+#   address (ListAgents/SendMessage), stable across --resume. A main checkout
+#   (.git is a directory) gets "<session>-hub"; a worktree session (.git is a
+#   file) keeps the bare session name. Only this front-door window is named;
+#   extra claude windows (tmux-claude-window) stay unnamed (<dir>-NN). codex:
+#   no equivalent.
+new_hub_session() {
+    local name="$1" dir="$2" agent="${3:-}"
+    local peer
+
+    [[ "$agent" == "claude" || "$agent" == "codex" ]] || agent=$(agent_default)
+
+    if [[ "$agent" == "claude" ]]; then
+        peer="$name"
+        [[ -d "$dir/.git" ]] && peer="${name}-hub"
+        new_agent_session "$name" "$dir" "$agent" "claude -n '$peer'"
+    else
+        new_agent_session "$name" "$dir" "$agent" "$agent"
+    fi
 }
 
 # agent_ttys
