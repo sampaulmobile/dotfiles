@@ -8,7 +8,8 @@
 #
 # The report changes NOTHING: every git/gh call is a read and `wt` is only
 # printed. Removal needs both the `sweep` verb and --apply — a read-only mode
-# never grows a deleting flag.
+# never grows a deleting flag. `git worktree remove` (remove_worktree) is this
+# script's ONLY removal: nothing outside a git worktree is ever deleted here.
 #
 # Liveness comes from `lsof -d cwd -Fpn` (a live process's cwd), never from
 # git's worktree lock file (whose reason names the *hub session's* pid, which
@@ -24,8 +25,9 @@
 # data — the worktree is SKIPPED and the files listed, unless --force.
 #
 # A pipeline's `.feature/` is the exception the guard waves through: it feeds
-# the report's PIPELINE column (pipeline_state) and --apply archives it
-# (archive_feature_dir, whose comment carries the invariant).
+# the report's PIPELINE column (pipeline_state) and --apply copies it under
+# ~/.local/state/hq/runs/ (archive_feature_dir, whose comment carries the
+# invariant).
 set -uo pipefail
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
@@ -54,13 +56,16 @@ when no worktree in scope has one.
   -v          print, under each row, the command that would act on it
 
 sweep: remove the MERGED worktrees, guarding against the loss of
-worktree-unique gitignored data. Dry-run by default: REMOVE rows first, then
-SKIP rows, each with the reason it was skipped. A skip for at-risk gitignored
-data lists one line per top-level dir with a file count (-v lists every file).
-A worktree with a .feature/ names, under its REMOVE row, the
-~/.local/state/hq/runs/ directory --apply archives that pipeline history to.
-Exit 0 on a clean run; 2 when --apply left a worktree in place through a
-failure, its removal's or its archive's.
+worktree-unique gitignored data. Dry-run by default. Rows are grouped REMOVE,
+then SKIP (each with the reason it was skipped), then — under --apply —
+FAILED, the worktrees left in place by a failed archive or a failed removal. A
+skip for at-risk gitignored data lists one line per top-level dir with a file
+count (-v lists every file). A worktree with a .feature/ names, under its
+REMOVE row, the ~/.local/state/hq/runs/<repo>/<branch-slug>/<UTC-stamp>/
+directory --apply copies that pipeline history to; the history is append-only
+(a sweep adds a directory and removes none), and a copy that fails is left
+beside it as <dir>.partial. Exit 0 on a clean run; 2 when --apply left a
+worktree in place through a failure, its removal's or its archive's.
   --apply     actually remove (default: dry-run — only print what would happen)
   --force     also remove MERGED worktrees that hold at-risk gitignored files
               (the guard's skips); LIVE/DIRTY/unmerged are still never touched
@@ -814,44 +819,36 @@ sweep_would_kill_own_session() {
 }
 
 # feature_archive_dir <repo> <path> <branch> — where a swept worktree's
-#   .feature/ run history is parked. The branch slug maps "/" -> "-", the
-#   sanitisation worktrunk uses for its sibling directories. A detached
-#   worktree has no branch; its directory basename stands in.
+#   .feature/ run history is parked: one UTC-stamped directory per sweep run,
+#   from $SWEEP_STAMP so every row of one sweep shares it (the slug already
+#   differs per row). The branch slug maps "/" -> "-", the sanitisation
+#   worktrunk uses for its sibling directories. A detached worktree has no
+#   branch; its directory basename stands in.
 feature_archive_dir() {
-    local repo="$1" path="$2" branch="$3" slug
+    local repo="$1" path="$2" branch="$3" slug stamp
     slug="${branch:-${path##*/}}"
-    printf '%s/.local/state/hq/runs/%s/%s' "$HOME" "${repo##*/}" "${slug//\//-}"
+    stamp="${SWEEP_STAMP:-}"
+    [[ -n "$stamp" ]] || stamp=$(date -u +%Y%m%dT%H%M%SZ)
+    printf '%s/.local/state/hq/runs/%s/%s/%s' "$HOME" "${repo##*/}" "${slug//\//-}" "$stamp"
 }
 
-# archive_feature_dir <repo> <path> <branch> — replace the archive dir with
-#   this worktree's .feature/: the destination is cleared, never merged into,
-#   so a file of an earlier sweep of the same branch cannot survive into what
-#   a reader takes for one run.
+# archive_feature_dir <repo> <path> <branch> — copy this worktree's .feature/
+#   into its own timestamp directory. The run history is append-only: a sweep
+#   adds a directory and this script removes nothing under runs/, so no run can
+#   be lost to a later sweep of the same branch. The copy lands at
+#   <dest>.partial and is renamed only once whole, so a .partial directory is a
+#   copy that did not finish; it is left on disk for the caller to name.
 archive_feature_dir() {
-    local repo="$1" path="$2" branch="$3" dest stage leaf parent comp
+    local repo="$1" path="$2" branch="$3" dest partial
     [[ -d "$path/.feature" ]] || return 0
     dest=$(feature_archive_dir "$repo" "$path" "$branch")
-    # The two components under runs/ are the only variables in $dest, and the
-    # rm -rf below is contained by them alone — never by git's output format.
-    leaf="${dest##*/}"
-    parent="${dest%/*}"
-    parent="${parent##*/}"
-    for comp in "$leaf" "$parent"; do
-        [[ -n "$comp" && "$comp" != . && "$comp" != .. ]] || return 1
-    done
-    # Staged beside the destination and swapped in only once the copy is
-    # whole, so a copy that fails partway leaves the earlier archive standing.
-    stage="$dest.tmp.$$"
-    rm -rf "$stage" || return 1
-    mkdir -p "$stage" || return 1
-    if ! cp -R "$path/.feature/." "$stage/"; then
-        rm -rf "$stage"
-        return 1
-    fi
-    if ! rm -rf "$dest" || ! mv "$stage" "$dest"; then
-        rm -rf "$stage"
-        return 1
-    fi
+    partial="$dest.partial"
+    mkdir -p "$partial" || return 1
+    cp -R "$path/.feature/." "$partial/" || return 1
+    # mv onto an existing directory nests the copy inside it; the .partial is
+    # left standing instead, holding the run this sweep could not file.
+    [[ -e "$dest" ]] && return 1
+    mv "$partial" "$dest" || return 1
     return 0
 }
 
@@ -945,7 +942,7 @@ sweep_row() {
     # removal, and a failed copy costs the removal, not the history.
     if [[ "$APPLY" == true ]] && ! archive_feature_dir "$repo" "$path" "$branch"; then
         CNT_FAIL=$((CNT_FAIL + 1))
-        rows_add FAILED "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, .feature/ archive failed (left in place)" "" "" ""
+        rows_add FAILED "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, .feature/ archive FAILED, partial at $(shorten "$(feature_archive_dir "$repo" "$path" "$branch").partial")" "" "" ""
         return 0
     fi
 
@@ -1028,6 +1025,10 @@ if [[ "$APPLY" == true ]] && [[ "$LSOF_RAN" == false ]]; then
     echo "worktrees: sweep --apply needs lsof to protect live worktrees; not found" >&2
     exit 2
 fi
+
+# One stamp per run, shared by every row's archive directory.
+SWEEP_STAMP=""
+[[ "$MODE" == sweep ]] && SWEEP_STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 
 # Cache exclude list (single source of truth: dots/worktrunk.toml).
 sweep_excludes=()
@@ -1145,7 +1146,12 @@ if (( ${#repos[@]} )); then
     prof "rows"
     if [[ "$MODE" == sweep ]]; then rows_render 6; else rows_render 9; fi
     prof "render"
-    [[ -n "$PR_PREFETCH_DIR" ]] && rm -rf "$PR_PREFETCH_DIR"
+    # Files this run wrote, then an empty-directory rmdir: no directory tree
+    # is ever deleted by this script, so no path here needs proving safe.
+    if [[ -n "$PR_PREFETCH_DIR" ]]; then
+        rm -f "$PR_PREFETCH_DIR"/* 2>/dev/null
+        rmdir "$PR_PREFETCH_DIR" 2>/dev/null
+    fi
 fi
 fi
 

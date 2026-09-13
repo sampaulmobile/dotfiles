@@ -34,11 +34,10 @@
 # report a phase no one is in any more.
 # feature_archive_dir/archive_feature_dir's cases that matter: a failed copy
 # must REPORT failure, because that return value is the only thing standing
-# between a sweep and a deleted run history; a re-archive of the same branch
-# must leave nothing behind from the previous run, or a later reader sees two
-# runs as one; a copy that dies partway must still leave the previous archive
-# standing; and a `.`/`..`/empty path component must be refused, so the rm -rf
-# is contained by a guard of its own rather than by git's output format.
+# between a sweep and a worktree removed with its run history unwritten; the
+# history is append-only, so a second sweep of the same branch adds a stamp
+# directory beside the first one and leaves it byte-identical; and a copy that
+# dies partway leaves its <dest>.partial behind and no <dest> at all.
 # sweep_row's cases that matter: under --apply a worktree left in place is
 # counted ONCE, and the row's label is the one the summary counts it under.
 
@@ -656,17 +655,30 @@ else
 fi
 
 echo "── feature_archive_dir: where sweep --apply parks a removed worktree's .feature/"
-got=$(HOME=/h feature_archive_dir /r/myrepo /r/myrepo.feat-x feat/x)
-if [[ "$got" == "/h/.local/state/hq/runs/myrepo/feat-x" ]]; then
-    ok "branch slashes sanitized to '-', keyed by repo basename"
+stamp=20260913T101500Z
+got=$(HOME=/h SWEEP_STAMP="$stamp" feature_archive_dir /r/myrepo /r/myrepo.feat-x feat/x)
+if [[ "$got" == "/h/.local/state/hq/runs/myrepo/feat-x/$stamp" ]]; then
+    ok "branch slashes sanitized to '-', keyed by repo basename, stamped"
 else
     bad "feature_archive_dir branch" "got [$got]"
 fi
-got=$(HOME=/h feature_archive_dir /r/myrepo /r/myrepo/.claude/worktrees/agent-7 "")
-if [[ "$got" == "/h/.local/state/hq/runs/myrepo/agent-7" ]]; then
+got=$(HOME=/h SWEEP_STAMP="$stamp" feature_archive_dir /r/proj /r/proj.release-1.2 release/1.2)
+if [[ "$got" == "/h/.local/state/hq/runs/proj/release-1.2/$stamp" ]]; then
+    ok "release/1.2 -> release-1.2 (worktrunk's sanitisation, not the session name)"
+else
+    bad "feature_archive_dir release slug" "got [$got]"
+fi
+got=$(HOME=/h SWEEP_STAMP="$stamp" feature_archive_dir /r/myrepo /r/myrepo/.claude/worktrees/agent-7 "")
+if [[ "$got" == "/h/.local/state/hq/runs/myrepo/agent-7/$stamp" ]]; then
     ok "detached worktree (no branch) -> its directory basename"
 else
     bad "feature_archive_dir detached" "got [$got]"
+fi
+got=$(HOME=/h SWEEP_STAMP="" feature_archive_dir /r/myrepo /r/myrepo.feat-x feat/x)
+if [[ "$got" == /h/.local/state/hq/runs/myrepo/feat-x/2[0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z ]]; then
+    ok "no SWEEP_STAMP -> the function stamps it itself, UTC"
+else
+    bad "feature_archive_dir own stamp" "got [$got]"
 fi
 
 echo "── archive_feature_dir: copies .feature/ out, and only then may the worktree go"
@@ -674,22 +686,24 @@ awt="$tmp/archive-wt"
 mkdir -p "$awt/.feature"
 printf 'line one\n' > "$awt/.feature/status.jsonl"
 printf 'notes\n' > "$awt/.feature/NOTES.md"
-if HOME="$tmp/home" archive_feature_dir /r/myrepo "$awt" feat/y \
-    && [[ -f "$tmp/home/.local/state/hq/runs/myrepo/feat-y/status.jsonl" ]] \
-    && [[ -f "$tmp/home/.local/state/hq/runs/myrepo/feat-y/NOTES.md" ]]; then
+aruns="$tmp/home/.local/state/hq/runs/myrepo/feat-y"
+if HOME="$tmp/home" SWEEP_STAMP=20260913T101500Z archive_feature_dir /r/myrepo "$awt" feat/y \
+    && [[ -f "$aruns/20260913T101500Z/status.jsonl" ]] \
+    && [[ -f "$aruns/20260913T101500Z/NOTES.md" ]]; then
     ok "state tree created and every .feature/ file copied"
 else
-    bad "archive_feature_dir copy" "expected status.jsonl and NOTES.md under $tmp/home/.local/state/hq/runs/myrepo/feat-y"
+    bad "archive_feature_dir copy" "expected status.jsonl and NOTES.md under $aruns/20260913T101500Z"
 fi
-printf 'stale\n' > "$tmp/home/.local/state/hq/runs/myrepo/feat-y/findings-round-9.md"
-if HOME="$tmp/home" archive_feature_dir /r/myrepo "$awt" feat/y \
-    && [[ ! -e "$tmp/home/.local/state/hq/runs/myrepo/feat-y/findings-round-9.md" ]] \
-    && [[ -f "$tmp/home/.local/state/hq/runs/myrepo/feat-y/status.jsonl" ]]; then
-    ok "re-archiving the same branch replaces the dir, leaving no earlier file"
+# Append-only: a second sweep of the same branch must not touch the first run.
+printf 'round two\n' >> "$awt/.feature/status.jsonl"
+if HOME="$tmp/home" SWEEP_STAMP=20260913T110000Z archive_feature_dir /r/myrepo "$awt" feat/y \
+    && [[ "$(wc -l < "$aruns/20260913T101500Z/status.jsonl")" -eq 1 ]] \
+    && [[ "$(wc -l < "$aruns/20260913T110000Z/status.jsonl")" -eq 2 ]]; then
+    ok "a second archive of the branch adds a stamp dir, first run byte-identical"
 else
-    bad "archive_feature_dir snapshot" "expected findings-round-9.md gone and this run's files present"
+    bad "archive_feature_dir append-only" "expected two stamp dirs under $aruns, the first one unchanged"
 fi
-if HOME="$tmp/home" archive_feature_dir /r/myrepo "$tmp/no-such-worktree" feat/z; then
+if HOME="$tmp/home" SWEEP_STAMP=20260913T120000Z archive_feature_dir /r/myrepo "$tmp/no-such-worktree" feat/z; then
     ok "worktree without a .feature/ -> nothing to archive, success"
 else
     bad "archive_feature_dir absent" "expected rc 0 when there is no .feature/"
@@ -697,51 +711,27 @@ fi
 # An unwritable destination must FAIL, so the caller keeps the worktree.
 blocked="$tmp/blocked"
 printf 'not a dir\n' > "$blocked"
-if ! HOME="$blocked" archive_feature_dir /r/myrepo "$awt" feat/y 2>/dev/null; then
+if ! HOME="$blocked" SWEEP_STAMP=20260913T120000Z archive_feature_dir /r/myrepo "$awt" feat/y 2>/dev/null; then
     ok "a failed copy reports failure (the worktree is then not removed)"
 else
     bad "archive_feature_dir failure" "expected non-zero when the destination cannot be created"
 fi
-# A copy that dies partway must leave the previous archive standing, so the
-# staging dir is the only thing lost.
-adest="$tmp/home/.local/state/hq/runs/myrepo/feat-y"
+# A copy that dies partway is kept as <dest>.partial: nothing is deleted, and
+# <dest> stays absent so no reader mistakes the half-copy for a run.
 if [[ "$(id -u)" == 0 ]]; then
     ok "skipped (running as root — an unreadable file is still readable)"
 else
-    # A file only the archive has: it is the proof the dir was never cleared.
-    printf 'previous run\n' > "$adest/findings-round-9.md"
     printf 'secret\n' > "$awt/.feature/unreadable"
     chmod 000 "$awt/.feature/unreadable"
-    if ! HOME="$tmp/home" archive_feature_dir /r/myrepo "$awt" feat/y 2>/dev/null \
-        && [[ -f "$adest/findings-round-9.md" ]] \
-        && [[ -z "$(find "$(dirname "$adest")" -maxdepth 1 -name 'feat-y.tmp.*')" ]]; then
-        ok "a copy failing partway leaves the previous archive and no staging dir"
+    if ! HOME="$tmp/home" SWEEP_STAMP=20260913T130000Z archive_feature_dir /r/myrepo "$awt" feat/y 2>/dev/null \
+        && [[ -d "$aruns/20260913T130000Z.partial" ]] \
+        && [[ ! -e "$aruns/20260913T130000Z" ]]; then
+        ok "a copy that fails leaves <dest>.partial and never creates <dest>"
     else
-        bad "archive_feature_dir partial copy" "expected rc!=0, $adest/findings-round-9.md intact, no feat-y.tmp.* beside it"
+        bad "archive_feature_dir partial copy" "expected rc!=0, $aruns/20260913T130000Z.partial kept, no $aruns/20260913T130000Z"
     fi
-    rm -f "$awt/.feature/unreadable" "$adest/findings-round-9.md"
-fi
-# Containment of the rm -rf must not rest on git's output format.
-mkdir -p "$tmp/home/.local/state/hq/runs/myrepo"
-printf 'sentinel\n' > "$tmp/home/.local/state/hq/runs/myrepo/other-branch"
-if ! HOME="$tmp/home" archive_feature_dir /r/myrepo "$awt" .. 2>/dev/null \
-    && [[ -f "$tmp/home/.local/state/hq/runs/myrepo/other-branch" ]]; then
-    ok "a '..' branch slug is refused before anything is removed"
-else
-    bad "archive_feature_dir dot-dot slug" "expected rc!=0 and the sibling archive untouched"
-fi
-if ! HOME="$tmp/home" archive_feature_dir "/r/.." "$awt" feat/y 2>/dev/null; then
-    ok "a '..' repo basename is refused before anything is removed"
-else
-    bad "archive_feature_dir dot-dot repo" "expected rc!=0"
-fi
-mkdir -p "$tmp/emptyslug/.feature"
-printf 'x\n' > "$tmp/emptyslug/.feature/status.jsonl"
-if ! HOME="$tmp/home" archive_feature_dir /r/myrepo "$tmp/emptyslug/" "" 2>/dev/null \
-    && [[ -f "$tmp/home/.local/state/hq/runs/myrepo/other-branch" ]]; then
-    ok "an empty slug is refused before anything is removed"
-else
-    bad "archive_feature_dir empty slug" "expected rc!=0 and the sibling archive untouched"
+    chmod 644 "$awt/.feature/unreadable"
+    rm -f "$awt/.feature/unreadable"
 fi
 
 echo "── sweep_row counters: what --apply reports when a row is left in place"
@@ -751,9 +741,10 @@ sweep_row_probe() {
     local arc="$1" rmrc="$2"
     (
         APPLY=true VERBOSE=false FORCE=false
+        HOME=/h SWEEP_STAMP=20260913T101500Z
         repo=/r/myrepo
         CNT_REMOVE=0 CNT_SKIP=0 CNT_FAIL=0
-        labels=""
+        labels="" reasons=""
         derive_worktree_facts() {
             f_live=false f_dirty=false f_pr_state=MERGED f_unpushed=false
             f_merged_local=true f_pr_head=cafe f_pr_disp=pr:1 f_age=yesterday f_age_epoch=0
@@ -765,27 +756,27 @@ sweep_row_probe() {
         where_for() { printf 'wt'; }
         archive_feature_dir() { return "$arc"; }
         remove_worktree() { REMOVE_NOTE="" REMOVE_FAIL_NOTE=""; return "$rmrc"; }
-        rows_add() { labels="$labels$1"; }
+        rows_add() { labels="$labels$1"; reasons="$reasons$5"; }
         sweep_row /r/myrepo.feat-x feat/x false false cafe
-        printf 'remove=%d skip=%d fail=%d rows=%s' "$CNT_REMOVE" "$CNT_SKIP" "$CNT_FAIL" "$labels"
+        printf 'remove=%d skip=%d fail=%d rows=%s reason=%s' "$CNT_REMOVE" "$CNT_SKIP" "$CNT_FAIL" "$labels" "$reasons"
     )
 }
 got=$(sweep_row_probe 1 0)
-want='remove=0 skip=0 fail=1 rows=FAILED'
+want='remove=0 skip=0 fail=1 rows=FAILED reason=merged, .feature/ archive FAILED, partial at ~/.local/state/hq/runs/myrepo/feat-x/20260913T101500Z.partial'
 if [[ "$got" == "$want" ]]; then
-    ok "a failed archive counts once, under FAILED, and the row says so"
+    ok "a failed archive counts once, under FAILED, and the row names the partial"
 else
     bad "sweep_row archive failure" "got [$got] want [$want]"
 fi
 got=$(sweep_row_probe 0 1)
-want='remove=1 skip=0 fail=1 rows=REMOVE'
+want='remove=1 skip=0 fail=1 rows=REMOVE reason='
 if [[ "$got" == "$want" ]]; then
     ok "a failed removal still counts FAILED (exit 2) on its REMOVE row"
 else
     bad "sweep_row removal failure" "got [$got] want [$want]"
 fi
 got=$(sweep_row_probe 0 0)
-want='remove=1 skip=0 fail=0 rows=REMOVE'
+want='remove=1 skip=0 fail=0 rows=REMOVE reason='
 if [[ "$got" == "$want" ]]; then
     ok "a clean removal counts neither SKIP nor FAILED"
 else
