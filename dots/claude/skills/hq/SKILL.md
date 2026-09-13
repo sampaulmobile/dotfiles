@@ -91,18 +91,19 @@ ask the user, before dispatching.
 - In-flight state comes from the FILES the pipelines write, never from this
   conversation and never from a ledger of your own: each worktree's
   `.feature/status.jsonl`, whose LAST line is that run's current
-  phase/round/seat. `bin/worktrees` shows the same last line as its PIPELINE
-  column; to read them directly:
+  phase/round/seat. The collector publishes every one of them, refreshed
+  every ~5s; read the file, and refresh it first if you need this second's
+  state:
   ```
-  source ~/dotfiles/bin/project-dirs-lib && project_dirs
-  for d in "${project_dirs_out[@]}"; do
-      [[ -f "$d/.feature/status.jsonl" ]] || continue
-      printf '%s\t%s\n' "$d" "$(awk '$0!=""{l=$0} END{print l}' "$d/.feature/status.jsonl")"
-  done
+  ~/dotfiles/bin/hq-snapshot pipelines   # optional: collect before reading
+  cat ~/.local/state/hq/snapshot/pipelines.tsv
   ```
+  Columns: worktree · tmux session · repo · branch · `<phase> r<round>
+  <seat>` · PR · updated. A worktree with no run in flight has no row.
+  `bin/worktrees` shows the same state as its PIPELINE column.
   A `phase: gate` line means that run is waiting on the requester, not
   working: relay its digest to the user, and on a go send that go by message
-  to the task session itself, which resumes at its implement step. The scan
+  to the task session itself, which resumes at its implement step. The file
   yields the phase, never the digest itself: for a run this session launched
   it arrived here as a message, and otherwise it is at the top of that
   worktree's `workplans/<slug>-plan.md`, or of `.feature/plan.md` when
@@ -111,8 +112,7 @@ ask the user, before dispatching.
   implementation detail.
 - Multi-repo: report per-piece status; the feature is done only when every
   piece lands.
-- Steering: relay user feedback onward by message to the task session,
-  addressed by the name `bin/project-dirs-lib`'s `session_name_for` gives its
-  worktree (`<repo-dir>_<branch-slug>`) — the same name Launch reported and
-  Ctrl+F lists. If the user wants hands-on control, name that session to jump
+- Steering: relay user feedback onward by message to the task session, named
+  in the run's `pipelines.tsv` row — the same name Launch reported and Ctrl+F
+  lists. If the user wants hands-on control, name that session to jump
   to (Ctrl+F).

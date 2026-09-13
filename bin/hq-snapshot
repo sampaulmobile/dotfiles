@@ -18,8 +18,8 @@
 # Sourceable — the reader half (snapshot_file, snapshot_age,
 # snapshot_verdict, snapshot_read, fmt_secs) is what the screens use, so
 # "is this snapshot usable" is decided in exactly one place. Nothing above
-# the source guard sets a shell option or forks, so a screen can source it
-# at any point. See tests/test-hq-snapshot.sh.
+# the source guard sets a shell option or collects anything, so a screen can
+# source it at any point. See tests/test-hq-snapshot.sh.
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 
@@ -109,6 +109,64 @@ snapshot_read() {
     return 0
 }
 
+# jsonl_last_line <file> — the last non-empty line; empty when the file is
+# absent or unreadable. The pipelines' status contract is append-only, so the
+# last line is the current state.
+jsonl_last_line() {
+    local f="$1" l last=""
+    [[ -r "$f" ]] || return 0
+    while IFS= read -r l || [[ -n "$l" ]]; do
+        [[ -n "$l" ]] && last="$l"
+    done < "$f"
+    printf '%s' "$last"
+}
+
+# json_field <json-line> <key> — <key>'s value as text: a quoted string
+# without its quotes, or a bare token (number, true/false) as written. Empty
+# for an absent key and for null, which the status records use for "not yet".
+# A status record is flat and one line, written by the pipeline itself, so a
+# pattern match is the whole parser it needs.
+json_field() {
+    local line="$1" key="$2" re v
+    re="\"$key\"[[:space:]]*:[[:space:]]*\"([^\"]*)\""
+    if [[ "$line" =~ $re ]]; then printf '%s' "${BASH_REMATCH[1]}"; return 0; fi
+    re="\"$key\"[[:space:]]*:[[:space:]]*([^,}[:space:]]+)"
+    if [[ "$line" =~ $re ]]; then
+        v="${BASH_REMATCH[1]}"
+        [[ "$v" == null ]] || printf '%s' "$v"
+    fi
+    return 0
+}
+
+# pipeline_map_load — the pipelines source into the global $pipeline_map, one
+# "<worktree>\t<state>" line per run in flight. Empty when the source has
+# never been written; the CALLER decides whether a stale one is worth
+# refreshing first.
+pipeline_map=""
+pipeline_map_load() {
+    local path state
+    pipeline_map=""
+    while IFS=$'\t' read -r path _ _ _ state _; do
+        [[ -n "$path" && -n "$state" ]] || continue
+        pipeline_map+="${path}"$'\t'"${state}"$'\n'
+    done < <(snapshot_read pipelines 2>/dev/null)
+}
+
+# pipeline_for_cwd <cwd> — the PIPELINE field of the worktree <cwd> sits in
+# or under; nothing when no run is in flight there.
+pipeline_for_cwd() {
+    local cwd="$1" path state
+    [[ -n "$cwd" && -n "$pipeline_map" ]] || return 0
+    while IFS=$'\t' read -r path state; do
+        [[ -n "$path" ]] || continue
+        if [[ "$cwd" == "$path" || "$cwd" == "$path"/* ]]; then
+            printf '%s' "$state"
+            return 0
+        fi
+    done <<< "$pipeline_map"
+    return 0
+}
+
 # Sourced by the screens and by tests/test-hq-snapshot.sh: hand back the
 # helpers above and run no collection.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
@@ -155,6 +213,40 @@ collect_sessions() {
     # shellcheck source=/dev/null
     source "$DOTFILES/bin/tmux-claude-lib" || return 1
     scan_claude_sessions
+}
+
+# collect_pipelines — one row per worktree running a /feature or
+# /address-review pipeline:
+#   <path> <session> <repo> <branch> <state> <pr> <updated>
+# <state> is `<phase> r<round> <seat>`, bin/worktrees' PIPELINE column, from
+# the LAST line of <path>/.feature/status.jsonl. A worktree with no .feature/,
+# an empty jsonl or only the pre-jsonl status.json has no state and no row.
+# Pure filesystem: project_dirs enumerates worktrees by directory shape, so
+# this costs no git and can ride the 5s tick.
+collect_pipelines() {
+    local dir last state repo branch pr updated
+    # shellcheck source=/dev/null
+    source "$DOTFILES/bin/project-dirs-lib" || return 1
+    # pipeline_state, so the PIPELINE column and this file cannot disagree.
+    # shellcheck source=/dev/null
+    source "$DOTFILES/bin/worktrees" || return 1
+    project_dirs
+    (( ${#project_dirs_out[@]} )) || return 0
+    for dir in "${project_dirs_out[@]}"; do
+        state=$(pipeline_state "$dir")
+        [[ -n "$state" ]] || continue
+        last=$(jsonl_last_line "$dir/.feature/status.jsonl")
+        worktree_branch "$dir"
+        branch="$worktree_branch_out"
+        repo="${worktree_repo_out:-$dir}"
+        repo="${repo##*/}"
+        session_name=""
+        session_name_for "$dir"
+        pr=$(json_field "$last" pr)
+        updated=$(json_field "$last" updated)
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$dir" "$session_name" "$repo" "$branch" "$state" "${pr:--}" "${updated:--}"
+    done
 }
 
 # collect_one <source> — produce it, then publish it. The body is held in

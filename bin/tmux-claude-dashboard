@@ -19,6 +19,10 @@
 #            over the main transcript only; - = neither.
 #   STATUS   idle/done/permission rows carry an age since the transcript's
 #            last write (⏳ perm 9m); a row whose cwd is gone shows ✗ gone.
+#   SESSION  also carries the PIPELINE field — `· <phase> r<round> <seat>`
+#            for a row sitting in a /feature or /address-review worktree,
+#            from the snapshot's pipelines source. Dropped, like any column,
+#            before the session name truncates.
 # Keys: j/k navigate · ⏎ switch to the row's exact pane · x kill row (the
 # session when it is that session's only agent row, else just the pane) ·
 # X prune gone rows · a toggle agent trees · r refresh · R hard refresh
@@ -44,6 +48,7 @@
 
 source ~/dotfiles/bin/tmux-claude-lib
 source ~/dotfiles/bin/profile-lib
+source ~/dotfiles/bin/hq-snapshot
 
 CACHE_DIR="/tmp/claude-dashboard"
 mkdir -p "$CACHE_DIR/agents"
@@ -410,6 +415,17 @@ build_frame() {
         (( avail_name_w < 1 )) && avail_name_w=1
 
         local name="${names[$i]}"
+        # PIPELINE rides in the same column, and is dropped rather than
+        # allowed to truncate the name it follows.
+        local pipe="" pipe_field="${pipeline_fields[$i]:-}"
+        if [[ -n "$pipe_field" ]]; then
+            pipe=" · ${pipe_field}"
+            if (( ${#name} + ${#pipe} > avail_name_w )); then
+                pipe=""
+            else
+                avail_name_w=$(( avail_name_w - ${#pipe} ))
+            fi
+        fi
         if (( ${#name} > avail_name_w )); then
             name="${name:0:$(( avail_name_w - 1 ))}…"
         fi
@@ -423,7 +439,8 @@ build_frame() {
         # marker slot + name (+ badge, if this session has working agents)
         out+="  "$'\x01'"${name}"$'\x02'
         (( working_agents > 0 )) && out+="${CYAN}${badge}${RST}"
-        out+="$(printf '%*s' "$(( name_w - ${#name} - ${#badge} + name_gap ))" '')"
+        [[ -n "$pipe" ]] && out+="${DIM}${pipe}${RST}"
+        out+="$(printf '%*s' "$(( name_w - ${#name} - ${#badge} - ${#pipe} + name_gap ))" '')"
 
         # An idle row carrying an attention flag shows as "done", so the
         # dashboard reveals WHICH agent the statusbar's ✅ belongs to. The
@@ -728,6 +745,7 @@ load_data() {
     agent_lines=()
     agent_working_counts=()
     agent_total_counts=()
+    pipeline_fields=()
 
     # show names (computed by reload_sessions) immediately with placeholders
     for sess in "${sessions[@]}"; do
@@ -743,11 +761,18 @@ load_data() {
         agent_lines+=("")
         agent_working_counts+=("0")
         agent_total_counts+=("0")
+        pipeline_fields+=("")
     done
     render
     prof "placeholder frame"
 
     build_cwd_session_map
+    # The pipelines source is a pure filesystem scan; refreshing it here
+    # rather than reading a stale one keeps the PIPELINE field honest without
+    # a second implementation of where the state comes from.
+    [[ "$(snapshot_verdict "$(snapshot_age pipelines)" "$(snapshot_cadence pipelines)")" == fresh ]] \
+        || ~/dotfiles/bin/hq-snapshot pipelines >/dev/null 2>&1
+    pipeline_map_load
 
     # collect all data in parallel — each session writes to a temp file
     local parallel_dir="${CACHE_DIR}/parallel.$$"
@@ -767,7 +792,7 @@ load_data() {
                 jsonl=$(find_pane_jsonl "$pid")
             fi
             stats=$(get_row_stats "${names[$i]}" "$jsonl" "$agent")
-            printf '%s\t%s\t%s' "$cwd_ok" "$st" "$stats" > "${parallel_dir}/${i}"
+            printf '%s\t%s\t%s\t%s' "$cwd" "$cwd_ok" "$st" "$stats" > "${parallel_dir}/${i}"
             # subagent trees are a claude concept (agent-*.jsonl under the
             # session dir); codex rows get an empty file
             if [[ "$agent" == "codex" ]]; then
@@ -785,9 +810,10 @@ load_data() {
     for i in "${!sessions[@]}"; do
         local result_file="${parallel_dir}/${i}"
         if [[ -f "$result_file" ]]; then
-            local cwd_ok st ctx tout tall turns cost mdl mt win
-            IFS=$'\t' read -r cwd_ok st ctx tout tall turns cost mdl mt win < "$result_file"
+            local cwd cwd_ok st ctx tout tall turns cost mdl mt win
+            IFS=$'\t' read -r cwd cwd_ok st ctx tout tall turns cost mdl mt win < "$result_file"
             [[ "$cwd_ok" == "0" ]] && st="gone"
+            pipeline_fields[$i]=$(pipeline_for_cwd "$cwd")
             statuses[$i]="$st"
             contexts[$i]="$ctx"
             outputs[$i]=$(format_tokens "$tout")
