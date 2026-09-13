@@ -73,7 +73,8 @@ fmt_age() {
 # pr_tag <isDraft> <mergeable> <ci> <reviewDecision>
 #   isDraft: true|false. mergeable: MERGEABLE|CONFLICTING|UNKNOWN.
 #   ci: green|red|pending|none (the check rollup state, folded by the jq below).
-#   reviewDecision: APPROVED|CHANGES_REQUESTED|REVIEW_REQUIRED|"".
+#   reviewDecision: APPROVED|CHANGES_REQUESTED|REVIEW_REQUIRED|- (none yet; the
+#   jq writes the placeholder so the column never collapses on `read`).
 #   Prints the one tag. Order IS the precedence.
 pr_tag() {
     local draft="$1" mergeable="$2" ci="$3" review="$4"
@@ -258,7 +259,7 @@ OPEN_JQ='[ (.repository.nameWithOwner | ascii_downcase), .number, .isDraft, (.me
   ( .commits.nodes[0].commit.statusCheckRollup.state
     | if . == null then "none" elif . == "SUCCESS" then "green"
       elif . == "FAILURE" or . == "ERROR" then "red" else "pending" end ),
-  (.reviewDecision // ""), ((now - (.updatedAt | fromdate)) | floor), .title, .url ] | @tsv'
+  (.reviewDecision // "-"), ((now - (.updatedAt | fromdate)) | floor), .title, .url ] | @tsv'
 MERGED_JQ='[ (.repository.nameWithOwner | ascii_downcase), .number, (.mergedAt | fromdate | strflocaltime("%H:%M")), .title, .url ] | @tsv'
 
 # The two searches run in parallel, each in its own subshell with its own
@@ -279,10 +280,7 @@ prof "searches launched"
 # --any-repo the list still supplies dirs for headers, but no longer filters.
 # Computed AFTER the searches are launched: enumerating ~25 repos and reading
 # each remote costs ~1s, which overlaps the network wait instead of adding to it.
-# shellcheck source=/dev/null
-source "$DOTFILES/bin/project-dirs-lib"
-project_dirs
-
+# --snapshot stores the rows unfiltered, so it never computes one.
 scope=$'\n'
 add_scope() {
     local slug
@@ -291,19 +289,23 @@ add_scope() {
     [[ "$scope" == *$'\n'"${slug}"$'\t'* ]] && return 0
     scope+="${slug}"$'\t'"$1"$'\n'
 }
-_cwd_common=$(git rev-parse --git-common-dir 2>/dev/null)
-if [[ "$SHOW_ALL" == false && "$ANY_REPO" == false && -n "$_cwd_common" ]]; then
-    _cwd_common=$(cd "$_cwd_common" 2>/dev/null && pwd -P)
-    add_scope "${_cwd_common%/.git}"
-elif (( ${#project_dirs_out[@]} )); then
-    for cand in "${project_dirs_out[@]}"; do
-        [[ -d "$cand/.git" ]] || continue
-        [[ "$cand" == "$DOTFILES" ]] && continue
-        add_scope "$cand"
-    done
+if [[ "$EMIT" == false ]]; then
+    # shellcheck source=/dev/null
+    source "$DOTFILES/bin/project-dirs-lib"
+    project_dirs
+    _cwd_common=$(git rev-parse --git-common-dir 2>/dev/null)
+    if [[ "$SHOW_ALL" == false && "$ANY_REPO" == false && -n "$_cwd_common" ]]; then
+        _cwd_common=$(cd "$_cwd_common" 2>/dev/null && pwd -P)
+        add_scope "${_cwd_common%/.git}"
+    elif (( ${#project_dirs_out[@]} )); then
+        for cand in "${project_dirs_out[@]}"; do
+            [[ -d "$cand/.git" ]] || continue
+            [[ "$cand" == "$DOTFILES" ]] && continue
+            add_scope "$cand"
+        done
+    fi
+    prof "local scope"
 fi
-
-prof "local scope"
 
 failed=""
 [[ -n "$open_pid" ]] && { wait "$open_pid" || failed+=" open: $(gh_failed "$TMPD/open.err")"; }

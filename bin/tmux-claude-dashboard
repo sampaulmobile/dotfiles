@@ -50,7 +50,7 @@ source ~/dotfiles/bin/tmux-claude-lib
 source ~/dotfiles/bin/profile-lib
 source ~/dotfiles/bin/hq-snapshot
 
-CACHE_DIR="/tmp/claude-dashboard"
+CACHE_DIR="${DASHBOARD_CACHE_DIR:-/tmp/claude-dashboard}"
 mkdir -p "$CACHE_DIR/agents"
 
 # context window per CLAUDE model — drives the CTX% column (percent of
@@ -219,10 +219,12 @@ get_row_stats() {
         IFS=$'\t' read -r tout tall turns cost <<< "$(get_totals_incremental "$jsonl" "$totals_cache")"
     fi
 
-    # render shows this mtime as an age on idle/done/permission rows
+    # render shows this mtime as an age on idle/done/permission rows. The
+    # model column is written "-" when empty: a tab run collapses on `read`,
+    # and the reader in load_data maps it back.
     mt=$(_agent_file_mtime "$jsonl")
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
-        "${ctx:-0}" "${tout:-0}" "${tall:-0}" "${turns:-0}" "${cost:--}" "$mdl" "${mt:-0}" "${win:-0}"
+        "${ctx:-0}" "${tout:-0}" "${tall:-0}" "${turns:-0}" "${cost:--}" "${mdl:--}" "${mt:-0}" "${win:-0}"
 }
 
 # get_row_agent_tree <row-name> <jsonl-path>
@@ -816,6 +818,7 @@ load_data() {
             local cwd cwd_ok st ctx tout tall turns cost mdl mt win
             IFS=$'\t' read -r cwd cwd_ok st ctx tout tall turns cost mdl mt win < "$result_file"
             [[ "$cwd" == "-" ]] && cwd=""
+            [[ "$mdl" == "-" ]] && mdl=""
             [[ "$cwd_ok" == "0" ]] && st="gone"
             pipeline_fields[$i]=$(pipeline_for_cwd "$cwd")
             statuses[$i]="$st"
@@ -848,6 +851,11 @@ load_data() {
     render
     prof "frame"
 }
+
+# Sourced by the test: hand back the helpers and stop.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
 
 # ── main loop ───────────────────────────────────────────
 

@@ -78,10 +78,10 @@ if [[ -z "$leftovers" ]]; then
 else
     bad "tmp file left after a successful write" "$leftovers"
 fi
-if ! grep -q 'rm ' "$repo/bin/hq-snapshot"; then
-    ok "the collector contains no rm at all"
+if ! grep -qwE '\brm\b|rmdir|unlink|-delete' "$repo/bin/hq-snapshot"; then
+    ok "the collector contains no rm, rmdir, unlink or -delete"
 else
-    bad "the collector contains an rm" "$(grep -n 'rm ' "$repo/bin/hq-snapshot")"
+    bad "the collector contains a deletion" "$(grep -nwE '\brm\b|rmdir|unlink|-delete' "$repo/bin/hq-snapshot")"
 fi
 # An empty body is still a write: a consumer must see "no rows", not a stale
 # previous snapshot.

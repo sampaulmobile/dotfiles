@@ -47,6 +47,7 @@ check "changes-requested"            "$(pr_tag false MERGEABLE green CHANGES_REQ
 check "approved"                     "$(pr_tag false MERGEABLE green APPROVED)"          "approved"
 check "review-required"              "$(pr_tag false MERGEABLE green REVIEW_REQUIRED)"   "review-required"
 check "unknown mergeable, no review" "$(pr_tag false UNKNOWN none '')"                  "open"
+check "placeholder review"           "$(pr_tag false MERGEABLE green -)"                 "open"
 
 echo "--open-only / --merged-only over a snapshot"
 # The snapshot holds BOTH halves whatever the flags; the flags choose which of
@@ -59,6 +60,7 @@ printf '%s\n' \
     "meta"$'\t'"author"$'\t'"@me" \
     "meta"$'\t'"since"$'\t'"$since" \
     "open"$'\t'"org/repo"$'\t'"11"$'\t'"false"$'\t'"MERGEABLE"$'\t'"green"$'\t'"APPROVED"$'\t'"900"$'\t'"an open one"$'\t'"https://example.invalid/11" \
+    "open"$'\t'"org/repo"$'\t'"13"$'\t'"false"$'\t'"MERGEABLE"$'\t'"green"$'\t'"-"$'\t'"7200"$'\t'"no review yet"$'\t'"https://example.invalid/13" \
     "merged"$'\t'"org/repo"$'\t'"12"$'\t'"09:30"$'\t'"a merged one"$'\t'"https://example.invalid/12" \
     | snapshot_write prs
 run_prs() {
@@ -79,6 +81,38 @@ shows "--merged-only drops the open row"   "$out" "#11" no
 out=$(run_prs)
 shows "no flag keeps the open row"    "$out" "#11" yes
 shows "no flag keeps the merged row"  "$out" "#12" yes
+# The placeholder review column keeps the age in its column on read.
+shows "placeholder review keeps the age"  "$out" "2h" yes
+
+echo "--snapshot against a fake gh"
+# --snapshot is the collector's entry: it prints both searches tagged with
+# the author and window, and never enumerates the local scope (the render
+# path does, after the searches are launched). A gh on PATH that answers the
+# two searches stands in for GitHub; PRS_PROFILE=1 names the stages run.
+mkdir -p "$work/bin"
+cat > "$work/bin/gh" <<'GH'
+#!/usr/bin/env bash
+q=""
+for a in "$@"; do case "$a" in q=*) q="${a#q=}" ;; esac; done
+case "$q" in
+    *is:open*)   printf 'org/repo\t21\tfalse\tMERGEABLE\tgreen\t-\t900\topen via gh\thttps://example.invalid/21\n' ;;
+    *is:merged*) printf 'org/repo\t22\t09:30\tmerged via gh\thttps://example.invalid/22\n' ;;
+esac
+GH
+chmod +x "$work/bin/gh"
+run_fake() {   # run_fake <args...>; stdout to $work/out, stderr to $work/err
+    PATH="$work/bin:$PATH" HOME="$work/home" PROJECT_DIRS_LOCAL=/nonexistent NO_COLOR=1 PRS_PROFILE=1 \
+        "$repo/bin/prs" --since "$since" "$@" > "$work/out" 2> "$work/err"
+}
+run_fake --snapshot
+shows "--snapshot tags the window"      "$(cat "$work/out")" "meta"$'\t'"since"$'\t'"$since" yes
+shows "--snapshot prints the open row"  "$(cat "$work/out")" "open"$'\t'"org/repo"$'\t'"21" yes
+shows "--snapshot prints the merged row" "$(cat "$work/out")" "merged"$'\t'"org/repo"$'\t'"22" yes
+shows "--snapshot skips the local scope" "$(cat "$work/err")" "local scope" no
+# A different author misses the snapshot, so the render path searches live.
+run_fake --any-repo --author other
+shows "the render path computes the scope" "$(cat "$work/err")" "local scope" yes
+shows "the render path shows the gh row"   "$(cat "$work/out")" "#21" yes
 
 echo; echo "passed $pass, failed $fail"
 (( fail == 0 ))
