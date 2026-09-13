@@ -38,7 +38,7 @@
   no hub-session role; `tests/run.sh` green under both bashes with a new
   offline suite for the helper's naming and command building.
 - **Not doing** — step 2b (`snapshot-collector-plan.md`); renaming
-  `new_hub_session` or dropping its `-hub` peer suffix (see Question);
+  `new_hub_session` or dropping its `-hub` peer suffix (settled at the gate);
   `bin/worktrees`' internal `hub` shorthand for a repo's main checkout (a
   variable name for a directory, not the session role); parameterizing any
   repo's stack; any change to how implementer/reviewer seats are spawned.
@@ -51,10 +51,10 @@
     at the requester (human test plan, item 1).
   - `/clear` in a session kills its background subagents. Verified by: clearing
     a session mid-run and watching its subagent stop (human test plan, item 3).
-  - Run IS the task session's claude, so `--orchestrator=<model[:effort]>` maps
-    to that claude's `--model` and its effort has no CLI knob to land on.
-    Verified by: a Launch with `--orchestrator=opus` producing
-    `claude --model opus -n <session> ...`.
+  - (was an assumption, VERIFIED at the gate) Run IS the task session's
+    claude, and `claude` 2.1.258 has both `--model <model>` and
+    `--effort <level>`, so `--orchestrator=<model[:effort]>` maps to
+    `claude --model <model> --effort <effort>` on the typed command line.
 - **Surface** — `tests/run.sh` under `/bin/bash` 3.2 and the default bash; a
   throwaway `tmux -L task-session-test-$$` server for the helper's real
   behavior; a read of the rendered skill text for the Launch/Run split and the
@@ -63,13 +63,9 @@
   `dots/claude/rules/{worktrees,delegation}.md`, `templates/hq/{CLAUDE.md,routing.md}`,
   `bin/tmux-task-session` (new), `bin/tmux-claude-lib`, `tests/test-task-session.sh`
   (new), `tests/run.sh`, `CLAUDE.md`.
-- **Question** — `new_hub_session` still names a main-checkout session's claude
-  `<basename>-hub`, and the function keeps that name. Nothing consumes the
-  suffix once `/hq`'s find-or-spawn-hub step is gone. Leave both as they are
-  (this plan's default: the plan says the human path is kept, and renaming the
-  peer changes how the user's existing repo sessions are addressed), or rename
-  the function to `new_agent_session` and drop the `-hub` suffix in the same
-  pass?
+- **Question** — asked and answered at the gate: `new_hub_session` and the
+  `-hub` peer suffix it gives a main-checkout session stay exactly as they are.
+  Out of scope for this step.
 
 Reading the code changed: the launch helper became a standalone
 `bin/tmux-task-session` over an extracted shared layout function rather than a
@@ -124,9 +120,11 @@ Launch helper only for the tmux-session naming it already shares.
   - New flags: `--repo=<path>` (Launch target, default the cwd's repo),
     `--requester=<session>` (who Run reports to) and `--run`. Run is the
     orchestrator itself rather than a spawned seat, so `--orchestrator=`'s
-    model becomes the task session's `claude --model` and its effort has no
-    CLI knob; `--quick` runs its single implementer seat inside Run, which is
-    already in the worktree, so no `isolation: "worktree"` is passed.
+    `<model[:effort]>` becomes BOTH `--model <model>` and `--effort <effort>`
+    on the claude command line Launch types, effort defaulting to `high` as the
+    flag doc says. The seat is never left to the machine's `settings.json`
+    `effortLevel`. `--quick` runs its single implementer seat inside Run, which
+    is already in the worktree, so no `isolation: "worktree"` is passed.
 - **`/address-review`**: "find a checkout of the branch; otherwise create one
   with `wt switch <branch>` from the repo's main checkout" (resolved from
   the routing table or the branch's git common dir). No hub wording.
@@ -159,7 +157,7 @@ Launch helper only for the tmux-session naming it already shares.
 - New script `bin/tmux-task-session`, callable from an agent shell:
 
   ```
-  tmux-task-session [--model <model>] <worktree-path> <prompt>
+  tmux-task-session [--model <model>] [--effort <level>] <worktree-path> <prompt>
   ```
 
   It resolves the session name with `session_name_for <worktree-path>`, builds
@@ -188,9 +186,11 @@ Launch helper only for the tmux-session naming it already shares.
 - Offline test `tests/test-task-session.sh`, added to `tests/run.sh`: the
   helper's pure pieces — the session name it derives for an agent worktree and
   a worktrunk sibling (must equal what `session_name_for` gives), and the
-  command string it builds (single-quote escaping of the session name and the
-  path, `--model` present only when asked). No tmux server. The real behavior
-  is checked once by hand on `tmux -L task-session-test-$$`.
+  command string it builds: single-quote escaping of the session name and the
+  path; `--model` and `--effort` each present only when asked, and present
+  TOGETHER with the resolved values when both are — the default seat `opus:high`
+  must build `--model opus --effort high`. No tmux server. The real behavior is
+  checked once by hand on `tmux -L task-session-test-$$`.
 
 ### E. Memory and lessons
 
@@ -249,12 +249,15 @@ Launch helper only for the tmux-session naming it already shares.
 - ASSUMED: `/clear` in a session kills its background subagents. The design
   does not depend on it, but the "clear any session any time" claim does;
   confirm once on a throwaway run.
-- JUDGMENT (literal instruction followed, not extended): this step removes the
-  hub ROLE from prose. It does NOT rename `new_hub_session` or drop the
-  `-hub` peer suffix it gives a main-checkout session — the plan keeps that
-  function for the human paths and says nothing about its naming, and the
-  suffix has no consumer left once `/hq`'s find-or-spawn-hub step is gone.
-  Raised as the digest's Question rather than resolved here.
+- DECIDED at the gate: this step removes the hub ROLE from prose only. It does
+  NOT rename `new_hub_session` and does NOT drop the `-hub` peer suffix it
+  gives a main-checkout session. Out of scope; the suffix simply has no
+  consumer left once `/hq`'s find-or-spawn-hub step is gone.
+- VERIFIED: `claude` 2.1.258 on this machine offers `--effort <level>`
+  ("Effort level for the current session") alongside `--model <model>`
+  (`claude --help`, lines 77 and 128). Both ride on the command line Launch
+  types, so the orchestrator seat's model AND effort are explicit and never
+  inherited from the machine's `settings.json` `effortLevel`.
 - JUDGMENT: `bin/worktrees`, `bin/prs`, `bin/wt-tmux-cleanup` and
   `dots/worktrunk.toml` use `hub` as shorthand for a repo's MAIN CHECKOUT (a
   directory, in local variable names and `--help` scope lines), not for the
@@ -279,4 +282,7 @@ Launch helper only for the tmux-session naming it already shares.
 
 - 2026-09-12: drafted, uncommitted. Gated on step 1 landing.
 - 2026-09-13: step 1 merged; snapshot collector split out to `snapshot-collector-plan.md` (step 2b); A gains the preserve-step-1-text and typed-invocation lines.
+- 2026-09-13: gate passed — Question answered (leave `new_hub_session` and the
+  `-hub` suffix alone), `--effort` verified so the orchestrator seat maps to
+  `--model` + `--effort`.
 - 2026-09-13: planned for implementation — restatement, digest, concrete helper design in C, entry-point flags in A, Assumptions extended.
