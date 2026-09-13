@@ -20,10 +20,13 @@ set -uo pipefail
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 # shellcheck source=/dev/null
 source "$DOTFILES/bin/profile-lib"
+# shellcheck source=/dev/null
+source "$DOTFILES/bin/hq-snapshot"
 
 usage() {
     cat <<'USAGE'
 usage: prs [--all|--any-repo] [--since DATE|Nd] [--author LOGIN] [--open-only] [--merged-only]
+           [--fresh] [--snapshot]
 
 Scope: inside a git repo (hub or worktree), that repo only; anywhere else,
 every project bin/project-dirs-lib knows about that has a GitHub remote.
@@ -42,6 +45,13 @@ approved · review-required · open.
   --since X     merged window: a date (2026-09-01) or Nd (7d). Default: today.
   --author L    GitHub login (default: @me, the gh login).
   --open-only / --merged-only   print just that half.
+  --fresh       recollect the snapshot before rendering.
+  --snapshot    print the search rows bin/hq-snapshot stores, and nothing else.
+
+The two searches come from bin/hq-snapshot's prs source, and the footer says
+how old it is. With no snapshot, one past its cadence, or one collected for a
+different --author or --since, the searches run here and the footer says that
+instead.
 
 PRS_PROFILE=1 adds a stderr line per stage with its elapsed time.
 USAGE
@@ -143,10 +153,13 @@ if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
 fi
 
 SHOW_ALL=false; ANY_REPO=false; SINCE=""; AUTHOR="@me"; WANT_OPEN=true; WANT_MERGED=true
+FRESH=false; EMIT=false; SNAPSHOT_NOTE=""
 while (( $# )); do
     case "$1" in
         --all) SHOW_ALL=true ;;
         --any-repo) ANY_REPO=true ;;
+        --fresh) FRESH=true ;;
+        --snapshot) EMIT=true ;;
         --since) SINCE="${2:-}"; shift ;;
         --author) AUTHOR="${2:-@me}"; shift ;;
         --open-only) WANT_MERGED=false ;;
@@ -167,7 +180,39 @@ fi
 
 prof_init prs "${PRS_PROFILE:-}"
 
-if ! command -v gh >/dev/null 2>&1; then
+# The snapshot holds the searches unfiltered by repo, plus the author and
+# window they were run for: a run asking for a different pair cannot use
+# them. --snapshot is the collector's own entry and always searches.
+FROM_SNAPSHOT=false
+snap_open=""; snap_merged=""
+if [[ "$EMIT" == false ]]; then
+    [[ "$FRESH" == true ]] && "$DOTFILES/bin/hq-snapshot" prs >/dev/null 2>&1
+    _sv=$(snapshot_verdict "$(snapshot_age prs)" "$(snapshot_cadence prs)")
+    if [[ "$_sv" == fresh ]]; then
+        _sauthor=""; _ssince=""
+        # Prefix-stripped, never `read`-split: a search row can carry an
+        # empty column, and a tab is IFS whitespace, so splitting here would
+        # not give back the row the live path holds.
+        while IFS= read -r _line; do
+            case "$_line" in
+                "meta"$'\t'"author"$'\t'*) _sauthor="${_line#meta$'\t'author$'\t'}" ;;
+                "meta"$'\t'"since"$'\t'*)  _ssince="${_line#meta$'\t'since$'\t'}" ;;
+                "open"$'\t'*)              snap_open+="${_line#open$'\t'}"$'\n' ;;
+                "merged"$'\t'*)            snap_merged+="${_line#merged$'\t'}"$'\n' ;;
+            esac
+        done < <(snapshot_read prs)
+        if [[ "$_sauthor" == "$AUTHOR" && "$_ssince" == "$SINCE" ]]; then
+            FROM_SNAPSHOT=true
+            SNAPSHOT_NOTE="snapshot: $(fmt_secs "$(snapshot_age prs)") old  (--fresh to recollect)"
+        else
+            SNAPSHOT_NOTE="snapshot is for --author $_sauthor --since $_ssince — searched live"
+        fi
+    else
+        SNAPSHOT_NOTE="snapshot $_sv — searched live  (bin/hq-snapshot prs writes one)"
+    fi
+fi
+
+if [[ "$FROM_SNAPSHOT" == false ]] && ! command -v gh >/dev/null 2>&1; then
     echo "prs: gh not installed" >&2; exit 2
 fi
 
@@ -219,13 +264,15 @@ MERGED_JQ='[ (.repository.nameWithOwner | ascii_downcase), .number, (.mergedAt |
 # The two searches run in parallel, each in its own subshell with its own
 # stderr file; the run fails as a whole if either does.
 open_pid=""; merged_pid=""
-if [[ "$WANT_OPEN" == true ]]; then
-    ( GH_ERRF="$TMPD/open.err"; search_prs "is:pr is:open archived:false author:$AUTHOR sort:updated-desc" "$OPEN_JQ" ) > "$TMPD/open" &
-    open_pid=$!
-fi
-if [[ "$WANT_MERGED" == true ]]; then
-    ( GH_ERRF="$TMPD/merged.err"; search_prs "is:pr is:merged archived:false author:$AUTHOR merged:>=$SINCE sort:updated-desc" "$MERGED_JQ" ) > "$TMPD/merged" &
-    merged_pid=$!
+if [[ "$FROM_SNAPSHOT" == false ]]; then
+    if [[ "$WANT_OPEN" == true ]]; then
+        ( GH_ERRF="$TMPD/open.err"; search_prs "is:pr is:open archived:false author:$AUTHOR sort:updated-desc" "$OPEN_JQ" ) > "$TMPD/open" &
+        open_pid=$!
+    fi
+    if [[ "$WANT_MERGED" == true ]]; then
+        ( GH_ERRF="$TMPD/merged.err"; search_prs "is:pr is:merged archived:false author:$AUTHOR merged:>=$SINCE sort:updated-desc" "$MERGED_JQ" ) > "$TMPD/merged" &
+        merged_pid=$!
+    fi
 fi
 prof "searches launched"
 # Scope: "<slug>\t<dir>" per local repo, in bin/project-dirs-lib order. With
@@ -264,8 +311,31 @@ failed=""
 prof "gh searches"
 [[ -n "$failed" ]] && { echo "prs: gh failed (after one retry):$failed" >&2; exit 1; }
 open_rows=""; merged_rows=""
-[[ -n "$open_pid" ]] && open_rows=$(cat "$TMPD/open")
-[[ -n "$merged_pid" ]] && merged_rows=$(cat "$TMPD/merged")
+if [[ "$FROM_SNAPSHOT" == true ]]; then
+    open_rows="${snap_open%$'\n'}"
+    merged_rows="${snap_merged%$'\n'}"
+else
+    [[ -n "$open_pid" ]] && open_rows=$(cat "$TMPD/open")
+    [[ -n "$merged_pid" ]] && merged_rows=$(cat "$TMPD/merged")
+fi
+
+# --snapshot stores the searches unfiltered by repo, tagged with the author
+# and window they answer for. The scope filter below belongs to whoever
+# renders them.
+if [[ "$EMIT" == true ]]; then
+    printf 'meta\tauthor\t%s\n' "$AUTHOR"
+    printf 'meta\tsince\t%s\n' "$SINCE"
+    emit_rows_() {
+        local kind="$1" rows="$2" line
+        [[ -n "$rows" ]] || return 0
+        while IFS= read -r line; do
+            [[ -n "$line" ]] && printf '%s\t%s\n' "$kind" "$line"
+        done <<< "$rows"
+    }
+    emit_rows_ open "$open_rows"
+    emit_rows_ merged "$merged_rows"
+    exit 0
+fi
 
 # Repo order: scope first (project-dirs order), then — with --any-repo only —
 # every other slug the rows mention, first seen.
@@ -318,5 +388,12 @@ while IFS= read -r slug; do
 done <<< "$slugs"
 
 [[ "$printed_any" == false ]] && echo "no PRs open or merged since $SINCE in scope (--any-repo widens it)"
+if [[ -n "$SNAPSHOT_NOTE" ]]; then
+    if [[ -n "$C_RESET" ]]; then
+        printf '\033[2m%s%s\n' "$SNAPSHOT_NOTE" "$C_RESET"
+    else
+        printf '%s\n' "$SNAPSHOT_NOTE"
+    fi
+fi
 prof "render"
 exit 0

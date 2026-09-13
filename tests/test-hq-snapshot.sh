@@ -286,6 +286,56 @@ cp_ state "$p_state" "implement r1 implementer"
 cp_ pr "$p_pr" "-"
 cp_ updated "$p_upd" "2026-09-13T02:00:00Z"
 
+echo "── the record formats round-trip through a snapshot"
+# A worktrees row and a prs search row both carry columns that can be empty.
+# A tab is IFS whitespace, so a run of them collapses on `read`: the worktrees
+# record writes "-" for an absent branch or pipeline, and the prs reader
+# strips its kind prefix instead of splitting. Both are pinned here.
+printf '%s\n' \
+    "meta"$'\t'"gh_ok"$'\t'"true" \
+    "meta"$'\t'"lsof"$'\t'"true" \
+    "/repo"$'\t'"MERGED"$'\t'"-"$'\t'"no PR"$'\t'"-"$'\t'"2 days ago"$'\t'"wt"$'\t'"-"$'\t'"1789155336"$'\t'"/repo.x"$'\t'"false"$'\t'"false" \
+    | snapshot_write worktrees
+IFS=$'\t' read -r w_repo w_bucket w_branch w_pr w_flags w_age w_where w_pipe w_epoch w_path w_locked w_sweep \
+    <<< "$(snapshot_read worktrees | grep -v '^meta')"
+rt_() {
+    if [[ "$2" == "$3" ]]; then ok "$1 -> [$2]"; else bad "$1" "got [$2] want [$3]"; fi
+}
+rt_ "worktrees repo"   "$w_repo"   "/repo"
+rt_ "worktrees branch" "$w_branch" "-"
+rt_ "worktrees pipe"   "$w_pipe"   "-"
+rt_ "worktrees epoch"  "$w_epoch"  "1789155336"
+rt_ "worktrees path"   "$w_path"   "/repo.x"
+rt_ "worktrees sweep"  "$w_sweep"  "false"
+
+# The prs row below has an empty reviewDecision column, which is what the
+# kind-prefix strip has to survive.
+prs_row="org/repo"$'\t'"7"$'\t'"false"$'\t'"MERGEABLE"$'\t'"green"$'\t'$'\t'"900"$'\t'"a title"$'\t'"https://example.invalid/7"
+printf '%s\n' \
+    "meta"$'\t'"author"$'\t'"@me" \
+    "meta"$'\t'"since"$'\t'"2026-09-13" \
+    "open"$'\t'"$prs_row" \
+    | snapshot_write prs
+got_row=""
+while IFS= read -r line; do
+    case "$line" in "open"$'\t'*) got_row="${line#open$'\t'}" ;; esac
+done < <(snapshot_read prs)
+rt_ "prs row survives the kind prefix" "$got_row" "$prs_row"
+
+echo "── bin/worktrees --snapshot and bin/prs --snapshot are the producers"
+# Both are what collect_worktrees/collect_prs run; asserted here by reading
+# the scripts, since running them would need a real repo set and gh.
+if grep -q 'bin/worktrees" --snapshot' "$repo/bin/hq-snapshot"; then
+    ok "collect_worktrees runs bin/worktrees --snapshot"
+else
+    bad "collect_worktrees producer" "does not run bin/worktrees --snapshot"
+fi
+if grep -q 'bin/prs" --snapshot' "$repo/bin/hq-snapshot"; then
+    ok "collect_prs runs bin/prs --snapshot"
+else
+    bad "collect_prs producer" "does not run bin/prs --snapshot"
+fi
+
 echo
 if (( fail )); then
     echo "FAILED: $fail failed, $pass passed"

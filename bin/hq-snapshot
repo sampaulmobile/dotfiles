@@ -21,6 +21,16 @@
 # the source guard sets a shell option or collects anything, so a screen can
 # source it at any point. See tests/test-hq-snapshot.sh.
 
+# Loaded twice in one process when this script is RUNNING and something it
+# sources sources it back (collect_pipelines -> bin/worktrees -> here): hand
+# back the helpers already defined. Without this the BASH_SOURCE guard below
+# reads "executed" — $0 really is this file — and the command line at the
+# bottom runs again on whatever $@ the caller happened to have.
+if [[ -n "${HQ_SNAPSHOT_LOADED:-}" ]]; then
+    return 0 2>/dev/null || true
+fi
+HQ_SNAPSHOT_LOADED=1
+
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 
 SNAPSHOT_DIR="${HQ_SNAPSHOT_DIR:-$HOME/.local/state/hq/snapshot}"
@@ -249,6 +259,20 @@ collect_pipelines() {
     done
 }
 
+# collect_worktrees — bin/worktrees' own row records for every project, gh
+# online. `--snapshot` is that script's emit mode: the classification is
+# computed once, there, and rendered by whoever reads this file.
+collect_worktrees() {
+    "$DOTFILES/bin/worktrees" --snapshot
+}
+
+# collect_prs — bin/prs' two GitHub searches, unfiltered by repo, with the
+# author and merged-window the run used recorded as meta rows. A reader whose
+# own author/window differ cannot use them and searches for itself.
+collect_prs() {
+    "$DOTFILES/bin/prs" --snapshot
+}
+
 # collect_one <source> — produce it, then publish it. The body is held in
 # full first: a producer that fails must leave the previous snapshot alone
 # rather than publish a truncated one.
@@ -317,7 +341,11 @@ case "${1:-}" in
         exit 0
         ;;
     all)
-        for s in $SNAPSHOT_SOURCES; do
+        # Slowest source first, so the short-cadence ones are the freshest
+        # when the run ends and a --check straight after it agrees.
+        rev=""
+        for s in $SNAPSHOT_SOURCES; do rev="$s $rev"; done
+        for s in $rev; do
             collect_one "${s%%:*}" || rc=1
         done
         exit "$rc"

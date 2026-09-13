@@ -35,6 +35,8 @@ set -uo pipefail
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 # shellcheck source=/dev/null
 source "$DOTFILES/bin/profile-lib"
+# shellcheck source=/dev/null
+source "$DOTFILES/bin/hq-snapshot"
 
 usage() {
     cat <<'EOF'
@@ -53,8 +55,14 @@ MERGED, ABANDONED or PRUNABLE. A worktree running a /feature or
 /address-review pipeline also shows a PIPELINE column, `<phase> r<round>
 <seat>` from the last line of its .feature/status.jsonl; the column is absent
 when no worktree in scope has one.
+
+The report renders bin/hq-snapshot's worktrees source and says how old it is;
+with no snapshot, or one past its cadence, it computes live and says that
+instead. sweep always computes live — it acts on what it sees.
   --offline   skip gh entirely (every worktree's PR state -> pr:unknown)
   --all       every project (those with no linked worktree are omitted)
+  --fresh     recollect the snapshot before rendering
+  --snapshot  print the row records bin/hq-snapshot stores, and nothing else
   -v          print, under each row, the command that would act on it
 
 sweep: remove the MERGED worktrees, guarding against the loss of
@@ -210,6 +218,7 @@ count_cell() {
 # data source the run had to do without. Silent otherwise: a healthy
 # everything-run needs no footer.
 source_warnings() {
+    [[ -n "${SNAPSHOT_NOTE:-}" ]] && printf '%s\n' "$SNAPSHOT_NOTE"
     if [[ -n "${SCOPED:-}" ]]; then
         if [[ -n "$C_RESET" ]]; then
             printf '\033[2mscope: %s  (--all for every project)%s\n' "$(shorten "$SCOPED")" "$C_RESET"
@@ -1182,12 +1191,21 @@ VERBOSE=false
 SHOW_ALL=false
 APPLY=false
 FORCE=false
+FRESH=false
+EMIT=false
+SNAPSHOT_NOTE=""
 for arg in "$@"; do
     case "$arg" in
         --offline) OFFLINE=true ;;
         -v|--verbose) VERBOSE=true ;;
         -h|--help) usage; exit 0 ;;
         --all) SHOW_ALL=true ;;
+        --fresh)
+            [[ "$MODE" == report ]] || { echo "worktrees: --fresh is a report flag; sweep always computes live" >&2; exit 2; }
+            FRESH=true ;;
+        --snapshot)
+            [[ "$MODE" == report ]] || { echo "worktrees: --snapshot is a report flag" >&2; exit 2; }
+            EMIT=true; SHOW_ALL=true ;;
         --apply)
             [[ "$MODE" == sweep ]] || { echo "worktrees: --apply needs the sweep verb: worktrees sweep --apply" >&2; exit 2; }
             APPLY=true ;;
@@ -1216,6 +1234,26 @@ fi
 
 prof_init worktrees "${WORKTREES_PROFILE:-}"
 
+# The report renders bin/hq-snapshot's worktrees source when there is a
+# usable one; sweep never does, because it acts on what it sees, --snapshot
+# is the collector's own entry, and --offline says "ask git only, now",
+# where the flag can still mean something.
+USE_SNAPSHOT=false
+if [[ "$MODE" == report && "$EMIT" == false && "$OFFLINE" == false ]]; then
+    [[ "$FRESH" == true ]] && "$DOTFILES/bin/hq-snapshot" worktrees >/dev/null 2>&1
+    _sv=$(snapshot_verdict "$(snapshot_age worktrees)" "$(snapshot_cadence worktrees)")
+    if [[ "$_sv" == fresh ]]; then
+        USE_SNAPSHOT=true
+        SNAPSHOT_NOTE="snapshot: $(fmt_secs "$(snapshot_age worktrees)") old  (--fresh to recollect)"
+    else
+        SNAPSHOT_NOTE="snapshot $_sv — computed live  (bin/hq-snapshot worktrees writes one)"
+    fi
+fi
+prof "snapshot"
+
+# lsof, the project enumeration and the worktree lists are the live path's
+# inputs; rendering records asks for none of them.
+if [[ "$USE_SNAPSHOT" == false ]]; then
 init_liveness
 prof "liveness (lsof)"
 
@@ -1242,6 +1280,7 @@ fi
 source "$DOTFILES/bin/project-dirs-lib"
 project_dirs
 prof "project dirs"
+fi
 
 repos=()
 repos_seen=$'\n'
@@ -1256,7 +1295,7 @@ if [[ "$SHOW_ALL" == false && -n "$_cwd_common" ]]; then
     repos=("$SCOPED")
 # Guarded on element count, not just "declared": bash 3.2 treats
 # "${arr[@]}" on a zero-element array as unbound under `set -u`.
-elif (( ${#project_dirs_out[@]} )); then
+elif [[ "$USE_SNAPSHOT" == false ]] && (( ${#project_dirs_out[@]} )); then
     for _cand in "${project_dirs_out[@]}"; do
         [[ -d "$_cand/.git" ]] || continue
         [[ "$repos_seen" == *$'\n'"$_cand"$'\n'* ]] && continue
@@ -1293,7 +1332,6 @@ report_row() {
 
     local bucket flags
     bucket=$(classify_worktree "$f_live" "$f_dirty" "$prunable" "$f_pr_state" "$f_unpushed" "$f_merged_local")
-    count_bucket "$bucket"
 
     flags=""
     [[ "$locked" == true ]] && flags+="locked "
@@ -1302,9 +1340,30 @@ report_row() {
     flags="${flags% }"
     [[ -z "$flags" ]] && flags="-"
 
-    local detail="" sweepable_dirty=false
+    # Only -v and the snapshot need this, and it forks git: a plain report
+    # never asks.
+    local sweepable_dirty=false
+    if [[ "$bucket" == DIRTY ]] && [[ "$VERBOSE" == true || "$EMIT" == true ]] \
+        && merged_under_untracked "$prunable"; then
+        sweepable_dirty=true
+    fi
+
+    # "-" for an absent branch or pipeline, never an empty field: a tab is
+    # IFS whitespace, so `read` collapses a run of them and every later
+    # column would shift left.
+    if [[ "$EMIT" == true ]]; then
+        local pipe
+        pipe=$(pipeline_state "$path")
+        printf 'row\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$repo" "$bucket" "${branch:--}" "$f_pr_disp" "$flags" "$f_age" \
+            "$(where_for "$path" "$repo")" "${pipe:--}" "$f_age_epoch" \
+            "$path" "$locked" "$sweepable_dirty"
+        return
+    fi
+
+    count_bucket "$bucket"
+    local detail=""
     if [[ "$VERBOSE" == true ]]; then
-        if [[ "$bucket" == DIRTY ]] && merged_under_untracked "$prunable"; then sweepable_dirty=true; fi
         detail="      $(action_for "$bucket" "$repo" "$path" "$branch" "$locked" "$sweepable_dirty")"
     fi
     rows_add "$bucket" "${branch:-(detached)}" "$f_pr_disp" "$flags" "$f_age" "$(where_for "$path" "$repo")" "$(pipeline_state "$path")" "$detail" "$f_age_epoch"
@@ -1314,9 +1373,61 @@ on_worktree_block() {
     if [[ "$MODE" == sweep ]]; then sweep_row "$@"; else report_row "$@"; fi
 }
 
+# render_snapshot_rows — buffer every row record of bin/hq-snapshot's
+# worktrees source that is in scope, then print the same table the live path
+# does. The records ARE the live path's output (bin/worktrees --snapshot is
+# what the collector runs), so nothing here classifies anything.
+render_snapshot_rows() {
+    local kind r_repo bucket branch pr_disp flags age where pipe epoch path locked sweepable
+    rows_reset
+    repos=()
+    repos_seen=$'\n'
+    while IFS=$'\t' read -r kind r_repo bucket branch pr_disp flags age where pipe epoch path locked sweepable; do
+        case "$kind" in
+            meta)
+                case "$r_repo" in
+                    gh_ok) GH_OK="$bucket" ;;
+                    lsof)  LSOF_RAN="$bucket" ;;
+                esac
+                continue ;;
+            row) ;;
+            *) continue ;;
+        esac
+        [[ -n "${SCOPED:-}" && "$r_repo" != "$SCOPED" ]] && continue
+        [[ "$branch" == "-" ]] && branch=""
+        [[ "$pipe" == "-" ]] && pipe=""
+        if [[ "$repos_seen" != *$'\n'"$r_repo"$'\n'* ]]; then
+            repos_seen+="$r_repo"$'\n'
+            repos+=("$r_repo")
+        fi
+        count_bucket "$bucket"
+        local detail=""
+        if [[ "$VERBOSE" == true ]]; then
+            detail="      $(action_for "$bucket" "$r_repo" "$path" "$branch" "$locked" "$sweepable")"
+        fi
+        repo="$r_repo"
+        rows_add "$bucket" "${branch:-(detached)}" "$pr_disp" "$flags" "$age" "$where" "$pipe" "$detail" "$epoch"
+    done < <(snapshot_read worktrees)
+    (( ${#repos[@]} )) && rows_render 9
+    return 0
+}
+
+# The report renders the snapshot when there is a usable one; sweep never
+# does, because it acts on what it sees. --snapshot is the collector's own
+# entry and computes live by definition.
+# The degraded-source state of the collection run, so a screen rendering the
+# records prints the same warnings the live path would have.
+if [[ "$EMIT" == true ]]; then
+    printf 'meta\tgh_ok\t%s\n' "$GH_OK"
+    printf 'meta\tlsof\t%s\n' "$LSOF_RAN"
+fi
+
+if [[ "$USE_SNAPSHOT" == true ]]; then
+    render_snapshot_rows
+    prof "render"
+elif (( ${#repos[@]} )); then
 # Guarded on element count, not just "declared" — see the note above the
 # same guard around project_dirs_out.
-if (( ${#repos[@]} )); then
 # One `git worktree list` per repo, cached. It decides which repos have a
 # linked worktree — the only ones queried, processed or shown — and feeds the
 # porcelain straight into the loop below. A repo with only its hub costs this
@@ -1351,7 +1462,13 @@ if (( ${#repos[@]} )); then
         parse_porcelain_blocks "$repo" <<< "${_porc[_i]}"
     done
     prof "rows"
-    if [[ "$MODE" == sweep ]]; then rows_render 6; else rows_render 9; fi
+    if [[ "$EMIT" == true ]]; then
+        :
+    elif [[ "$MODE" == sweep ]]; then
+        rows_render 6
+    else
+        rows_render 9
+    fi
     prof "render"
     # Files this run wrote, then an empty-directory rmdir: no directory tree
     # is ever deleted by this script, so no path here needs proving safe.
@@ -1361,6 +1478,11 @@ if (( ${#repos[@]} )); then
     fi
 fi
 fi
+
+# --snapshot prints records and nothing else: no table, no summary, no
+# footer. Exit 0 whatever the buckets hold — the exit code belongs to the
+# report the collector is feeding, not to the collection.
+[[ "$EMIT" == true ]] && exit 0
 
 echo
 if [[ "$MODE" == sweep ]]; then
