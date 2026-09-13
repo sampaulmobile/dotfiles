@@ -328,16 +328,17 @@ action_for() {
     esac
 }
 
-# parse_porcelain_blocks <repo>
+# parse_porcelain_blocks <repo> [<callback>]
 #   Reads `git worktree list --porcelain` from stdin and calls
-#   on_worktree_block <path> <branch> <locked> <prunable> <wt_head> once per
-#   block, skipping <repo> itself (the main worktree, always listed first by
-#   git) and flushing a trailing block that has no blank line after it.
+#   <callback> (default on_worktree_block) with
+#   <path> <branch> <locked> <prunable> <wt_head> once per block, skipping
+#   <repo> itself (the main worktree, always listed first by git) and
+#   flushing a trailing block that has no blank line after it.
 #   on_worktree_block belongs to the CALLER, not this file: the report below
 #   defines the real one, tests/test-worktrees.sh a recording stub —
 #   which is what lets the parser be exercised with no git and no gh.
 parse_porcelain_blocks() {
-    local repo="$1"
+    local repo="$1" cb="${2:-on_worktree_block}"
     local path="" branch="" locked=false prunable=false wt_head=""
     local have_block=false
 
@@ -345,7 +346,7 @@ parse_porcelain_blocks() {
         [[ "$have_block" == true ]] || return 0
         have_block=false
         [[ "$path" == "$repo" ]] && return 0
-        on_worktree_block "$path" "$branch" "$locked" "$prunable" "$wt_head"
+        "$cb" "$path" "$branch" "$locked" "$prunable" "$wt_head"
     }
 
     while IFS= read -r line; do
@@ -512,6 +513,123 @@ porcelain_untracked_only() {
     return 0
 }
 
+# ---- per-repo fact cache ----
+# Three of derive_worktree_facts' questions are answerable for a whole repo at
+# once: the origin ref of each worktree branch, the default ref's commit, and
+# which worktree branches are reachable from it. prime_repo_facts asks them in
+# three git processes per REPO; the repo_fact_* accessors read the answers, or
+# fork exactly the call they replace when this repo was never primed (which is
+# how tests/test-worktrees.sh drives derive_worktree_facts directly).
+REPO_FACTS_REPO=""
+REPO_FACTS_REFS=""
+REPO_FACTS_MERGED=$'\n'
+REPO_FACTS_AGES=""
+REPO_FACTS_DEFAULT_SHA=""
+
+# collect_worktree_block — a parse_porcelain_blocks callback that only records
+# the branch and HEAD of each live block, for prime_repo_facts to batch over.
+_cw_branches=()
+_cw_heads=()
+collect_worktree_block() {
+    local branch="$2" prunable="$4" wt_head="$5"
+    [[ "$prunable" == true ]] && return 0
+    [[ -n "$branch" ]] && _cw_branches+=("$branch")
+    # An unborn HEAD's all-zero sha is no object: batching it would fail the
+    # whole `show -s` and cost every worktree the per-worktree fallback.
+    case "$wt_head" in
+        *[!0]*) _cw_heads+=("$wt_head") ;;
+    esac
+    return 0
+}
+
+# prime_repo_facts <repo> — fill the cache for <repo> from _cw_branches /
+# _cw_heads. Reads $default_ref from the caller.
+prime_repo_facts() {
+    local repo="$1" b r pats=()
+    REPO_FACTS_REPO="$repo"
+    REPO_FACTS_REFS=""; REPO_FACTS_MERGED=$'\n'; REPO_FACTS_AGES=""; REPO_FACTS_DEFAULT_SHA=""
+
+    if (( ${#_cw_branches[@]} )); then
+        for b in "${_cw_branches[@]}"; do pats+=("refs/heads/$b" "refs/remotes/origin/$b"); done
+        REPO_FACTS_REFS=$(git -C "$repo" for-each-ref --format='%(refname)%09%(objectname)' "${pats[@]}" 2>/dev/null)
+    fi
+
+    if [[ -n "$default_ref" ]]; then
+        REPO_FACTS_DEFAULT_SHA=$(git -C "$repo" rev-parse --verify -q "$default_ref" 2>/dev/null)
+        if [[ -n "$REPO_FACTS_DEFAULT_SHA" ]] && (( ${#_cw_branches[@]} )); then
+            pats=()
+            for b in "${_cw_branches[@]}"; do pats+=("refs/heads/$b"); done
+            while IFS= read -r r; do
+                [[ -n "$r" ]] && REPO_FACTS_MERGED+="$r"$'\n'
+            done < <(git -C "$repo" for-each-ref --merged="$default_ref" --format='%(refname)' "${pats[@]}" 2>/dev/null)
+        fi
+    fi
+
+    # One `show -s` for every worktree HEAD. A sha git cannot read makes the
+    # whole call fail, which only costs the per-worktree fallback below.
+    if (( ${#_cw_heads[@]} )); then
+        REPO_FACTS_AGES=$(git -C "$repo" show -s --format='%H%x09%cr%x09%ct' "${_cw_heads[@]}" 2>/dev/null)
+    fi
+}
+
+# repo_fact_ref_sha <refname> — <refname>'s commit, empty when it has none.
+repo_fact_ref_sha() {
+    local want="$1" line
+    if [[ "$REPO_FACTS_REPO" == "$repo" ]]; then
+        while IFS= read -r line; do
+            [[ "${line%%$'\t'*}" == "$want" ]] || continue
+            printf '%s' "${line#*$'\t'}"
+            return 0
+        done <<< "$REPO_FACTS_REFS"
+        return 0
+    fi
+    git -C "$repo" rev-parse --verify -q "$want" 2>/dev/null
+}
+
+# repo_fact_default_sha — $default_ref's commit, empty when it has none.
+repo_fact_default_sha() {
+    if [[ "$REPO_FACTS_REPO" == "$repo" ]]; then
+        printf '%s' "$REPO_FACTS_DEFAULT_SHA"
+        return 0
+    fi
+    git -C "$repo" rev-parse --verify -q "$default_ref" 2>/dev/null
+}
+
+# repo_fact_merged_into_default <branch> <wt_head> — true when <wt_head> is
+# reachable from $default_ref. The batch answers that for refs/heads/<branch>,
+# so it stands in only while that ref IS <wt_head>; an unprimed repo, a
+# branch git never had, or a ref that has moved falls through to the ancestry
+# test itself.
+repo_fact_merged_into_default() {
+    local branch="$1" wt_head="$2"
+    if [[ "$REPO_FACTS_REPO" == "$repo" ]] && [[ -n "$wt_head" ]] \
+        && [[ "$(repo_fact_ref_sha "refs/heads/$branch")" == "$wt_head" ]]; then
+        case "$REPO_FACTS_MERGED" in
+            *$'\n'"refs/heads/$branch"$'\n'*) return 0 ;;
+        esac
+        return 1
+    fi
+    git -C "$repo" merge-base --is-ancestor "$wt_head" "$default_ref" 2>/dev/null
+}
+
+# repo_fact_age <sha> <path> — "<%cr>\t<%ct>" for the worktree's HEAD commit,
+# empty when there is no commit to read.
+repo_fact_age() {
+    local sha="$1" path="$2" line
+    if [[ -n "$sha" ]]; then
+        if [[ "$REPO_FACTS_REPO" == "$repo" ]]; then
+            while IFS= read -r line; do
+                [[ "${line%%$'\t'*}" == "$sha" ]] || continue
+                printf '%s' "${line#*$'\t'}"
+                return 0
+            done <<< "$REPO_FACTS_AGES"
+        fi
+        git -C "$path" log -1 --format='%cr%x09%ct' "$sha" 2>/dev/null
+        return 0
+    fi
+    git -C "$path" log -1 --format='%cr%x09%ct' 2>/dev/null
+}
+
 # derive_worktree_facts <path> <branch> <prunable> <wt_head>
 #   Compute the per-worktree facts classify_worktree needs, into the globals
 #   f_live f_dirty f_untracked_only f_unpushed f_merged_local f_pr_state
@@ -544,13 +662,17 @@ derive_worktree_facts() {
     fi
 
     if [[ -n "$branch" ]]; then
-        if git -C "$repo" rev-parse --verify -q "refs/remotes/origin/$branch" >/dev/null 2>&1; then
+        local origin_sha
+        origin_sha=$(repo_fact_ref_sha "refs/remotes/origin/$branch")
+        if [[ -z "$origin_sha" ]]; then
+            f_unpushed=true
+        elif [[ "$origin_sha" == "$wt_head" ]]; then
+            f_unpushed=false
+        else
             local ahead
             ahead=$(git -C "$repo" rev-list --count "origin/$branch..$wt_head" 2>/dev/null)
             [[ -z "$ahead" ]] && ahead=0
             if (( ahead > 0 )); then f_unpushed=true; else f_unpushed=false; fi
-        else
-            f_unpushed=true
         fi
         # --is-ancestor is trivially true for a branch that never diverged
         # (fresh `wt switch -c`, parked before its first commit), and the ref
@@ -559,21 +681,25 @@ derive_worktree_facts() {
         # branch reflog exists (oldest entry = creation point; reflogs are in
         # the common dir, visible from the hub) — the branch must have a
         # commit of its own since creation. Reset-to-creation reads as none.
+        # The reflog is read only once ancestry says the branch is folded in,
+        # so it and its rev-list cost nothing on an unmerged branch.
         local default_sha created own
-        default_sha=$(git -C "$repo" rev-parse --verify -q "$default_ref" 2>/dev/null)
-        created=""
-        while IFS= read -r _sha; do created="$_sha"; done \
-            < <(git -C "$repo" reflog show --format=%H "refs/heads/$branch" 2>/dev/null)
-        own=""
-        if [[ -n "$created" ]]; then
-            own=$(git -C "$repo" rev-list --count "$created..$wt_head" 2>/dev/null)
-        fi
+        default_sha=$(repo_fact_default_sha)
+        f_merged_local=false
         if [[ -n "$default_ref" ]] && [[ -n "$default_sha" ]] && [[ "$wt_head" != "$default_sha" ]] \
-            && [[ "$own" != 0 ]] \
-            && git -C "$repo" merge-base --is-ancestor "$wt_head" "$default_ref" 2>/dev/null; then
-            f_merged_local=true
-        else
-            f_merged_local=false
+            && repo_fact_merged_into_default "$branch" "$wt_head"; then
+            created=""
+            while IFS= read -r _sha; do created="$_sha"; done \
+                < <(git -C "$repo" reflog show --format=%H "refs/heads/$branch" 2>/dev/null)
+            own=""
+            if [[ -n "$created" ]]; then
+                if [[ "$created" == "$wt_head" ]]; then
+                    own=0
+                else
+                    own=$(git -C "$repo" rev-list --count "$created..$wt_head" 2>/dev/null)
+                fi
+            fi
+            [[ "$own" != 0 ]] && f_merged_local=true
         fi
     else
         # Detached HEAD has no branch to push or diff against a default.
@@ -617,12 +743,12 @@ derive_worktree_facts() {
         fi
     fi
 
-    # One log call for both age forms: %cr for display, %ct as the sort key
-    # (%cr "7 weeks ago" is unsortable). "-"/0 when there is no commit to read.
+    # Both age forms at once: %cr for display, %ct as the sort key (%cr
+    # "7 weeks ago" is unsortable). "-"/0 when there is no commit to read.
     local _age
-    _age=$(git -C "$path" log -1 --format='%cr%n%ct' 2>/dev/null)
-    f_age="${_age%%$'\n'*}"; [[ -z "$f_age" ]] && f_age="-"
-    f_age_epoch="${_age##*$'\n'}"; [[ -z "$f_age_epoch" ]] && f_age_epoch=0
+    _age=$(repo_fact_age "$wt_head" "$path")
+    f_age="${_age%%$'\t'*}"; [[ -z "$f_age" ]] && f_age="-"
+    f_age_epoch="${_age##*$'\t'}"; [[ -z "$f_age_epoch" ]] && f_age_epoch=0
 }
 
 # pipeline_state <worktree-path> — the PIPELINE column: `<phase> r<round>
@@ -1214,6 +1340,12 @@ if (( ${#repos[@]} )); then
     for _i in "${!repos[@]}"; do
         repo="${repos[_i]}"
         default_ref=$(default_ref_for "$repo")
+        # Two passes over the same porcelain: the first only lists the repo's
+        # worktree branches and HEADs so prime_repo_facts can ask git about
+        # all of them at once, the second builds the rows.
+        _cw_branches=(); _cw_heads=()
+        parse_porcelain_blocks "$repo" collect_worktree_block <<< "${_porc[_i]}"
+        prime_repo_facts "$repo"
         # A herestring, not a pipe: on_worktree_block must run in this shell so
         # the counters and, under --apply, the removals take effect here.
         parse_porcelain_blocks "$repo" <<< "${_porc[_i]}"

@@ -283,6 +283,36 @@ else
     fail=$(( fail + 1 ))
 fi
 
+echo "── prime_repo_facts: the batched answers match the per-worktree forks"
+# The report primes the cache per repo and derive_worktree_facts reads it;
+# everything above runs unprimed and forks instead. The two must agree on
+# every f_* fact, or the batching changed the report.
+facts_line() {
+    printf '%s|%s|%s|%s|%s|%s' \
+        "$f_live" "$f_dirty" "$f_untracked_only" "$f_unpushed" "$f_merged_local" "$f_age_epoch"
+}
+prime_cmp() {
+    local branch="$1" head="$2" unprimed primed
+    REPO_FACTS_REPO=""
+    derive_worktree_facts "$wd" "$branch" false "$head"
+    unprimed=$(facts_line)
+    _cw_branches=("$branch"); _cw_heads=("$head")
+    prime_repo_facts "$wd"
+    derive_worktree_facts "$wd" "$branch" false "$head"
+    primed=$(facts_line)
+    REPO_FACTS_REPO=""
+    if [[ "$primed" == "$unprimed" ]]; then
+        printf '  ok   %s -> [%s]\n' "$branch" "$primed"
+        pass=$(( pass + 1 ))
+    else
+        printf '  FAIL %s\n       primed   [%s]\n       unprimed [%s]\n' "$branch" "$primed" "$unprimed"
+        fail=$(( fail + 1 ))
+    fi
+}
+prime_cmp real "$real_sha"
+prime_cmp stale "$zero_sha"
+prime_cmp zero-commit-branch "$zero_sha"
+
 echo "── pipeline_state: the PIPELINE column comes from the LAST jsonl line"
 # pipeline_ <label> <want>   (fixture worktree: $pwt)
 pwt="$dtmp/pipe-wt"
