@@ -84,11 +84,25 @@ SCOPE       the repo; the paths it may touch, and the ones it may not
 CONTEXT     pointers only (PR, issue, wiki page, file path). For multi-repo
             work: this piece's place in the whole — what the other repos are
             doing, ordering, the interface between the pieces
-ACCEPTANCE  checkable lines, one per condition
+ACCEPTANCE  checkable lines, one per condition. State the END STATE
+            ("the section has no typos or grammar errors") and any change
+            the requester asked for by name. Do not state the specific
+            edits the dispatcher worked out while scoping ("add the missing
+            period on line 165"): deciding what to change is the
+            orchestrator's job in its plan step, with the whole file in front
+            of it. Written here, the dispatcher's guess becomes the standard
+            the run is graded against
 VERIFY      the commands to run, or the surface to verify on
 FORBIDDEN   what this task must not do, beyond the global rules
-FLAGS       the /feature flags to pass through verbatim (--go when the
-            acceptance criteria above already settle the plan)
+FLAGS       the /feature flags to pass through verbatim. Add --go only when
+            ACCEPTANCE names the specific change, not just the target: a
+            task whose plan phase decides WHAT to change ("fix what you
+            find") keeps the gate, however small the target. Express a
+            small task through the flags the pipeline knows — --no-workplan
+            (plan stays uncommitted, gate and review still run) or --quick
+            (one seat, no review) — never through a FORBIDDEN line that
+            fights the pipeline's defaults, such as naming the only file
+            allowed to change when the pipeline commits a workplan.
 REPORT      the digest, then the PR URL, by SendMessage to <THIS session's
             name>
 ```
