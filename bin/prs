@@ -312,8 +312,10 @@ prof "gh searches"
 [[ -n "$failed" ]] && { echo "prs: gh failed (after one retry):$failed" >&2; exit 1; }
 open_rows=""; merged_rows=""
 if [[ "$FROM_SNAPSHOT" == true ]]; then
-    open_rows="${snap_open%$'\n'}"
-    merged_rows="${snap_merged%$'\n'}"
+    # The snapshot always holds both halves; --open-only / --merged-only pick
+    # here, where the live path picks by running only one search.
+    [[ "$WANT_OPEN" == true ]] && open_rows="${snap_open%$'\n'}"
+    [[ "$WANT_MERGED" == true ]] && merged_rows="${snap_merged%$'\n'}"
 else
     [[ -n "$open_pid" ]] && open_rows=$(cat "$TMPD/open")
     [[ -n "$merged_pid" ]] && merged_rows=$(cat "$TMPD/merged")
