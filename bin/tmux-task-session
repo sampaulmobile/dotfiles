@@ -108,9 +108,13 @@ task_main() {
 
     while (( $# )); do
         case "$1" in
-            --model)   model="${2-}";  shift 2 ;;
+            --model)
+                (( $# >= 2 )) || { printf 'tmux-task-session: --model needs a value\n' >&2; return 2; }
+                model="$2"; shift 2 ;;
             --model=*) model="${1#*=}"; shift ;;
-            --effort)   effort="${2-}";  shift 2 ;;
+            --effort)
+                (( $# >= 2 )) || { printf 'tmux-task-session: --effort needs a value\n' >&2; return 2; }
+                effort="$2"; shift 2 ;;
             --effort=*) effort="${1#*=}"; shift ;;
             -h|--help) task_usage; return 0 ;;
             --) shift; break ;;
