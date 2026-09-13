@@ -112,7 +112,10 @@ ask the user, before dispatching.
   A `phase: gate` line means that run is waiting on the requester, not
   working: relay its digest to the user, and on a go send that go to the
   session that ran `/feature` — that session is the orchestrator's parent and
-  resumes it by name; this one cannot.
+  resumes it by name; this one cannot. The scan yields the phase, never the
+  digest itself: for a run this session dispatched it is in the message sent
+  to the brief's REPORT address, and otherwise at the top of that worktree's
+  `workplans/<slug>-plan.md`, or of `.feature/plan.md` when workplans are off.
 - Relay results to the user as they land — PR URLs and summaries, not
   implementation detail.
 - Multi-repo: report per-piece status; the feature is done only when every

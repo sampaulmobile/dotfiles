@@ -146,7 +146,7 @@ Spawn a FRESH reviewer subagent (`subagent_type: "<REVIEWER_EFFORT>"`, `model: "
 Reply with ONLY: the PR URL (raw, on its own line), a 2-line summary of what was built, rounds used, count of unresolved findings, the worktree path, and the Lessons block below.
 
 **Lessons** — at most three, each a FACT the run learned (a gotcha, a convention, a follow-up), never a preference about how the user wants work done. Written at step 5, before the push. Tag each `repo`, `wiki`, `backlog`, `dotfiles` or `none`:
-- `repo` — write it into the repo's CLAUDE.md and name it under "Open for the reviewer": prose the human on the PR judges.
+- `repo` — write it into the repo's CLAUDE.md and name it under "Open for the reviewer": prose the human on the PR judges. Under `--local` there is no PR body, so name it in the report instead.
 - `wiki` — report it; the hub session appends it to the repo's module page in the vault and commits, per the knowledge rule.
 - `backlog` — report it; the hub session appends it to the hq backlog as an inbox item.
 - `dotfiles` — propose it in the report only. Never apply it.
