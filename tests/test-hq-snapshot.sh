@@ -286,6 +286,23 @@ cp_ state "$p_state" "implement r1 implementer"
 cp_ pr "$p_pr" "-"
 cp_ updated "$p_upd" "2026-09-13T02:00:00Z"
 
+echo "── a detached worktree's row keeps its columns in place"
+# HEAD at a raw sha means no branch; the empty column would collapse on the
+# `read` in pipeline_map_load, which takes column 5 for the state.
+mk_wt loose "0000000000000000000000000000000000000000"
+mkdir -p "$fh/dev/proj/.claude/worktrees/loose/.feature"
+printf '%s\n' '{"repo":"proj","branch":null,"phase":"review","round":2,"seat":"reviewer","pr":null,"updated":"2026-09-13T03:00:00Z"}' \
+    > "$fh/dev/proj/.claude/worktrees/loose/.feature/status.jsonl"
+HOME="$fh" PROJECT_DIRS_LOCAL=/nonexistent HQ_SNAPSHOT_DIR="$work/snapshot" \
+    "$repo/bin/hq-snapshot" pipelines >/dev/null 2>&1
+pipeline_map_load
+got=$(pipeline_for_cwd "$fh/dev/proj/.claude/worktrees/loose")
+if [[ "$got" == "review r2 reviewer" ]]; then
+    ok "a detached worktree's state reads back"
+else
+    bad "detached worktree state" "got [$got] want [review r2 reviewer]"
+fi
+
 echo "── the record formats round-trip through a snapshot"
 # A worktrees row and a prs search row both carry columns that can be empty.
 # A tab is IFS whitespace, so a run of them collapses on `read`: the worktrees
