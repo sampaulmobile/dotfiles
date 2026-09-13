@@ -230,7 +230,7 @@ writer, so a session's conversation is never the only copy of anything.
   a second sweep of the same repo and branch adds a directory and leaves the
   first byte-identical; a copy that fails leaves its `.partial` and no stamp
   directory.
-- ASSUMED: step 6's profile numbers cannot all be collected from inside this
+- VERIFIED (2026-09-13, by hand): step 6's profile numbers cannot all be collected from inside this
   pipeline. `bin/worktrees` and `bin/prs` are non-interactive and read-only, so
   their numbers are real measurements taken here. `bin/tmux-claude-dashboard`
   is a full-screen TUI that reads a key with `read -rsn1` and needs a tty; a
@@ -291,13 +291,16 @@ Same run online (`--all`): pr prefetch 2018ms, rows 4203ms, total 7496ms.
 | render | 139ms |
 | **total** | **2591ms** |
 
-`bin/tmux-claude-dashboard` is a full-screen TUI blocking on `read -rsn1`; a
-pipeline agent has no tty, so its number is NOT collected here. The command a
-human runs (press `q` once it has drawn, then read the file):
+`DASHBOARD_PROFILE=1 bin/tmux-claude-dashboard 2>/tmp/dash.prof`, run by hand
+in a terminal (the TUI needs a tty), 2026-09-13:
 
-```
-DASHBOARD_PROFILE=1 bin/tmux-claude-dashboard 2>/tmp/dash.prof
-```
+| stage | elapsed |
+|---|---|
+| pane scan | 78ms |
+| placeholder frame | 60ms |
+| per-row collect | 363ms |
+| frame | 133ms |
+| **total** | **634ms** |
 
 Findings, for the step-2 collector rather than this PR:
 
