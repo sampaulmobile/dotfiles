@@ -104,7 +104,7 @@ paint() {
 # order below (act-on-these first, then surface, then in-progress). A row's
 # detail is pre-indented text printed beneath it, "" for none — the CALLER
 # decides whether a detail is attached (e.g. only under -v).
-BUCKET_ORDER="MERGED ABANDONED PRUNABLE PARKED SHIPPED? DIRTY IN-REVIEW LIVE REMOVE SKIP"
+BUCKET_ORDER="MERGED ABANDONED PRUNABLE PARKED SHIPPED? DIRTY IN-REVIEW LIVE REMOVE SKIP FAILED"
 row_n=0
 rows_reset() {
     row_n=0
@@ -249,7 +249,7 @@ where_for() {
 #   live/dirty/prunable/unpushed/merged_local: "true" or "false".
 #   pr_state: one of MERGED, CLOSED, OPEN, none, unknown.
 #   Prints the bucket name. First match wins — the order below IS the
-#   precedence, and tests/test-worktree-doctor.sh pins it.
+#   precedence, and tests/test-worktrees.sh pins it.
 classify_worktree() {
     local live="$1" dirty="$2" prunable="$3" pr_state="$4" unpushed="$5" merged_local="$6"
 
@@ -317,7 +317,7 @@ action_for() {
 #   block, skipping <repo> itself (the main worktree, always listed first by
 #   git) and flushing a trailing block that has no blank line after it.
 #   on_worktree_block belongs to the CALLER, not this file: the report below
-#   defines the real one, tests/test-worktree-doctor.sh a recording stub —
+#   defines the real one, tests/test-worktrees.sh a recording stub —
 #   which is what lets the parser be exercised with no git and no gh.
 parse_porcelain_blocks() {
     local repo="$1"
@@ -824,22 +824,38 @@ feature_archive_dir() {
 }
 
 # archive_feature_dir <repo> <path> <branch> — replace the archive dir with
-#   this worktree's .feature/. The destination is cleared first, so a second
-#   sweep of the same branch cannot leave a file of the first one's behind for
-#   a reader to mistake for part of this run. Non-zero when the copy fails,
-#   and the caller must then leave the worktree in place: the run history is
-#   worth more than the sweep.
+#   this worktree's .feature/: the destination is cleared, never merged into,
+#   so a file of an earlier sweep of the same branch cannot survive into what
+#   a reader takes for one run.
 archive_feature_dir() {
-    local repo="$1" path="$2" branch="$3" dest
+    local repo="$1" path="$2" branch="$3" dest stage leaf parent comp
     [[ -d "$path/.feature" ]] || return 0
     dest=$(feature_archive_dir "$repo" "$path" "$branch")
-    rm -rf "$dest" || return 1
-    mkdir -p "$dest" || return 1
-    cp -R "$path/.feature/." "$dest/" || return 1
+    # The two components under runs/ are the only variables in $dest, and the
+    # rm -rf below is contained by them alone — never by git's output format.
+    leaf="${dest##*/}"
+    parent="${dest%/*}"
+    parent="${parent##*/}"
+    for comp in "$leaf" "$parent"; do
+        [[ -n "$comp" && "$comp" != . && "$comp" != .. ]] || return 1
+    done
+    # Staged beside the destination and swapped in only once the copy is
+    # whole, so a copy that fails partway leaves the earlier archive standing.
+    stage="$dest.tmp.$$"
+    rm -rf "$stage" || return 1
+    mkdir -p "$stage" || return 1
+    if ! cp -R "$path/.feature/." "$stage/"; then
+        rm -rf "$stage"
+        return 1
+    fi
+    if ! rm -rf "$dest" || ! mv "$stage" "$dest"; then
+        rm -rf "$stage"
+        return 1
+    fi
     return 0
 }
 
-# Sourced (tests/test-worktree-sweep.sh) rather than executed: hand back the
+# Sourced (tests/test-worktrees.sh) rather than executed: hand back the
 # guard functions above and run none of the sweep below.
 
 # remove_worktree <repo> <path> <branch> <locked> — the removal itself
@@ -867,6 +883,91 @@ remove_worktree() {
         REMOVE_NOTE="; branch $branch KEPT (git branch -D failed — delete it by hand)"
     fi
     return 0
+}
+
+# sweep_row <path> <branch> <locked> <prunable> <wt_head>
+#   The sweep's per-worktree callback; acts only on MERGED. Buffers a row and
+#   bumps the counters in THIS shell — the caller is fed by process
+#   substitution, not a pipe, so both survive. Under --apply the removal
+#   happens here; only the printing is deferred.
+sweep_row() {
+    local path="$1" branch="$2" locked="$3" prunable="$4" wt_head="$5"
+    local bucket at_risk detail listing reason nl=$'\n'
+
+    derive_worktree_facts "$path" "$branch" "$prunable" "$wt_head"
+    bucket=$(classify_worktree "$f_live" "$f_dirty" "$prunable" "$f_pr_state" "$f_unpushed" "$f_merged_local")
+    [[ "$bucket" == MERGED ]] || return 0
+
+    # Removable only if the worktree carries nothing the merge did not.
+    if ! sweep_is_removable "$bucket" "$f_unpushed" "$f_pr_state" "$f_pr_head" "$wt_head" "$f_merged_local"; then
+        CNT_SKIP=$((CNT_SKIP + 1))
+        if [[ "$f_pr_state" == MERGED && -n "$f_pr_head" ]]; then
+            reason="merged, not at PR head"
+        else
+            reason="merged, unpushed (no remote)"
+        fi
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "$reason" "" "" ""
+        return 0
+    fi
+
+    at_risk=$(worktree_ignored_at_risk "$path" "$repo")
+
+    if [[ -n "$at_risk" ]] && [[ "$FORCE" == false ]]; then
+        CNT_SKIP=$((CNT_SKIP + 1))
+        if [[ "$VERBOSE" == true ]]; then
+            listing=$(printf '%s\n' "$at_risk" | grep . | sed 's/^/        /')
+        else
+            listing=$(printf '%s\n' "$at_risk" | summarize_at_risk)
+        fi
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, has gitignored data" "" "" "$listing"
+        return 0
+    fi
+
+    # The post-remove hook would kill the session this sweep runs in.
+    if sweep_would_kill_own_session "$repo" "$path" "$branch"; then
+        CNT_SKIP=$((CNT_SKIP + 1))
+        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, in this session" "" "" ""
+        return 0
+    fi
+
+    # Re-check liveness right before the point of no return: the snapshot
+    # predates the slow (one gh call per row) work above.
+    if [[ "$APPLY" == true ]]; then
+        init_liveness
+        if is_live "$path"; then
+            CNT_SKIP=$((CNT_SKIP + 1))
+            rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, now live" "" "" ""
+            return 0
+        fi
+    fi
+
+    # Run history outlives the worktree: the copy must be on disk before the
+    # removal, and a failed copy costs the removal, not the history.
+    if [[ "$APPLY" == true ]] && ! archive_feature_dir "$repo" "$path" "$branch"; then
+        CNT_FAIL=$((CNT_FAIL + 1))
+        rows_add FAILED "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, .feature/ archive failed (left in place)" "" "" ""
+        return 0
+    fi
+
+    CNT_REMOVE=$((CNT_REMOVE + 1))
+    detail=""
+    if [[ -n "$at_risk" ]]; then
+        detail="      --force: dropping at-risk gitignored files"
+    fi
+    if [[ -d "$path/.feature" ]]; then
+        detail+="${detail:+$nl}      .feature/ -> $(shorten "$(feature_archive_dir "$repo" "$path" "$branch")")"
+    fi
+    if [[ "$APPLY" == true ]]; then
+        if remove_worktree "$repo" "$path" "$branch" "$locked"; then
+            detail+="${detail:+$nl}      removed$REMOVE_NOTE"
+        else
+            CNT_FAIL=$((CNT_FAIL + 1))
+            detail+="${detail:+$nl}      $(paint FAILED 6) to remove (left in place)$REMOVE_FAIL_NOTE"
+        fi
+    elif [[ "$VERBOSE" == true ]]; then
+        detail+="${detail:+$nl}      would run: $(sweep_remove_cmd "$repo" "$path" "$branch" "$locked")"
+    fi
+    rows_add REMOVE "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" "" "$detail"
 }
 
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
@@ -1005,92 +1106,6 @@ report_row() {
         detail="      $(action_for "$bucket" "$repo" "$path" "$branch" "$locked")"
     fi
     rows_add "$bucket" "${branch:-(detached)}" "$f_pr_disp" "$flags" "$f_age" "$(where_for "$path" "$repo")" "$(pipeline_state "$path")" "$detail" "$f_age_epoch"
-}
-
-# sweep_row <path> <branch> <locked> <prunable> <wt_head>
-#   The sweep's per-worktree callback; acts only on MERGED. Buffers a row and
-#   bumps the counters in THIS shell — the caller is fed by process
-#   substitution, not a pipe, so both survive. Under --apply the removal
-#   happens here; only the printing is deferred.
-sweep_row() {
-    local path="$1" branch="$2" locked="$3" prunable="$4" wt_head="$5"
-    local bucket at_risk detail listing reason nl=$'\n'
-
-    derive_worktree_facts "$path" "$branch" "$prunable" "$wt_head"
-    bucket=$(classify_worktree "$f_live" "$f_dirty" "$prunable" "$f_pr_state" "$f_unpushed" "$f_merged_local")
-    [[ "$bucket" == MERGED ]] || return 0
-
-    # Removable only if the worktree carries nothing the merge did not.
-    if ! sweep_is_removable "$bucket" "$f_unpushed" "$f_pr_state" "$f_pr_head" "$wt_head" "$f_merged_local"; then
-        CNT_SKIP=$((CNT_SKIP + 1))
-        if [[ "$f_pr_state" == MERGED && -n "$f_pr_head" ]]; then
-            reason="merged, not at PR head"
-        else
-            reason="merged, unpushed (no remote)"
-        fi
-        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "$reason" "" "" ""
-        return 0
-    fi
-
-    at_risk=$(worktree_ignored_at_risk "$path" "$repo")
-
-    if [[ -n "$at_risk" ]] && [[ "$FORCE" == false ]]; then
-        CNT_SKIP=$((CNT_SKIP + 1))
-        if [[ "$VERBOSE" == true ]]; then
-            listing=$(printf '%s\n' "$at_risk" | grep . | sed 's/^/        /')
-        else
-            listing=$(printf '%s\n' "$at_risk" | summarize_at_risk)
-        fi
-        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, has gitignored data" "" "" "$listing"
-        return 0
-    fi
-
-    # The post-remove hook would kill the session this sweep runs in.
-    if sweep_would_kill_own_session "$repo" "$path" "$branch"; then
-        CNT_SKIP=$((CNT_SKIP + 1))
-        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, in this session" "" "" ""
-        return 0
-    fi
-
-    # Re-check liveness right before the point of no return: the snapshot
-    # predates the slow (one gh call per row) work above.
-    if [[ "$APPLY" == true ]]; then
-        init_liveness
-        if is_live "$path"; then
-            CNT_SKIP=$((CNT_SKIP + 1))
-            rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, now live" "" "" ""
-            return 0
-        fi
-    fi
-
-    # Run history outlives the worktree: the copy must be on disk before the
-    # removal, and a failed copy costs the removal, not the history.
-    if [[ "$APPLY" == true ]] && ! archive_feature_dir "$repo" "$path" "$branch"; then
-        CNT_SKIP=$((CNT_SKIP + 1))
-        CNT_FAIL=$((CNT_FAIL + 1))
-        rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, .feature/ archive FAILED" "" "" ""
-        return 0
-    fi
-
-    CNT_REMOVE=$((CNT_REMOVE + 1))
-    detail=""
-    if [[ -n "$at_risk" ]]; then
-        detail="      --force: dropping at-risk gitignored files"
-    fi
-    if [[ -d "$path/.feature" ]]; then
-        detail+="${detail:+$nl}      .feature/ -> $(shorten "$(feature_archive_dir "$repo" "$path" "$branch")")"
-    fi
-    if [[ "$APPLY" == true ]]; then
-        if remove_worktree "$repo" "$path" "$branch" "$locked"; then
-            detail+="${detail:+$nl}      removed$REMOVE_NOTE"
-        else
-            CNT_FAIL=$((CNT_FAIL + 1))
-            detail+="${detail:+$nl}      $(paint FAILED 6) to remove (left in place)$REMOVE_FAIL_NOTE"
-        fi
-    elif [[ "$VERBOSE" == true ]]; then
-        detail+="${detail:+$nl}      would run: $(sweep_remove_cmd "$repo" "$path" "$branch" "$locked")"
-    fi
-    rows_add REMOVE "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" "" "$detail"
 }
 
 on_worktree_block() {

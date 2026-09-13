@@ -34,9 +34,13 @@
 # report a phase no one is in any more.
 # feature_archive_dir/archive_feature_dir's cases that matter: a failed copy
 # must REPORT failure, because that return value is the only thing standing
-# between a sweep and a deleted run history; and a re-archive of the same
-# branch must leave nothing behind from the previous run, or a later reader
-# sees two runs as one.
+# between a sweep and a deleted run history; a re-archive of the same branch
+# must leave nothing behind from the previous run, or a later reader sees two
+# runs as one; a copy that dies partway must still leave the previous archive
+# standing; and a `.`/`..`/empty path component must be refused, so the rm -rf
+# is contained by a guard of its own rather than by git's output format.
+# sweep_row's cases that matter: under --apply a worktree left in place is
+# counted ONCE, and the row's label is the one the summary counts it under.
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo_dir=$(dirname "$here")
@@ -697,6 +701,95 @@ if ! HOME="$blocked" archive_feature_dir /r/myrepo "$awt" feat/y 2>/dev/null; th
     ok "a failed copy reports failure (the worktree is then not removed)"
 else
     bad "archive_feature_dir failure" "expected non-zero when the destination cannot be created"
+fi
+# A copy that dies partway must leave the previous archive standing, so the
+# staging dir is the only thing lost.
+adest="$tmp/home/.local/state/hq/runs/myrepo/feat-y"
+if [[ "$(id -u)" == 0 ]]; then
+    ok "skipped (running as root — an unreadable file is still readable)"
+else
+    # A file only the archive has: it is the proof the dir was never cleared.
+    printf 'previous run\n' > "$adest/findings-round-9.md"
+    printf 'secret\n' > "$awt/.feature/unreadable"
+    chmod 000 "$awt/.feature/unreadable"
+    if ! HOME="$tmp/home" archive_feature_dir /r/myrepo "$awt" feat/y 2>/dev/null \
+        && [[ -f "$adest/findings-round-9.md" ]] \
+        && [[ -z "$(find "$(dirname "$adest")" -maxdepth 1 -name 'feat-y.tmp.*')" ]]; then
+        ok "a copy failing partway leaves the previous archive and no staging dir"
+    else
+        bad "archive_feature_dir partial copy" "expected rc!=0, $adest/findings-round-9.md intact, no feat-y.tmp.* beside it"
+    fi
+    rm -f "$awt/.feature/unreadable" "$adest/findings-round-9.md"
+fi
+# Containment of the rm -rf must not rest on git's output format.
+mkdir -p "$tmp/home/.local/state/hq/runs/myrepo"
+printf 'sentinel\n' > "$tmp/home/.local/state/hq/runs/myrepo/other-branch"
+if ! HOME="$tmp/home" archive_feature_dir /r/myrepo "$awt" .. 2>/dev/null \
+    && [[ -f "$tmp/home/.local/state/hq/runs/myrepo/other-branch" ]]; then
+    ok "a '..' branch slug is refused before anything is removed"
+else
+    bad "archive_feature_dir dot-dot slug" "expected rc!=0 and the sibling archive untouched"
+fi
+if ! HOME="$tmp/home" archive_feature_dir "/r/.." "$awt" feat/y 2>/dev/null; then
+    ok "a '..' repo basename is refused before anything is removed"
+else
+    bad "archive_feature_dir dot-dot repo" "expected rc!=0"
+fi
+mkdir -p "$tmp/emptyslug/.feature"
+printf 'x\n' > "$tmp/emptyslug/.feature/status.jsonl"
+if ! HOME="$tmp/home" archive_feature_dir /r/myrepo "$tmp/emptyslug/" "" 2>/dev/null \
+    && [[ -f "$tmp/home/.local/state/hq/runs/myrepo/other-branch" ]]; then
+    ok "an empty slug is refused before anything is removed"
+else
+    bad "archive_feature_dir empty slug" "expected rc!=0 and the sibling archive untouched"
+fi
+
+echo "── sweep_row counters: what --apply reports when a row is left in place"
+# Everything the callback reaches out to is stubbed; the counters and the row
+# label it produces are the subject.
+sweep_row_probe() {
+    local arc="$1" rmrc="$2"
+    (
+        APPLY=true VERBOSE=false FORCE=false
+        repo=/r/myrepo
+        CNT_REMOVE=0 CNT_SKIP=0 CNT_FAIL=0
+        labels=""
+        derive_worktree_facts() {
+            f_live=false f_dirty=false f_pr_state=MERGED f_unpushed=false
+            f_merged_local=true f_pr_head=cafe f_pr_disp=pr:1 f_age=yesterday f_age_epoch=0
+        }
+        worktree_ignored_at_risk() { printf ''; }
+        sweep_would_kill_own_session() { return 1; }
+        init_liveness() { :; }
+        is_live() { return 1; }
+        where_for() { printf 'wt'; }
+        archive_feature_dir() { return "$arc"; }
+        remove_worktree() { REMOVE_NOTE="" REMOVE_FAIL_NOTE=""; return "$rmrc"; }
+        rows_add() { labels="$labels$1"; }
+        sweep_row /r/myrepo.feat-x feat/x false false cafe
+        printf 'remove=%d skip=%d fail=%d rows=%s' "$CNT_REMOVE" "$CNT_SKIP" "$CNT_FAIL" "$labels"
+    )
+}
+got=$(sweep_row_probe 1 0)
+want='remove=0 skip=0 fail=1 rows=FAILED'
+if [[ "$got" == "$want" ]]; then
+    ok "a failed archive counts once, under FAILED, and the row says so"
+else
+    bad "sweep_row archive failure" "got [$got] want [$want]"
+fi
+got=$(sweep_row_probe 0 1)
+want='remove=1 skip=0 fail=1 rows=REMOVE'
+if [[ "$got" == "$want" ]]; then
+    ok "a failed removal still counts FAILED (exit 2) on its REMOVE row"
+else
+    bad "sweep_row removal failure" "got [$got] want [$want]"
+fi
+got=$(sweep_row_probe 0 0)
+want='remove=1 skip=0 fail=0 rows=REMOVE'
+if [[ "$got" == "$want" ]]; then
+    ok "a clean removal counts neither SKIP nor FAILED"
+else
+    bad "sweep_row clean removal" "got [$got] want [$want]"
 fi
 
 echo "── B5: a clean --apply run (no removals, no failures) exits 0"
