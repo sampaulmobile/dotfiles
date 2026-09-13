@@ -792,7 +792,10 @@ load_data() {
                 jsonl=$(find_pane_jsonl "$pid")
             fi
             stats=$(get_row_stats "${names[$i]}" "$jsonl" "$agent")
-            printf '%s\t%s\t%s\t%s' "$cwd" "$cwd_ok" "$st" "$stats" > "${parallel_dir}/${i}"
+            # A tab run collapses on `read`, so the leading cwd — empty when
+            # the pane is already gone — is written as "-", a string tmux's
+            # absolute pane path can never be.
+            printf '%s\t%s\t%s\t%s' "${cwd:--}" "$cwd_ok" "$st" "$stats" > "${parallel_dir}/${i}"
             # subagent trees are a claude concept (agent-*.jsonl under the
             # session dir); codex rows get an empty file
             if [[ "$agent" == "codex" ]]; then
@@ -812,6 +815,7 @@ load_data() {
         if [[ -f "$result_file" ]]; then
             local cwd cwd_ok st ctx tout tall turns cost mdl mt win
             IFS=$'\t' read -r cwd cwd_ok st ctx tout tall turns cost mdl mt win < "$result_file"
+            [[ "$cwd" == "-" ]] && cwd=""
             [[ "$cwd_ok" == "0" ]] && st="gone"
             pipeline_fields[$i]=$(pipeline_for_cwd "$cwd")
             statuses[$i]="$st"
