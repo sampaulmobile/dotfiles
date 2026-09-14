@@ -47,8 +47,8 @@ Spawn ONE background agent (`subagent_type: "high"`, `model: "sonnet"`; use `mod
 - Order of operations: every fix first, THEN a rebase onto the default branch if the branch conflicts with it, then push ONCE. Rebase first only when a conflict sits in code a thread touches — otherwise the fixes are written against a base that is about to move.
 - Classify a red CI check before acting on it. A failure in code this diff never touched is not this PR's bug: after `git fetch`, a base is stale when `git merge-base --is-ancestor origin/<default> HEAD` FAILS — rebase and push that case. An unrelated failure on a current base is reported, not chased. NEVER retrigger or re-run a workflow (CI/CD safety rule); pushing is the only trigger this agent pulls.
 - Reply to each inline thread with a ONE-LINE pointer, e.g. `Done in <short-sha>.` (at most add a short clause if the fix took a different shape than asked):
-  Write the reply text to a scratch file and pass it with `-F body=@<file>`:
-  `gh api repos/<owner>/<repo>/pulls/<n>/comments/<databaseId>/replies -F body=@/tmp/reply.md`
+  Write the reply text to a file named uniquely per thread and pass it with `-F body=@<file>`:
+  `gh api repos/<owner>/<repo>/pulls/<n>/comments/<databaseId>/replies -F body=@/tmp/reply-<n>-<databaseId>.md`
   NEVER pass comment/PR bodies as inline shell-quoted strings (`-f body='...'`) — apostrophes in the
   text turn into literal `'\''` artifacts in the posted comment (seen 2026-09-08).
   Elaborate only when the thread was a question (answer it) or you're declining a change (give the reasoning). Do NOT duplicate the commit message into the thread, and do NOT resolve threads — the human reviewer resolves them on re-review.

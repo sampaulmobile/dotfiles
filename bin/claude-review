@@ -1,0 +1,487 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+"""claude-review — process-efficiency analyzer for Claude Code transcripts.
+
+Where `claude-tokens` answers "what did it cost", this answers "what was
+wasted". It reads the same JSONL transcripts under ~/.claude/projects and
+ranks the levers that actually move agentic spend:
+
+  spend      per project / model / day, main-thread vs subagent lane
+  cache      write vs read split — a write costs many times a read per
+             token, so a miss can matter more than context length does
+  bloat      tool results ranked by estimated carry cost (result size x the
+             later turns that re-sent it) — trust the ordering, not the $
+  waste      duplicate tool calls, non-zero tool results, thinking share
+
+Usage:
+  claude-review [--since 7d] [--json] [--top N]
+
+Two accounting rules this file exists to get right:
+
+1. One API response is logged as one assistant record PER CONTENT BLOCK,
+   all carrying the same requestId, with usage evolving as output streams.
+   Summing raw records roughly doubles every count. Resuming a session also
+   copies the whole history into a new file, so one requestId can appear in
+   many of them. Keep ONE record per requestId — the one with the highest
+   output_tokens, which is the final block.
+
+2. Cache reads are 0.1x base input on every model EXCEPT claude-fable-5-1,
+   where they are 0.025x ($0.25/MTok). Cache reads dominate token counts on
+   an agentic workload, so a flat 0.1x overstates a fable-5-1 bill by 4x on
+   its largest component.
+"""
+
+import argparse
+import json
+import os
+import re
+import sys
+import time
+from collections import defaultdict
+from pathlib import Path
+
+PROJECTS = Path(os.environ.get("CLAUDE_PROJECTS_DIR", Path.home() / ".claude/projects"))
+
+# USD per MTok: [input, output, cache_read]. Cache writes are derived:
+# 1.25x input for the 5-minute TTL, 2x for the 1-hour TTL.
+PRICES = {
+    "claude-fable-5-1": [10, 50, 0.25],
+    "claude-fable-5": [10, 50, 1.0],
+    "claude-mythos-5-1": [10, 50, 0.25],
+    "claude-mythos-5": [10, 50, 1.0],
+    "claude-opus-5": [5, 25, 0.5],
+    "claude-opus-4-8": [5, 25, 0.5],
+    "claude-opus-4-7": [5, 25, 0.5],
+    "claude-opus-4-6": [5, 25, 0.5],
+    "claude-opus-4-5": [5, 25, 0.5],
+    "claude-sonnet-5": [2, 10, 0.2],
+    "claude-sonnet-4-6": [3, 15, 0.3],
+    "claude-sonnet-4-5": [3, 15, 0.3],
+    "claude-haiku-4-5": [1, 5, 0.1],
+}
+M = 1_000_000
+CHARS_PER_TOKEN = 4  # tool-result sizing is a char/4 estimate, not a tokenizer
+
+
+def base_model(m):
+    return re.sub(r"-20\d{6}$", "", m or "")
+
+
+def price(model):
+    return PRICES.get(base_model(model))
+
+
+def cost_of(usage, model):
+    """Per-component USD for one API request. Returns None for unpriced models."""
+    p = price(model)
+    if not p:
+        return None
+    cc = usage.get("cache_creation") or {}
+    w5 = cc.get("ephemeral_5m_input_tokens", 0)
+    w1h = cc.get("ephemeral_1h_input_tokens", 0)
+    if not cc:
+        w5 = usage.get("cache_creation_input_tokens", 0) or 0
+    return {
+        "input": (usage.get("input_tokens", 0) or 0) * p[0] / M,
+        "output": (usage.get("output_tokens", 0) or 0) * p[1] / M,
+        "cache_read": (usage.get("cache_read_input_tokens", 0) or 0) * p[2] / M,
+        "cache_write": (w5 * p[0] * 1.25 + w1h * p[0] * 2) / M,
+    }
+
+
+def parse_since(s):
+    m = re.fullmatch(r"(\d+)([dhm])", s)
+    if not m:
+        raise argparse.ArgumentTypeError("expected e.g. 7d, 48h, 90m")
+    n, unit = int(m.group(1)), m.group(2)
+    return time.time() - n * {"d": 86400, "h": 3600, "m": 60}[unit]
+
+
+def ts_epoch(ts):
+    # Transcript timestamps are UTC ISO-8601 with milliseconds.
+    try:
+        from datetime import datetime, timezone
+
+        return (
+            datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            .astimezone(timezone.utc)
+            .timestamp()
+        )
+    except Exception:
+        return 0.0
+
+
+def project_of(path):
+    """Human project label from the transcript's cwd, ~-relative."""
+    home = str(Path.home())
+    return path.replace(home, "~") if path else "?"
+
+
+def scan(since):
+    """Stream every transcript, returning deduped requests plus tool records."""
+    requests = {}  # requestId -> request dict (highest output_tokens wins)
+    tool_calls = {}  # tool_use_id -> {name, input, session, ts, file}
+    tool_results = {}  # tool_use_id -> {chars, is_error}
+    # Per file, the sorted request timestamps — needed to count how many
+    # turns re-sent a given tool result.
+    file_req_ts = defaultdict(list)
+
+    files = sorted(PROJECTS.rglob("*.jsonl"))
+    for f in files:
+        if f.stat().st_mtime < since:
+            continue  # a file untouched in the window holds nothing in it
+        try:
+            fh = f.open(errors="replace")
+        except OSError:
+            continue
+        with fh:
+            for line in fh:
+                if not line.strip():
+                    continue
+                try:
+                    r = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                typ = r.get("type")
+                ts = ts_epoch(r.get("timestamp", "")) if r.get("timestamp") else 0.0
+
+                if typ == "assistant":
+                    msg = r.get("message") or {}
+                    usage = msg.get("usage")
+                    model = msg.get("model") or ""
+                    rid = r.get("requestId")
+                    if usage and rid and model.startswith("claude"):
+                        if ts >= since:
+                            prev = requests.get(rid)
+                            out = usage.get("output_tokens", 0) or 0
+                            if prev is None or out > prev["usage"].get(
+                                "output_tokens", 0
+                            ):
+                                requests[rid] = {
+                                    "usage": usage,
+                                    "model": model,
+                                    "ts": ts,
+                                    "sidechain": bool(r.get("isSidechain")),
+                                    "project": project_of(r.get("cwd", "")),
+                                    "session": r.get("sessionId"),
+                                    "file": str(f),
+                                }
+                            file_req_ts[str(f)].append(ts)
+                    for blk in msg.get("content") or []:
+                        if isinstance(blk, dict) and blk.get("type") == "tool_use":
+                            tid = blk.get("id")
+                            if tid and tid not in tool_calls and ts >= since:
+                                tool_calls[tid] = {
+                                    "name": blk.get("name", "?"),
+                                    "input": json.dumps(
+                                        blk.get("input", {}), sort_keys=True
+                                    ),
+                                    "session": r.get("sessionId"),
+                                    "project": project_of(r.get("cwd", "")),
+                                    "model": model,
+                                    "ts": ts,
+                                    "file": str(f),
+                                }
+
+                elif typ == "user":
+                    msg = r.get("message") or {}
+                    content = msg.get("content")
+                    if isinstance(content, list):
+                        for blk in content:
+                            if (
+                                isinstance(blk, dict)
+                                and blk.get("type") == "tool_result"
+                            ):
+                                tid = blk.get("tool_use_id")
+                                if not tid:
+                                    continue
+                                chars = len(json.dumps(blk.get("content", "")))
+                                prev = tool_results.get(tid)
+                                if prev is None or chars > prev["chars"]:
+                                    tool_results[tid] = {
+                                        "chars": chars,
+                                        "is_error": bool(blk.get("is_error")),
+                                    }
+
+    for k in file_req_ts:
+        file_req_ts[k].sort()
+    return requests, tool_calls, tool_results, file_req_ts
+
+
+def fmt_tok(n):
+    for unit, div in (("B", 1e9), ("M", 1e6), ("k", 1e3)):
+        if n >= div:
+            return f"{n / div:.1f}{unit}"
+    return str(int(n))
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Claude Code process-efficiency review")
+    ap.add_argument(
+        "--since",
+        type=parse_since,
+        default=parse_since("7d"),
+        metavar="7d|48h|90m",
+        help="window to report on (default: 7d)",
+    )
+    ap.add_argument(
+        "--top", type=int, default=12, metavar="N",
+        help="rows per ranked table (default: 12)",
+    )
+    ap.add_argument(
+        "--json", action="store_true",
+        help="emit the report as JSON instead of tables",
+    )
+    args = ap.parse_args()
+
+    requests, tool_calls, tool_results, file_req_ts = scan(args.since)
+    if not requests:
+        print("no requests in window", file=sys.stderr)
+        return 1
+
+    agg = lambda: {
+        "cost": 0.0,
+        "input": 0.0,
+        "output": 0.0,
+        "cache_read": 0.0,
+        "cache_write": 0.0,
+        "turns": 0,
+        "ctx": 0,
+        "thinking": 0,
+        "w5": 0,
+        "w1h": 0,
+        "cr_tok": 0,
+    }
+    by_project, by_model, by_day, by_session, by_chain, by_lane_model = (
+        defaultdict(agg),
+        defaultdict(agg),
+        defaultdict(agg),
+        defaultdict(agg),
+        defaultdict(agg),
+        defaultdict(agg),
+    )
+    totals = agg()
+    unpriced = 0
+
+    for r in requests.values():
+        c = cost_of(r["usage"], r["model"])
+        if c is None:
+            unpriced += 1
+            continue
+        u = r["usage"]
+        ctx = (
+            (u.get("input_tokens", 0) or 0)
+            + (u.get("cache_read_input_tokens", 0) or 0)
+            + (u.get("cache_creation_input_tokens", 0) or 0)
+        )
+        think = (u.get("output_tokens_details") or {}).get("thinking_tokens", 0) or 0
+        day = time.strftime("%Y-%m-%d", time.localtime(r["ts"]))
+        lane = "subagent" if r["sidechain"] else "main"
+        buckets = [
+            by_lane_model[f"{lane} / {base_model(r['model'])}"],
+            by_project[r["project"]],
+            by_model[base_model(r["model"])],
+            by_day[day],
+            by_session[(r["project"], r["session"])],
+            by_chain["subagent" if r["sidechain"] else "main thread"],
+            totals,
+        ]
+        cc = u.get("cache_creation") or {}
+        w5 = cc.get("ephemeral_5m_input_tokens", 0) or 0
+        w1h = cc.get("ephemeral_1h_input_tokens", 0) or 0
+        if not cc:
+            w5 = u.get("cache_creation_input_tokens", 0) or 0
+        for b in buckets:
+            b["cost"] += sum(c.values())
+            for k in ("input", "output", "cache_read", "cache_write"):
+                b[k] += c[k]
+            b["turns"] += 1
+            b["ctx"] += ctx
+            b["thinking"] += think
+            b["w5"] += w5
+            b["w1h"] += w1h
+            b["cr_tok"] += u.get("cache_read_input_tokens", 0) or 0
+
+    # Tool results ranked by carry cost: a result is re-sent as cache-read
+    # input on every later turn of its session, so a fat result early in a
+    # long session is re-billed dozens of times.
+    tool_agg = defaultdict(
+        lambda: {"calls": 0, "chars": 0, "carry": 0.0, "errors": 0, "biggest": 0}
+    )
+    worst = []
+    for tid, call in tool_calls.items():
+        res = tool_results.get(tid)
+        if not res:
+            continue
+        p = price(call["model"])
+        cr_rate = p[2] if p else 0.5
+        later = sum(1 for t in file_req_ts.get(call["file"], ()) if t > call["ts"])
+        tok = res["chars"] / CHARS_PER_TOKEN
+        carry = tok * later * cr_rate / M
+        t = tool_agg[call["name"]]
+        t["calls"] += 1
+        t["chars"] += res["chars"]
+        t["carry"] += carry
+        t["errors"] += 1 if res["is_error"] else 0
+        t["biggest"] = max(t["biggest"], res["chars"])
+        worst.append(
+            {
+                "tool": call["name"],
+                "project": call["project"],
+                "tokens": int(tok),
+                "resent": later,
+                "carry": carry,
+                "input": call["input"][:160],
+            }
+        )
+    worst.sort(key=lambda x: -x["carry"])
+
+    # Duplicate tool calls: same tool + identical input, repeated in one session.
+    seen, dupes = {}, defaultdict(lambda: {"count": 0, "carry": 0.0})
+    for tid, call in sorted(tool_calls.items(), key=lambda kv: kv[1]["ts"]):
+        key = (call["session"], call["name"], call["input"])
+        if key in seen:
+            res = tool_results.get(tid)
+            chars = res["chars"] if res else 0
+            p = price(call["model"])
+            later = sum(1 for t in file_req_ts.get(call["file"], ()) if t > call["ts"])
+            d = dupes[call["name"]]
+            d["count"] += 1
+            d["carry"] += (chars / CHARS_PER_TOKEN) * later * (p[2] if p else 0.5) / M
+        else:
+            seen[key] = tid
+
+    report = {
+        "window_start": time.strftime("%Y-%m-%d %H:%M", time.localtime(args.since)),
+        "totals": totals,
+        "by_project": dict(sorted(by_project.items(), key=lambda kv: -kv[1]["cost"])),
+        "by_model": dict(sorted(by_model.items(), key=lambda kv: -kv[1]["cost"])),
+        "by_day": dict(sorted(by_day.items())),
+        "by_chain": dict(by_chain),
+        "by_lane_model": dict(
+            sorted(by_lane_model.items(), key=lambda kv: -kv[1]["cost"])
+        ),
+        "sessions": [
+            {
+                "project": k[0],
+                "session": k[1],
+                "cost": v["cost"],
+                "turns": v["turns"],
+                "mean_ctx": v["ctx"] / max(v["turns"], 1),
+                "output": v["output"],
+                "cache_read": v["cache_read"],
+            }
+            for k, v in sorted(by_session.items(), key=lambda kv: -kv[1]["cost"])
+        ],
+        "tools": dict(sorted(tool_agg.items(), key=lambda kv: -kv[1]["carry"])),
+        "worst_results": worst[: args.top],
+        "dupes": dict(sorted(dupes.items(), key=lambda kv: -kv[1]["carry"])),
+        "unpriced_requests": unpriced,
+    }
+
+    if args.json:
+        print(json.dumps(report, indent=2, default=float))
+        return 0
+
+    t = totals
+    print(f"\n=== Claude Code review — since {report['window_start']} ===")
+    print("    MEASURED  token/request counts, summed from the usage field per API response")
+    print("    DERIVED   those tokens x the price sheet in this script (verify before quoting)")
+    print("    ESTIMATED marked per-section; depends on an approximation. Directional only.\n")
+    print(
+        f"{t['turns']} API requests   ${t['cost']:,.2f} est   "
+        f"context re-sent: {fmt_tok(t['ctx'])} tokens"
+    )
+    share = lambda x: f"{100 * x / t['cost']:.0f}%" if t["cost"] else "-"
+    print(
+        f"  cache read  ${t['cache_read']:8,.2f} ({share(t['cache_read'])})   "
+        f"output ${t['output']:8,.2f} ({share(t['output'])})"
+    )
+    print(
+        f"  cache write ${t['cache_write']:8,.2f} ({share(t['cache_write'])})   "
+        f"input  ${t['input']:8,.2f} ({share(t['input'])})"
+    )
+    print(f"  thinking tokens: {fmt_tok(t['thinking'])} of output\n")
+
+    def table(title, rows, label):
+        print(f"--- {title} ---")
+        print(f"{label:<44} {'COST':>9} {'TURNS':>6} {'MEAN CTX':>9}")
+        for name, v in rows:
+            mc = fmt_tok(v["ctx"] / max(v["turns"], 1))
+            print(f"{str(name)[:44]:<44} {v['cost']:>9,.2f} {v['turns']:>6} {mc:>9}")
+        print()
+
+    table("spend by project", list(report["by_project"].items())[: args.top], "PROJECT")
+    table("spend by model", list(report["by_model"].items()), "MODEL")
+    table("main thread vs subagents", list(report["by_chain"].items()), "LANE")
+    print("--- cost per request by lane and model (the model-choice lever) ---")
+    print(f"{'LANE / MODEL':<34} {'COST':>9} {'REQS':>6} {'$/REQ':>8}")
+    for name, v in report["by_lane_model"].items():
+        print(
+            f"{name[:34]:<34} {v['cost']:>9,.2f} {v['turns']:>6} "
+            f"{v['cost'] / max(v['turns'], 1):>8.3f}"
+        )
+    print()
+    table("spend by day", list(report["by_day"].items()), "DAY")
+
+    print("--- costliest sessions (mean ctx = avg tokens re-sent per turn) ---")
+    print(f"{'PROJECT':<40} {'COST':>8} {'TURNS':>6} {'MEAN CTX':>9}")
+    for s in report["sessions"][: args.top]:
+        print(
+            f"{s['project'][:40]:<40} {s['cost']:>8,.2f} {s['turns']:>6} "
+            f"{fmt_tok(s['mean_ctx']):>9}"
+        )
+    print()
+
+    # Cache writes bill at 1.25x/2x input while reads bill at 0.1x (0.025x on
+    # fable-5-1), so a written entry must be read back many times to pay for
+    # itself. READS/WRITE below is that payback ratio, in tokens.
+    print("--- cache economics (a write is 12-80x a read per token, by model) ---")
+    print(f"{'MODEL':<20} {'5m WRITE':>10} {'1h WRITE':>10} {'1h%':>5} {'READS':>9} {'READS/WRITE':>12}")
+    for name, v in report["by_model"].items():
+        w = v["w5"] + v["w1h"]
+        print(
+            f"{name[:20]:<20} {fmt_tok(v['w5']):>10} {fmt_tok(v['w1h']):>10} "
+            f"{100 * v['w1h'] / max(w, 1):>4.0f}% {fmt_tok(v['cr_tok']):>9} "
+            f"{v['cr_tok'] / max(w, 1):>11.1f}x"
+        )
+    print()
+
+    # NONZERO counts tool results flagged is_error — for Bash that is any
+    # non-zero exit, which `grep|head` produces on SIGPIPE with the output
+    # intact. Treat it as a retry-risk signal, not a failure count.
+    print("--- tool output by carry cost [ESTIMATED] ---")
+    print("    carry = result chars/4 x later turns x cache-read rate. Both factors are")
+    print("    approximations; use the ordering, not the dollar values.")
+    print(f"{'TOOL':<34} {'CALLS':>6} {'TOTAL':>8} {'BIGGEST':>8} {'CARRY $':>9} {'NONZERO':>8}")
+    for name, v in list(report["tools"].items())[: args.top]:
+        print(
+            f"{name[:34]:<34} {v['calls']:>6} {fmt_tok(v['chars'] / CHARS_PER_TOKEN):>8} "
+            f"{fmt_tok(v['biggest'] / CHARS_PER_TOKEN):>8} {v['carry']:>9,.2f} {v['errors']:>8}"
+        )
+    print()
+
+    print("--- single worst tool results [ESTIMATED] ---")
+    for w in report["worst_results"]:
+        print(
+            f"  ${w['carry']:>7,.2f}  {w['tool']:<14} {fmt_tok(w['tokens']):>7} tok "
+            f"x{w['resent']:<4} re-sent  {w['project']}"
+        )
+        print(f"           {w['input'][:120]}")
+    print()
+
+    print("--- repeated identical tool calls (counts MEASURED, carry ESTIMATED) ---")
+    print(f"{'TOOL':<34} {'REPEATS':>8} {'CARRY $':>9}")
+    for name, v in list(report["dupes"].items())[: args.top]:
+        print(f"{name[:34]:<34} {v['count']:>8} {v['carry']:>9,.2f}")
+    print()
+    if unpriced:
+        print(f"({unpriced} requests on unpriced models excluded from cost)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

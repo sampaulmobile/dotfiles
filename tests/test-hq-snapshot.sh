@@ -311,9 +311,10 @@ echo "── the record formats round-trip through a snapshot"
 printf '%s\n' \
     "meta"$'\t'"gh_ok"$'\t'"true" \
     "meta"$'\t'"lsof"$'\t'"true" \
-    "/repo"$'\t'"MERGED"$'\t'"-"$'\t'"no PR"$'\t'"-"$'\t'"2 days ago"$'\t'"wt"$'\t'"-"$'\t'"1789155336"$'\t'"/repo.x"$'\t'"false"$'\t'"false" \
+    "/repo"$'\t'"MERGED"$'\t'"-"$'\t'"no PR"$'\t'"-"$'\t'"2 days ago"$'\t'"wt"$'\t'"-"$'\t'"1789155336"$'\t'"/repo.x"$'\t'"false"$'\t'"false"$'\t'"none"$'\t'"-"$'\t'"-"$'\t'"true" \
     | snapshot_write worktrees
 IFS=$'\t' read -r w_repo w_bucket w_branch w_pr w_flags w_age w_where w_pipe w_epoch w_path w_locked w_sweep \
+    w_prstate w_prhead w_wthead w_merged \
     <<< "$(snapshot_read worktrees | grep -v '^meta')"
 rt_() {
     if [[ "$2" == "$3" ]]; then ok "$1 -> [$2]"; else bad "$1" "got [$2] want [$3]"; fi
@@ -324,6 +325,21 @@ rt_ "worktrees pipe"   "$w_pipe"   "-"
 rt_ "worktrees epoch"  "$w_epoch"  "1789155336"
 rt_ "worktrees path"   "$w_path"   "/repo.x"
 rt_ "worktrees sweep"  "$w_sweep"  "false"
+# The four the sweep's dry run reads instead of asking git. pr_head and
+# wt_head are the empty-capable ones, so they are the "-" cases here.
+rt_ "worktrees pr_state"     "$w_prstate" "none"
+rt_ "worktrees pr_head"      "$w_prhead"  "-"
+rt_ "worktrees wt_head"      "$w_wthead"  "-"
+rt_ "worktrees merged_local" "$w_merged"  "true"
+
+# ROW_FIELDS is what makes bin/worktrees reject a snapshot whose rows are a
+# different width, so it has to track the writer. Counted from the script
+# rather than by running it: the producer needs a real repo set and gh.
+echo "── bin/worktrees' ROW_FIELDS matches the record it writes"
+rf_declared=$(grep -E '^ROW_FIELDS=' "$repo/bin/worktrees" | head -1 | cut -d= -f2)
+rf_written=$(( $(grep -o "printf 'row[^']*'" "$repo/bin/worktrees" | grep -o '%s' | wc -l) + 1 ))
+rt_ "ROW_FIELDS vs the row printf" "$rf_declared" "$rf_written"
+rt_ "the reader reads that many"   "$rf_declared" "17"
 
 # The prs row below has an empty reviewDecision column, which is what the
 # kind-prefix strip has to survive.
