@@ -201,7 +201,7 @@ Findings file `.feature/findings-round-<N>.md`: line 1 the verdict, `CLEAN` or `
 
 **5. Ship**
 - Write the Lessons (below) FIRST, so a `repo` lesson's CLAUDE.md edit is in the diff the PR opens with and nothing is added to the branch after this step.
-- If this branch already carries a PR, confirm it is still open (`gh pr view --json state`) before anything is committed. A PR that merged while the run was going takes no further commits: branch fresh off <DEFAULT_BRANCH> and ship the remaining work as its own PR, never onto the merged branch.
+- If this branch already carries a PR, confirm it is still open (`gh pr view --json state`) before anything is committed. A PR that merged while the run was going takes no further commits: branch fresh off <DEFAULT_BRANCH> in its own worktree (`wt switch -c <branch>` run from the repo's MAIN checkout — `dirname $(git rev-parse --git-common-dir)`; never raw `git worktree add`) and ship the remaining work as its own PR, never onto the merged branch.
 - Invoke the `pr` skill (it commits anything outstanding, pushes, opens the PR) and give it the body material in that skill's sections.
 - "Open for the reviewer" carries what a human still has to judge: assumptions the run never verified, the deferred reviewer notes that matter, product decisions taken on the pipeline's own authority, and any surface that could not be verified. The remaining deferred notes go in the commit body, not the PR.
 
