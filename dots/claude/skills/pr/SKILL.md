@@ -35,7 +35,9 @@ Determine the default branch first: `git symbolic-ref --short refs/remotes/origi
 
 Write the PR body to a file under `/tmp` and pass it with `--body-file <file>` — NEVER pass a multi-line body inline or via HEREDOC; shell quoting mangles backticks, `$`, and code fences, which then requires ugly `gh pr edit` / API-PATCH repair after the fact.
 
-The body is written for the person who has to decide whether to merge it, and their time is the budget: aim at 40 lines. These sections, in this order, each DROPPED when it has nothing to say:
+The body is written for the person who has to decide whether to merge it, and their time is the budget: the VISIBLE body — everything above the `<details>` block — MUST be 40 lines or fewer. Count it before posting with `sed -n '1,/<details>/p' <file> | wc -l`, or plain `wc -l` when the body has no `<details>` block at all, and cut until it passes; a collapsed block costs the reader no time, so it does not count against the cap. The first ~15 lines stand alone — someone who reads only those can decide whether to merge. Tradeoffs and "Open for the reviewer" carry at most ~3 items each; more than three things needing human judgement means the PR is too big, not that the list gets longer. Overflow goes into a collapsed `<details>` block placed after the last section and above the `Generated with` line — never silently dropped. A requester's instruction to document something does not suspend the budget: it goes in that collapsed block.
+
+These sections, in this order, each DROPPED when it has nothing to say:
 
 ```
 ## Why
