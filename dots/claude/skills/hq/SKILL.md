@@ -78,9 +78,10 @@ FLAGS       the /feature flags to pass through verbatim. Add --go only when
             find") keeps the gate, however small the target. Express a
             small task through the flags the pipeline knows — --no-workplan
             (plan stays uncommitted, gate and review still run) or --quick
-            (one seat, no review) — never through a FORBIDDEN line that
-            fights the pipeline's defaults, such as naming the only file
-            allowed to change when the pipeline commits a workplan
+            (one seat, no review; a PR only when the run commits) — never
+            through a FORBIDDEN line that fights the pipeline's defaults,
+            such as naming the only file allowed to change when the
+            pipeline commits a workplan
 ```
 
 A field you cannot fill is a task you have not scoped yet — scope it here, or
@@ -108,8 +109,8 @@ ask the user, before dispatching.
   it arrived here as a message, and otherwise it is at the top of that
   worktree's `workplans/<slug>-plan.md`, or of `.feature/plan.md` when
   workplans are off.
-- Relay results to the user as they land — PR URLs and summaries, not
-  implementation detail.
+- Relay results to the user as they land — PR URLs and summaries, or the
+  findings when a `--quick` run produced no commits, not implementation detail.
 - Multi-repo: report per-piece status; the feature is done only when every
   piece lands.
 - Steering: relay user feedback onward by message to the task session, named
