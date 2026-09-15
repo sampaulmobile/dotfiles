@@ -1,0 +1,372 @@
+#!/usr/bin/env bash
+# hq-snapshot — the collector behind the status screens. One TSV per source
+# under ~/.local/state/hq/snapshot/; the screens (bin/tmux-sessionizer,
+# bin/worktrees, bin/prs, Ctrl+G, /hq) READ those files and print the
+# snapshot's age instead of recomputing at the keypress.
+#
+# APPEND-ONLY, the rule the sweep archive beside it already keeps: this
+# script creates and overwrites its own files and REMOVES NOTHING under
+# ~/.local/state/hq — not a stale snapshot, and not its own <file>.tmp.<pid>
+# on a failure path. A failed write leaves the tmp file where it fell and the
+# previous snapshot stands, which is the safe outcome
+# (dots/claude/rules/deletion-safety.md).
+#
+# One code path: a source is computed HERE, by the same program the screen
+# would run live. A screen either renders the snapshot or falls back to
+# computing it and says so; neither grows a second copy of the computation.
+#
+# Sourceable — the reader half (snapshot_file, snapshot_age,
+# snapshot_verdict, snapshot_read, fmt_secs) is what the screens use, so
+# "is this snapshot usable" is decided in exactly one place. Nothing above
+# the source guard sets a shell option or collects anything, so a screen can
+# source it at any point. See tests/test-hq-snapshot.sh.
+
+# Loaded twice in one process when this script is RUNNING and something it
+# sources sources it back (collect_pipelines -> bin/worktrees -> here): hand
+# back the helpers already defined. Without this the BASH_SOURCE guard below
+# reads "executed" — $0 really is this file — and the command line at the
+# bottom runs again on whatever $@ the caller happened to have.
+if [[ -n "${HQ_SNAPSHOT_LOADED:-}" ]]; then
+    return 0 2>/dev/null || true
+fi
+HQ_SNAPSHOT_LOADED=1
+
+DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+
+SNAPSHOT_DIR="${HQ_SNAPSHOT_DIR:-$HOME/.local/state/hq/snapshot}"
+
+# <name>:<cadence seconds>, in collection order. The cadence is both the tick
+# interval a source is collected on and, times three, the age at which a
+# reader stops trusting it.
+SNAPSHOT_SOURCES="sessions:5 pipelines:5 worktrees:15 prs:30"
+
+snapshot_file() { printf '%s/%s.tsv' "$SNAPSHOT_DIR" "$1"; }
+
+# snapshot_cadence <source> — its cadence in seconds; 0 and exit 1 for a name
+# that is not a source.
+snapshot_cadence() {
+    local s
+    for s in $SNAPSHOT_SOURCES; do
+        if [[ "${s%%:*}" == "$1" ]]; then printf '%s' "${s#*:}"; return 0; fi
+    done
+    printf '0'
+    return 1
+}
+
+# snapshot_write <source> — stdin is the body. The file gets a
+# `# generated <ISO time>` first line and lands with one mv, so a reader
+# never sees a half-written snapshot.
+snapshot_write() {
+    local name="$1" f tmp
+    f=$(snapshot_file "$name")
+    tmp="$f.tmp.$$"
+    mkdir -p "$SNAPSHOT_DIR" || return 1
+    { printf '# generated %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"; cat; } > "$tmp" || return 1
+    mv -f "$tmp" "$f"
+}
+
+# snapshot_mtime <source> — its mtime in epoch seconds; exit 1 when absent.
+snapshot_mtime() {
+    local f
+    f=$(snapshot_file "$1")
+    [[ -f "$f" ]] || return 1
+    stat -f '%m' "$f" 2>/dev/null || stat -c '%Y' "$f" 2>/dev/null
+}
+
+# snapshot_age <source> — seconds since it was written, -1 when absent.
+snapshot_age() {
+    local m
+    m=$(snapshot_mtime "$1") || { printf '%s' -1; return 0; }
+    [[ -n "$m" ]] || { printf '%s' -1; return 0; }
+    printf '%s' "$(( $(date +%s) - m ))"
+}
+
+# snapshot_verdict <age-seconds> <cadence-seconds> — fresh | stale | missing.
+# A reader renders the snapshot on fresh and computes live on either other
+# answer, saying which it got.
+snapshot_verdict() {
+    local age="$1" cadence="${2:-0}"
+    [[ -n "$age" ]] || { printf 'missing'; return 0; }
+    if (( age < 0 )); then printf 'missing'; return 0; fi
+    if (( cadence > 0 )) && (( age > cadence * 3 )); then printf 'stale'; return 0; fi
+    printf 'fresh'
+}
+
+# fmt_secs <seconds> — "12s" / "3m" / "2h" / "4d" for an age line.
+fmt_secs() {
+    local s="${1:-0}"
+    if   (( s < 0 ));     then printf 'never'
+    elif (( s < 60 ));    then printf '%ds' "$s"
+    elif (( s < 3600 ));  then printf '%dm' $(( s / 60 ))
+    elif (( s < 86400 )); then printf '%dh' $(( s / 3600 ))
+    else                       printf '%dd' $(( s / 86400 ))
+    fi
+}
+
+# snapshot_read <source> — the body, without the generated-at line. Exit 1
+# when the file is not there to read.
+snapshot_read() {
+    local f line first=true
+    f=$(snapshot_file "$1")
+    [[ -r "$f" ]] || return 1
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$first" == true ]]; then
+            first=false
+            if [[ "$line" == '# generated '* ]]; then continue; fi
+        fi
+        [[ -n "$line" ]] && printf '%s\n' "$line"
+    done < "$f"
+    return 0
+}
+
+# jsonl_last_line <file> — the last non-empty line; empty when the file is
+# absent or unreadable. The pipelines' status contract is append-only, so the
+# last line is the current state.
+jsonl_last_line() {
+    local f="$1" l last=""
+    [[ -r "$f" ]] || return 0
+    while IFS= read -r l || [[ -n "$l" ]]; do
+        [[ -n "$l" ]] && last="$l"
+    done < "$f"
+    printf '%s' "$last"
+}
+
+# json_field <json-line> <key> — <key>'s value as text: a quoted string
+# without its quotes, or a bare token (number, true/false) as written. Empty
+# for an absent key and for null, which the status records use for "not yet".
+# A status record is flat and one line, written by the pipeline itself, so a
+# pattern match is the whole parser it needs.
+json_field() {
+    local line="$1" key="$2" re v
+    re="\"$key\"[[:space:]]*:[[:space:]]*\"([^\"]*)\""
+    if [[ "$line" =~ $re ]]; then printf '%s' "${BASH_REMATCH[1]}"; return 0; fi
+    re="\"$key\"[[:space:]]*:[[:space:]]*([^,}[:space:]]+)"
+    if [[ "$line" =~ $re ]]; then
+        v="${BASH_REMATCH[1]}"
+        [[ "$v" == null ]] || printf '%s' "$v"
+    fi
+    return 0
+}
+
+# pipeline_map_load — the pipelines source into the global $pipeline_map, one
+# "<worktree>\t<state>" line per run in flight. Empty when the source has
+# never been written; the CALLER decides whether a stale one is worth
+# refreshing first.
+pipeline_map=""
+pipeline_map_load() {
+    local path state
+    pipeline_map=""
+    while IFS=$'\t' read -r path _ _ _ state _; do
+        [[ -n "$path" && -n "$state" ]] || continue
+        pipeline_map+="${path}"$'\t'"${state}"$'\n'
+    done < <(snapshot_read pipelines 2>/dev/null)
+}
+
+# pipeline_for_cwd <cwd> — the PIPELINE field of the worktree <cwd> sits in
+# or under; nothing when no run is in flight there.
+pipeline_for_cwd() {
+    local cwd="$1" path state
+    [[ -n "$cwd" && -n "$pipeline_map" ]] || return 0
+    while IFS=$'\t' read -r path state; do
+        [[ -n "$path" ]] || continue
+        if [[ "$cwd" == "$path" || "$cwd" == "$path"/* ]]; then
+            printf '%s' "$state"
+            return 0
+        fi
+    done <<< "$pipeline_map"
+    return 0
+}
+
+# Sourced by the screens and by tests/test-hq-snapshot.sh: hand back the
+# helpers above and run no collection.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0 2>/dev/null || true
+fi
+
+set -uo pipefail
+
+usage() {
+    cat <<'EOF'
+usage: hq-snapshot <source>...      collect those sources now
+       hq-snapshot all              collect every source
+       hq-snapshot tick             the statusbar's entry (see below)
+       hq-snapshot age [<source>]   seconds since each source was written
+       hq-snapshot --check          doctor mode: every source present, fresh
+
+Sources and their cadence, one TSV each under ~/.local/state/hq/snapshot/
+(override the directory with HQ_SNAPSHOT_DIR):
+  sessions   5s   per-session agent status, for the sessionizer's row colors
+  pipelines  5s   the last .feature/status.jsonl line of every worktree
+  worktrees 15s   bin/worktrees' classification of every project
+  prs       30s   bin/prs' GitHub search rows
+
+Every file starts with a `# generated <ISO time>` line. A reader treats a
+snapshot older than three times its cadence as unusable and computes live.
+
+tick is called by bin/tmux-claude-statusbar every ~5s: it collects pipelines
+inline and spawns the slower sources when they are due and not already
+running. sessions is written by the statusbar itself, which has just run the
+scan — `hq-snapshot sessions` is the standalone path, for a machine whose
+status bar is not ticking.
+
+Nothing under ~/.local/state/hq is ever removed, by this script or any other.
+A failed write leaves <file>.tmp.<pid> behind on purpose; to clear them, run
+the deletion yourself.
+EOF
+}
+
+# ---- producers: one collect_<source> per source, body on stdout ----
+
+# collect_sessions — "<session>\t<status>\t<pane>" per session with an agent
+# in it: the scan bin/tmux-claude-statusbar and Ctrl+Y already share.
+collect_sessions() {
+    # shellcheck source=/dev/null
+    source "$DOTFILES/bin/tmux-claude-lib" || return 1
+    scan_claude_sessions
+}
+
+# collect_pipelines — one row per worktree running a /feature or
+# /address-review pipeline:
+#   <path> <session> <repo> <branch> <state> <pr> <updated>
+# <state> is `<phase> r<round> <seat>`, bin/worktrees' PIPELINE column, from
+# the LAST line of <path>/.feature/status.jsonl. A worktree with no .feature/,
+# an empty jsonl or only the pre-jsonl status.json has no state and no row.
+# Pure filesystem: project_dirs enumerates worktrees by directory shape, so
+# this costs no git and can ride the 5s tick.
+collect_pipelines() {
+    local dir last state repo branch pr updated
+    # shellcheck source=/dev/null
+    source "$DOTFILES/bin/project-dirs-lib" || return 1
+    # pipeline_state, so the PIPELINE column and this file cannot disagree.
+    # shellcheck source=/dev/null
+    source "$DOTFILES/bin/worktrees" || return 1
+    project_dirs
+    (( ${#project_dirs_out[@]} )) || return 0
+    for dir in "${project_dirs_out[@]}"; do
+        state=$(pipeline_state "$dir")
+        [[ -n "$state" ]] || continue
+        last=$(jsonl_last_line "$dir/.feature/status.jsonl")
+        worktree_branch "$dir"
+        branch="$worktree_branch_out"
+        repo="${worktree_repo_out:-$dir}"
+        repo="${repo##*/}"
+        session_name=""
+        session_name_for "$dir"
+        pr=$(json_field "$last" pr)
+        updated=$(json_field "$last" updated)
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$dir" "$session_name" "$repo" "${branch:--}" "$state" "${pr:--}" "${updated:--}"
+    done
+}
+
+# collect_worktrees — bin/worktrees' own row records for every project, gh
+# online. `--snapshot` is that script's emit mode: the classification is
+# computed once, there, and rendered by whoever reads this file.
+collect_worktrees() {
+    "$DOTFILES/bin/worktrees" --snapshot
+}
+
+# collect_prs — bin/prs' two GitHub searches, unfiltered by repo, with the
+# author and merged-window the run used recorded as meta rows. A reader whose
+# own author/window differ cannot use them and searches for itself.
+collect_prs() {
+    "$DOTFILES/bin/prs" --snapshot
+}
+
+# collect_one <source> — produce it, then publish it. The body is held in
+# full first: a producer that fails must leave the previous snapshot alone
+# rather than publish a truncated one.
+collect_one() {
+    local name="$1" out
+    if ! declare -f "collect_$name" >/dev/null 2>&1; then
+        echo "hq-snapshot: no such source: $name" >&2
+        return 2
+    fi
+    out=$("collect_$name") || {
+        echo "hq-snapshot: $name collection failed — previous snapshot left in place" >&2
+        return 1
+    }
+    { [[ -z "$out" ]] || printf '%s\n' "$out"; } | snapshot_write "$name"
+}
+
+# due <source> — true when its snapshot is older than its own cadence.
+due() {
+    local age cadence
+    age=$(snapshot_age "$1")
+    cadence=$(snapshot_cadence "$1") || return 0
+    (( age < 0 )) && return 0
+    (( age >= cadence ))
+}
+
+# already_running <source> — true when another hq-snapshot is collecting it.
+# A process check, not a lock file: a lock under ~/.local/state/hq would have
+# to be removed to be released, and nothing there is ever removed.
+already_running() {
+    pgrep -f "hq-snapshot $1\$" >/dev/null 2>&1
+}
+
+shorten_home() {
+    local p="$1"
+    [[ "$p" == "$HOME/"* ]] && p="~/${p#"$HOME"/}"
+    printf '%s' "$p"
+}
+
+rc=0
+case "${1:-}" in
+    -h|--help) usage; exit 0 ;;
+    --check)
+        miss=""
+        for s in $SNAPSHOT_SOURCES; do
+            name="${s%%:*}"
+            v=$(snapshot_verdict "$(snapshot_age "$name")" "${s#*:}")
+            [[ "$v" == fresh ]] || miss+="  $name: $v"$'\n'
+        done
+        if [[ -n "$miss" ]]; then
+            printf 'snapshot (%s) not current:\n%s' "$(shorten_home "$SNAPSHOT_DIR")" "$miss"
+            echo "  fix: bin/hq-snapshot all   (the status bar keeps it current once tmux is running)"
+            exit 1
+        fi
+        echo "snapshot: all sources fresh"
+        exit 0
+        ;;
+    age)
+        shift
+        names="$*"
+        if [[ -z "$names" ]]; then
+            for s in $SNAPSHOT_SOURCES; do names+="${s%%:*} "; done
+        fi
+        for name in $names; do
+            printf '%-10s %s\n' "$name" "$(fmt_secs "$(snapshot_age "$name")")"
+        done
+        exit 0
+        ;;
+    all)
+        # Slowest source first, so the short-cadence ones are the freshest
+        # when the run ends and a --check straight after it agrees.
+        rev=""
+        for s in $SNAPSHOT_SOURCES; do rev="$s $rev"; done
+        for s in $rev; do
+            collect_one "${s%%:*}" || rc=1
+        done
+        exit "$rc"
+        ;;
+    tick)
+        collect_one pipelines || rc=1
+        for s in worktrees prs; do
+            declare -f "collect_$s" >/dev/null 2>&1 || continue
+            due "$s" || continue
+            already_running "$s" && continue
+            ( "$0" "$s" >/dev/null 2>&1 & )
+        done
+        exit "$rc"
+        ;;
+    "")
+        usage >&2
+        exit 2
+        ;;
+esac
+
+for name in "$@"; do
+    collect_one "$name" || rc=1
+done
+exit "$rc"

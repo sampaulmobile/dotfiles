@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+#
+# tmux-task-session [--model <model>] [--effort <level>] <worktree-path> <prompt>
+#
+# Builds the tmux session for a task worktree and starts a claude in its agent
+# window with <prompt> as its first turn. Prints the session name on stdout.
+# This is the agent-callable launch path: everything else in bin/ that makes a
+# session is driven by a human keypress.
+#
+#   tmux-task-session ~/dev/proj.feat-x "$(cat brief.md)"
+#   tmux-task-session --model opus --effort high ~/dev/proj.feat-x "<brief>"
+#
+# CREATION ONLY, per the tmux-safety rule: new-session, new-window,
+# set-option, select-window, send-keys and has-session are the only tmux
+# subcommands this script may ever use. It never kills a session or a server,
+# never switches a client, never sources a file and never sets a hook — a
+# caller's own screen must not move because a task session was launched. An
+# existing session of the same name is left untouched: the name is printed and
+# the script exits.
+#
+# <prompt> is written to <worktree>/.feature/launch-prompt.md and the typed
+# line reads it back with "$(cat <file>)", so an arbitrary multi-line brief
+# reaches claude byte-for-byte with no shell-quoting hazard, and the file
+# stays as the record of what that session was asked to do.
+#
+# Session naming goes through project-dirs-lib's session_name_for, so the
+# session this builds is the one Ctrl+F lists, Ctrl+G shows and
+# wt-tmux-cleanup kills when the worktree is removed.
+
+# Resolved relative to THIS file, so a worktree copy sources its own siblings
+# rather than the installed ~/dotfiles.
+_task_bin_dir="${BASH_SOURCE[0]%/*}"
+[[ "$_task_bin_dir" == "${BASH_SOURCE[0]}" ]] && _task_bin_dir="$HOME/dotfiles/bin"
+# shellcheck source=/dev/null
+source "$_task_bin_dir/project-dirs-lib"
+# shellcheck source=/dev/null
+source "$_task_bin_dir/tmux-claude-lib"
+
+TASK_PROMPT_FILE=".feature/launch-prompt.md"
+
+# _task_sq <string>
+#   <string> wrapped in single quotes for a line typed into a shell, embedded
+#   quotes escaped the '\'' way.
+_task_sq() {
+    local s="$1" q="'"
+    printf "'%s'" "${s//$q/$q\\$q$q}"
+}
+
+# task_session_name <worktree-path>
+#   The worktree's session name, into the global task_session_name_out.
+task_session_name() {
+    session_name_for "$1"
+    task_session_name_out="$session_name"
+}
+
+# task_claude_command <session-name> <prompt-file> [model] [effort]
+#   The line typed into the agent window, into the global
+#   task_claude_command_out. Model and effort ride the command line rather
+#   than being left to the machine's settings.json, so the seat is whatever
+#   the caller asked for. Both are typed unquoted and so are refused unless
+#   they are bare words. Returns 1 without setting the global on a refusal.
+task_claude_command() {
+    local name="$1" prompt_file="$2" model="${3:-}" effort="${4:-}"
+    local cmd
+
+    # an empty value matches neither pattern: a bracket expression needs a
+    # character to match, so "" falls through as "flag not asked for"
+    case "$model" in
+        *[!A-Za-z0-9._-]*) printf 'tmux-task-session: bad model: %s\n' "$model" >&2; return 1 ;;
+    esac
+    case "$effort" in
+        *[!A-Za-z0-9._-]*) printf 'tmux-task-session: bad effort: %s\n' "$effort" >&2; return 1 ;;
+    esac
+
+    cmd="claude -n $(_task_sq "$name")"
+    [[ -n "$model" ]] && cmd="$cmd --model $model"
+    [[ -n "$effort" ]] && cmd="$cmd --effort $effort"
+    task_claude_command_out="$cmd \"\$(cat $(_task_sq "$prompt_file"))\""
+}
+
+# task_write_prompt <worktree-path> <prompt>
+#   Writes <prompt> to the worktree's .feature/launch-prompt.md and keeps
+#   .feature/ out of git the way the pipeline does, via the repo's
+#   info/exclude. Prints the file's absolute path.
+task_write_prompt() {
+    local path="$1" prompt="$2" common exclude
+
+    mkdir -p "$path/.feature"
+    printf '%s\n' "$prompt" > "$path/$TASK_PROMPT_FILE"
+
+    common=$(git -C "$path" rev-parse --git-common-dir 2>/dev/null) || common=""
+    if [[ -n "$common" ]]; then
+        case "$common" in /*) ;; *) common="$path/$common" ;; esac
+        exclude="$common/info/exclude"
+        mkdir -p "$common/info"
+        grep -qxF '.feature/' "$exclude" 2>/dev/null || printf '.feature/\n' >> "$exclude"
+    fi
+
+    printf '%s\n' "$path/$TASK_PROMPT_FILE"
+}
+
+task_usage() {
+    printf 'usage: tmux-task-session [--model <model>] [--effort <level>] <worktree-path> <prompt>\n'
+}
+
+task_main() {
+    local model="" effort="" path="" prompt="" name prompt_file
+
+    while (( $# )); do
+        case "$1" in
+            --model)
+                (( $# >= 2 )) || { printf 'tmux-task-session: --model needs a value\n' >&2; return 2; }
+                model="$2"; shift 2 ;;
+            --model=*) model="${1#*=}"; shift ;;
+            --effort)
+                (( $# >= 2 )) || { printf 'tmux-task-session: --effort needs a value\n' >&2; return 2; }
+                effort="$2"; shift 2 ;;
+            --effort=*) effort="${1#*=}"; shift ;;
+            -h|--help) task_usage; return 0 ;;
+            --) shift; break ;;
+            -*) printf 'tmux-task-session: unknown flag: %s\n' "$1" >&2; task_usage >&2; return 2 ;;
+            *) break ;;
+        esac
+    done
+
+    path="${1-}"
+    prompt="${2-}"
+    if [[ -z "$path" || -z "$prompt" ]]; then
+        task_usage >&2
+        return 2
+    fi
+    [[ -d "$path" ]] || { printf 'tmux-task-session: not a directory: %s\n' "$path" >&2; return 2; }
+    path=$(cd "$path" && pwd)
+
+    task_session_name "$path"
+    name="$task_session_name_out"
+
+    if tmux has-session -t="$name" 2>/dev/null; then
+        printf '%s\n' "$name"
+        return 0
+    fi
+
+    prompt_file=$(task_write_prompt "$path" "$prompt")
+    task_claude_command "$name" "$prompt_file" "$model" "$effort" || return 2
+    new_agent_session "$name" "$path" claude "$task_claude_command_out"
+    printf '%s\n' "$name"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    set -euo pipefail
+    task_main "$@"
+fi

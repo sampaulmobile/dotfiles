@@ -1,18 +1,20 @@
 ---
 name: hq
-description: Dispatch a work request to the right repo hub session(s) — resolve targets from the hq routing table (+ wiki), find-or-spawn each hub, delegate the work (usually a /feature run), track and relay results. Works from any shell; handles single- and multi-repo requests.
+description: Dispatch a work request to the right repo(s) — resolve targets from the hq routing table (+ wiki), launch one task session per piece (usually a /feature run), track and relay results. Works from any shell; handles single- and multi-repo requests.
 disable-model-invocation: true
 ---
 
-Route a work request to the repo hub session(s) that should execute it. The
-argument is a free-form request; pass any /feature tier flags the user
-included (`--quick`, `--hard`, `--best`, `--strict`, `--rounds N`, `--xhigh`,
-`--local`) through verbatim to the dispatched invocation.
+Route a work request to the repo(s) that should execute it. The argument is a
+free-form request; pass any /feature flags the user included (`--quick`,
+`--hard`, `--best`, `--strict`, `--rounds N`, `--xhigh`, `--local`, `--go`,
+`--no-workplan`; per-seat `--orchestrator=`, `--implementer=` and
+`--reviewer=<model[:effort]>`) through verbatim to the dispatched invocation.
 
-You are the DISPATCHER, not the implementer. Never execute repo work in the
-invoking session — worktree isolation, repo config, and session identity all
-key to the executing session's cwd. (The step-2 short-circuit is not an
-exception: there the invoking session IS the correct executing session.)
+You are the DISPATCHER, not the implementer. Never execute repo work in this
+session — worktree isolation, repo config, and session identity all key to
+the executing session's cwd. Creating a worktree and its task session IS
+dispatch mechanics and is allowed: that is all `/feature` Launch does before
+it returns.
 
 ## 1. Resolve target repo(s)
 
@@ -30,67 +32,87 @@ exception: there the invoking session IS the correct executing session.)
   (consult the wiki for relationships and ordering). You coordinate the
   pieces; no single dispatched task may span repos.
 
-## 2. Short-circuit: already in the right hub?
-
-If there is exactly ONE target repo and this session's cwd is that repo's hub
-(the main checkout: `git rev-parse --show-toplevel` matches the routing row's
-repo path, and `.git` is a directory, not a file), skip delegation and run the
-task here directly — usually by invoking `/feature`. Steps 3–5 are for every
-other case.
-
-## 3. Find or spawn each hub session
-
-- The hub is the claude session whose peer name is EXACTLY
-  `<repo-dir-basename>-hub` (`routing.md` lists it as `hub`).
-  new_hub_session launches it as `claude -n <basename>-hub`, so ListAgents
-  shows it under that name. Other claude sessions in the same repo show up as
-  auto-named `<basename>-NN` — those are NOT hubs: never dispatch to them,
-  even if idle (durable repo context lives in the hub; dispatching elsewhere
-  splits it and risks two sessions on one branch).
-- Hub tmux session exists but no exactly-named peer (hub launched before the
-  naming convention, or renamed)? Don't spawn a duplicate: ask the user to
-  run `/rename <basename>-hub` in that hub's claude pane, then re-check.
-- Not running? Spawn one headlessly with the standard hub layout, then
-  re-check ListAgents (allow ~15s):
-  `source ~/dotfiles/bin/tmux-claude-lib && new_hub_session <repo-dir-basename> ~/dev/<repo-dir> claude`
-  NEVER launch claude as the tmux session command (`new-session ... claude`) —
-  that bypasses zsh rc files, so env from other/zshrc.local (ANTHROPIC_MODEL,
-  TLS, ...) is missing and claude comes up on the wrong model.
-  new_hub_session instead types `claude` into an initialized shell, same as
-  Ctrl+F, so claude starts warm in window 1.
-  The third argument is the agent (`claude` or `codex`) — always pass `claude`
-  explicitly: omitting it means the machine's default agent, and a codex
-  session has no SendMessage/ListAgents equivalent to be dispatched to.
-  Creation only — never kill or mutate existing sessions (tmux-safety rules).
-
-## 4. Delegate
+## 2. Launch a task session per piece
 
 Before dispatching anything that touches an EXISTING PR or branch (review
-fixes, rebases, follow-ups), assume the user may already be working it directly
-in that hub. Every such dispatch must open with an in-flight check the hub
-answers before acting: "If work on <PR/branch> is already in flight in your
-session (e.g. the user ran /address-review or is steering an agent there),
-do NOT start a second agent — fold this into the running work where it fits,
-drop what the user has since overridden, and reply with the current state."
-Fresh work (a new /feature) needs no check.
+fixes, rebases, follow-ups), check whether work on it is already in flight:
+`bin/worktrees` lists a worktree for that branch with its PIPELINE column, and
+the user may be steering an agent there. If so, do NOT launch a second run —
+send the new direction to that session by name and ask it to fold the work in,
+drop what the user has since overridden, and reply with the current state.
+Fresh work needs no check.
 
-SendMessage each hub a SELF-CONTAINED task — the receiver has none of this
-conversation:
+Otherwise invoke `/feature` Launch here, with the target repo as `--repo=` and
+this session as the reporting address:
 
-- What to do: usually a `/feature <description> <tier flags>` invocation.
-  Include acceptance criteria and any context the hub lacks.
-- For multi-repo work: this piece's place in the whole — what the other repos
-  are doing, ordering constraints, interface contracts between the pieces.
-- Report-back address: "report milestones and the final result back to
-  <THIS session's name>" — invoker-only; results land wherever /hq was called
-  from.
+```
+/feature --repo=<repo path from the routing row> --requester=<THIS session's name> <FLAGS> <the brief below>
+```
 
-## 5. Track and relay
+Launch makes the worktree and its tmux task session, types the Run invocation
+into it, and reports the session name. It never moves your screen and never
+touches an existing session.
 
-- Keep track of outstanding delegations (repo, short task tag, status); relay
-  results to the user as they land — PR URLs and summaries, not
+The brief is the task text Launch passes on, and the receiving session has
+none of this conversation. Every field, every time:
+
+```
+GOAL        one sentence: what is true when this is done
+SCOPE       the repo; the paths it may touch, and the ones it may not
+CONTEXT     pointers only (PR, issue, wiki page, file path). For multi-repo
+            work: this piece's place in the whole — what the other repos are
+            doing, ordering, the interface between the pieces
+ACCEPTANCE  checkable lines, one per condition. State the END STATE
+            ("the section has no typos or grammar errors") and any change
+            the requester asked for by name. Do not state the specific
+            edits the dispatcher worked out while scoping ("add the missing
+            period on line 165"): deciding what to change is the run's job
+            in its plan step, with the whole file in front of it. Written
+            here, the dispatcher's guess becomes the standard the run is
+            graded against
+VERIFY      the commands to run, or the surface to verify on
+FORBIDDEN   what this task must not do, beyond the global rules
+FLAGS       the /feature flags to pass through verbatim. Add --go only when
+            ACCEPTANCE names the specific change, not just the target: a
+            task whose plan phase decides WHAT to change ("fix what you
+            find") keeps the gate, however small the target. Express a
+            small task through the flags the pipeline knows — --no-workplan
+            (plan stays uncommitted, gate and review still run) or --quick
+            (one seat, no review) — never through a FORBIDDEN line that
+            fights the pipeline's defaults, such as naming the only file
+            allowed to change when the pipeline commits a workplan
+```
+
+A field you cannot fill is a task you have not scoped yet — scope it here, or
+ask the user, before dispatching.
+
+## 3. Track and relay
+
+- In-flight state comes from the FILES the pipelines write, never from this
+  conversation and never from a ledger of your own: each worktree's
+  `.feature/status.jsonl`, whose LAST line is that run's current
+  phase/round/seat. The collector publishes every one of them, refreshed
+  every ~5s; read the file, and refresh it first if you need this second's
+  state:
+  ```
+  ~/dotfiles/bin/hq-snapshot pipelines   # optional: collect before reading
+  cat ~/.local/state/hq/snapshot/pipelines.tsv
+  ```
+  Columns: worktree · tmux session · repo · branch · `<phase> r<round>
+  <seat>` · PR · updated. A worktree with no run in flight has no row.
+  `bin/worktrees` shows the same state as its PIPELINE column.
+  A `phase: gate` line means that run is waiting on the requester, not
+  working: relay its digest to the user, and on a go send that go by message
+  to the task session itself, which resumes at its implement step. The file
+  yields the phase, never the digest itself: for a run this session launched
+  it arrived here as a message, and otherwise it is at the top of that
+  worktree's `workplans/<slug>-plan.md`, or of `.feature/plan.md` when
+  workplans are off.
+- Relay results to the user as they land — PR URLs and summaries, not
   implementation detail.
 - Multi-repo: report per-piece status; the feature is done only when every
   piece lands.
-- Steering: relay user feedback onward by message. If the user wants hands-on
-  control, name the tmux session to jump to (Ctrl+F).
+- Steering: relay user feedback onward by message to the task session, named
+  in the run's `pipelines.tsv` row — the same name Launch reported and Ctrl+F
+  lists. If the user wants hands-on control, name that session to jump
+  to (Ctrl+F).

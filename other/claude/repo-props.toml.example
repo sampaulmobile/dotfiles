@@ -1,0 +1,3 @@
+# Per-repo properties consulted by claude skills. Keyed by the repo's main-checkout basename.
+[some-config-repo]
+workplans = false   # /feature keeps the plan in .feature/plan.md instead of committing workplans/<slug>-plan.md

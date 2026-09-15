@@ -12,7 +12,11 @@
 # The classify_worktree case that matters is precedence: LIVE beats DIRTY
 # beats PRUNABLE beats MERGED beats ABANDONED beats IN-REVIEW beats PARKED
 # beats SHIPPED?, first match wins — so a merged worktree that's still dirty
-# must report DIRTY (keep, inspect), never silently look removable.
+# must report DIRTY (keep, inspect), never silently look removable. The one
+# sanctioned look-through is merged_under_untracked: dirt that is untracked
+# files alone is worktree-unique data like the gitignored guard's, so sweep
+# treats it as a guard SKIP that --force drops; any modified/staged tracked
+# file keeps the row DIRTY and out of the sweep.
 # action_for's case that matters is the locked-unlock prefix landing on
 # MERGED/ABANDONED only, never changing any other bucket's command.
 # parse_porcelain_blocks's case that matters is a real parser bug this PR
@@ -26,6 +30,20 @@
 # merged_local (B6) even though `merge-base --is-ancestor` is trivially true
 # for it; a branch with its own commit, folded into default by a real local
 # merge, still must.
+#
+# pipeline_state's cases that matter: the column is the LAST line of
+# status.jsonl (a run's earlier phases must never be shown as current), and it
+# is blank for everything that is not a parseable jsonl line — including a
+# worktree left holding the pre-jsonl status.json, which would otherwise
+# report a phase no one is in any more.
+# feature_archive_dir/archive_feature_dir's cases that matter: a failed copy
+# must REPORT failure, because that return value is the only thing standing
+# between a sweep and a worktree removed with its run history unwritten; the
+# history is append-only, so a second sweep of the same branch adds a stamp
+# directory beside the first one and leaves it byte-identical; and a copy that
+# dies partway leaves its <dest>.partial behind and no <dest> at all.
+# sweep_row's cases that matter: under --apply a worktree left in place is
+# counted ONCE, and the row's label is the one the summary counts it under.
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo_dir=$(dirname "$here")
@@ -264,6 +282,73 @@ else
     printf '  FAIL %s\n       got f_merged_local=%s want false\n' "zero-commit branch, default advanced" "$f_merged_local"
     fail=$(( fail + 1 ))
 fi
+
+echo "── prime_repo_facts: the batched answers match the per-worktree forks"
+# The report primes the cache per repo and derive_worktree_facts reads it;
+# everything above runs unprimed and forks instead. The two must agree on
+# every f_* fact, or the batching changed the report.
+facts_line() {
+    printf '%s|%s|%s|%s|%s|%s' \
+        "$f_live" "$f_dirty" "$f_untracked_only" "$f_unpushed" "$f_merged_local" "$f_age_epoch"
+}
+prime_cmp() {
+    local branch="$1" head="$2" unprimed primed
+    REPO_FACTS_REPO=""
+    derive_worktree_facts "$wd" "$branch" false "$head"
+    unprimed=$(facts_line)
+    _cw_branches=("$branch"); _cw_heads=("$head")
+    prime_repo_facts "$wd"
+    derive_worktree_facts "$wd" "$branch" false "$head"
+    primed=$(facts_line)
+    REPO_FACTS_REPO=""
+    if [[ "$primed" == "$unprimed" ]]; then
+        printf '  ok   %s -> [%s]\n' "$branch" "$primed"
+        pass=$(( pass + 1 ))
+    else
+        printf '  FAIL %s\n       primed   [%s]\n       unprimed [%s]\n' "$branch" "$primed" "$unprimed"
+        fail=$(( fail + 1 ))
+    fi
+}
+prime_cmp real "$real_sha"
+prime_cmp stale "$zero_sha"
+prime_cmp zero-commit-branch "$zero_sha"
+
+echo "── pipeline_state: the PIPELINE column comes from the LAST jsonl line"
+# pipeline_ <label> <want>   (fixture worktree: $pwt)
+pwt="$dtmp/pipe-wt"
+mkdir -p "$pwt/.feature"
+pipeline_() {
+    local label="$1" want="$2" got
+    got=$(pipeline_state "$pwt")
+    if [[ "$got" == "$want" ]]; then
+        printf '  ok   %s -> [%s]\n' "$label" "$got"
+        pass=$(( pass + 1 ))
+    else
+        printf '  FAIL %s\n       got [%s] want [%s]\n' "$label" "$got" "$want"
+        fail=$(( fail + 1 ))
+    fi
+}
+cat > "$pwt/.feature/status.jsonl" <<'JSONL'
+{"repo":"proj","branch":"feat/x","pr":null,"phase":"plan","round":1,"seat":"orchestrator","task":"plan it"}
+{"repo":"proj","branch":"feat/x","pr":null,"phase":"implement","round":1,"seat":"implementer","task":"build it"}
+{"repo":"proj","branch":"feat/x","pr":null,"phase":"review","round":2,"seat":"reviewer","task":"review it"}
+JSONL
+pipeline_ "three lines -> the last one" "review r2 reviewer"
+# A run that ended mid-write leaves a final line with no newline.
+printf '{"phase":"ship","round":3,"seat":"orchestrator"}' >> "$pwt/.feature/status.jsonl"
+pipeline_ "unterminated last line still read" "ship r3 orchestrator"
+printf '{"phase":"gate","seat":"orchestrator"}\n' > "$pwt/.feature/status.jsonl"
+pipeline_ "no round -> phase and seat only" "gate orchestrator"
+printf 'not json at all\n' > "$pwt/.feature/status.jsonl"
+pipeline_ "unparseable last line -> blank" ""
+: > "$pwt/.feature/status.jsonl"
+pipeline_ "empty file -> blank" ""
+rm -f "$pwt/.feature/status.jsonl"
+# The pre-jsonl contract: present, never read, column stays blank.
+printf '{"phase":"implement","round":1,"seat":"implementer"}\n' > "$pwt/.feature/status.json"
+pipeline_ "stale status.json (no jsonl) -> blank" ""
+rm -rf "$pwt/.feature"
+pipeline_ "no .feature dir -> blank" ""
 
 # ============================================================================
 # sweep half
@@ -601,6 +686,216 @@ if [[ "$got" == "$want" ]]; then
     ok "paths with spaces are shell-quoted (paste-safe)"
 else
     bad "sweep_remove_cmd quoting" "got [$got] want [$want]"
+fi
+
+got=$(sweep_remove_cmd /repo /repo/wt branchname false true)
+want='wt -C /repo remove --foreground --no-delete-branch -f branchname && git -C /repo branch -D branchname'
+if [[ "$got" == "$want" ]]; then
+    ok "dirty (untracked-only, --force) -> wt remove -f, same branch delete"
+else
+    bad "sweep_remove_cmd dirty" "got [$got] want [$want]"
+fi
+got=$(sweep_remove_cmd /repo /repo/wt branchname false false)
+if [[ "$got" != *" -f "* ]]; then
+    ok "dirty=false -> no -f (the default stays the dirty-refusing remove)"
+else
+    bad "sweep_remove_cmd dirty=false" "got [$got], must not carry -f"
+fi
+
+echo "── porcelain_untracked_only: untracked entries alone, and nothing else, count"
+if porcelain_untracked_only $'?? uv.lock\n?? reports/'; then
+    ok "all ?? lines -> true"
+else
+    bad "porcelain untracked" "expected true for two ?? lines"
+fi
+if ! porcelain_untracked_only $'?? uv.lock\n M src/app.py'; then
+    ok "a modified tracked file among them -> false"
+else
+    bad "porcelain modified" "expected false when a line is not ??"
+fi
+if ! porcelain_untracked_only $'A  new.py'; then
+    ok "staged-only -> false (tracked now, not untracked)"
+else
+    bad "porcelain staged" "expected false for a staged add"
+fi
+if ! porcelain_untracked_only ""; then
+    ok "empty porcelain (clean) -> false, never 'untracked-only'"
+else
+    bad "porcelain empty" "expected false for empty input"
+fi
+
+echo "── merged_under_untracked: the sweep's look-through and the report's -v hint"
+f_dirty=true; f_untracked_only=true; f_pr_state=MERGED; f_unpushed=false; f_merged_local=false
+if merged_under_untracked false; then
+    ok "dirty, untracked-only, PR merged -> looks through to MERGED"
+else
+    bad "look-through merged PR" "expected true"
+fi
+f_pr_state=OPEN
+if ! merged_under_untracked false; then
+    ok "dirty, untracked-only, PR open -> not merged, stays DIRTY"
+else
+    bad "look-through open PR" "expected false"
+fi
+f_pr_state=MERGED; f_untracked_only=false
+if ! merged_under_untracked false; then
+    ok "dirty with modified tracked files, PR merged -> stays DIRTY"
+else
+    bad "look-through modified" "expected false when dirt is not untracked-only"
+fi
+f_untracked_only=true; f_pr_state=none; f_merged_local=true
+if merged_under_untracked false; then
+    ok "dirty, untracked-only, folded into local default -> MERGED"
+else
+    bad "look-through merged_local" "expected true"
+fi
+f_dirty=false
+if ! merged_under_untracked false; then
+    ok "not dirty at all -> false (a clean MERGED row is not this case)"
+else
+    bad "look-through clean" "expected false"
+fi
+unset f_dirty f_untracked_only f_pr_state f_unpushed f_merged_local
+got=$(action_for DIRTY /repo /repo/wt branchname false true)
+if [[ "$got" == "worktrees sweep --force --apply"* ]]; then
+    ok "action_for DIRTY sweepable -> points at sweep --force"
+else
+    bad "action_for DIRTY sweepable" "got [$got]"
+fi
+got=$(action_for DIRTY /repo /repo/wt branchname false)
+if [[ "$got" == "keep — inspect: git -C /repo/wt status" ]]; then
+    ok "action_for DIRTY default -> keep, inspect (unchanged)"
+else
+    bad "action_for DIRTY default" "got [$got]"
+fi
+
+echo "── feature_archive_dir: where sweep --apply parks a removed worktree's .feature/"
+stamp=20260913T101500Z
+got=$(HOME=/h SWEEP_STAMP="$stamp" feature_archive_dir /r/myrepo /r/myrepo.feat-x feat/x)
+if [[ "$got" == "/h/.local/state/hq/runs/myrepo/feat-x/$stamp" ]]; then
+    ok "branch slashes sanitized to '-', keyed by repo basename, stamped"
+else
+    bad "feature_archive_dir branch" "got [$got]"
+fi
+got=$(HOME=/h SWEEP_STAMP="$stamp" feature_archive_dir /r/proj /r/proj.release-1.2 release/1.2)
+if [[ "$got" == "/h/.local/state/hq/runs/proj/release-1.2/$stamp" ]]; then
+    ok "release/1.2 -> release-1.2 (worktrunk's sanitisation, not the session name)"
+else
+    bad "feature_archive_dir release slug" "got [$got]"
+fi
+got=$(HOME=/h SWEEP_STAMP="$stamp" feature_archive_dir /r/myrepo /r/myrepo/.claude/worktrees/agent-7 "")
+if [[ "$got" == "/h/.local/state/hq/runs/myrepo/agent-7/$stamp" ]]; then
+    ok "detached worktree (no branch) -> its directory basename"
+else
+    bad "feature_archive_dir detached" "got [$got]"
+fi
+got=$(HOME=/h SWEEP_STAMP="" feature_archive_dir /r/myrepo /r/myrepo.feat-x feat/x)
+if [[ "$got" == /h/.local/state/hq/runs/myrepo/feat-x/2[0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z ]]; then
+    ok "no SWEEP_STAMP -> the function stamps it itself, UTC"
+else
+    bad "feature_archive_dir own stamp" "got [$got]"
+fi
+
+echo "── archive_feature_dir: copies .feature/ out, and only then may the worktree go"
+awt="$tmp/archive-wt"
+mkdir -p "$awt/.feature"
+printf 'line one\n' > "$awt/.feature/status.jsonl"
+printf 'notes\n' > "$awt/.feature/NOTES.md"
+aruns="$tmp/home/.local/state/hq/runs/myrepo/feat-y"
+if HOME="$tmp/home" SWEEP_STAMP=20260913T101500Z archive_feature_dir /r/myrepo "$awt" feat/y \
+    && [[ -f "$aruns/20260913T101500Z/status.jsonl" ]] \
+    && [[ -f "$aruns/20260913T101500Z/NOTES.md" ]]; then
+    ok "state tree created and every .feature/ file copied"
+else
+    bad "archive_feature_dir copy" "expected status.jsonl and NOTES.md under $aruns/20260913T101500Z"
+fi
+# Append-only: a second sweep of the same branch must not touch the first run.
+printf 'round two\n' >> "$awt/.feature/status.jsonl"
+if HOME="$tmp/home" SWEEP_STAMP=20260913T110000Z archive_feature_dir /r/myrepo "$awt" feat/y \
+    && [[ "$(wc -l < "$aruns/20260913T101500Z/status.jsonl")" -eq 1 ]] \
+    && [[ "$(wc -l < "$aruns/20260913T110000Z/status.jsonl")" -eq 2 ]]; then
+    ok "a second archive of the branch adds a stamp dir, first run byte-identical"
+else
+    bad "archive_feature_dir append-only" "expected two stamp dirs under $aruns, the first one unchanged"
+fi
+if HOME="$tmp/home" SWEEP_STAMP=20260913T120000Z archive_feature_dir /r/myrepo "$tmp/no-such-worktree" feat/z; then
+    ok "worktree without a .feature/ -> nothing to archive, success"
+else
+    bad "archive_feature_dir absent" "expected rc 0 when there is no .feature/"
+fi
+# An unwritable destination must FAIL, so the caller keeps the worktree.
+blocked="$tmp/blocked"
+printf 'not a dir\n' > "$blocked"
+if ! HOME="$blocked" SWEEP_STAMP=20260913T120000Z archive_feature_dir /r/myrepo "$awt" feat/y 2>/dev/null; then
+    ok "a failed copy reports failure (the worktree is then not removed)"
+else
+    bad "archive_feature_dir failure" "expected non-zero when the destination cannot be created"
+fi
+# A copy that dies partway is kept as <dest>.partial: nothing is deleted, and
+# <dest> stays absent so no reader mistakes the half-copy for a run.
+if [[ "$(id -u)" == 0 ]]; then
+    ok "skipped (running as root — an unreadable file is still readable)"
+else
+    printf 'secret\n' > "$awt/.feature/unreadable"
+    chmod 000 "$awt/.feature/unreadable"
+    if ! HOME="$tmp/home" SWEEP_STAMP=20260913T130000Z archive_feature_dir /r/myrepo "$awt" feat/y 2>/dev/null \
+        && [[ -d "$aruns/20260913T130000Z.partial" ]] \
+        && [[ ! -e "$aruns/20260913T130000Z" ]]; then
+        ok "a copy that fails leaves <dest>.partial and never creates <dest>"
+    else
+        bad "archive_feature_dir partial copy" "expected rc!=0, $aruns/20260913T130000Z.partial kept, no $aruns/20260913T130000Z"
+    fi
+    chmod 644 "$awt/.feature/unreadable"
+    rm -f "$awt/.feature/unreadable"
+fi
+
+echo "── sweep_row counters: what --apply reports when a row is left in place"
+# Everything the callback reaches out to is stubbed; the counters and the row
+# label it produces are the subject.
+sweep_row_probe() {
+    local arc="$1" rmrc="$2"
+    (
+        APPLY=true VERBOSE=false FORCE=false
+        HOME=/h SWEEP_STAMP=20260913T101500Z
+        repo=/r/myrepo
+        CNT_REMOVE=0 CNT_SKIP=0 CNT_FAIL=0
+        labels="" reasons=""
+        derive_worktree_facts() {
+            f_live=false f_dirty=false f_pr_state=MERGED f_unpushed=false
+            f_merged_local=true f_pr_head=cafe f_pr_disp=pr:1 f_age=yesterday f_age_epoch=0
+        }
+        worktree_ignored_at_risk() { printf ''; }
+        sweep_would_kill_own_session() { return 1; }
+        init_liveness() { :; }
+        is_live() { return 1; }
+        where_for() { printf 'wt'; }
+        archive_feature_dir() { return "$arc"; }
+        remove_worktree() { REMOVE_NOTE="" REMOVE_FAIL_NOTE=""; return "$rmrc"; }
+        rows_add() { labels="$labels$1"; reasons="$reasons$5"; }
+        sweep_row /r/myrepo.feat-x feat/x false false cafe
+        printf 'remove=%d skip=%d fail=%d rows=%s reason=%s' "$CNT_REMOVE" "$CNT_SKIP" "$CNT_FAIL" "$labels" "$reasons"
+    )
+}
+got=$(sweep_row_probe 1 0)
+want='remove=0 skip=0 fail=1 rows=FAILED reason=merged, .feature/ archive FAILED, partial at ~/.local/state/hq/runs/myrepo/feat-x/20260913T101500Z.partial'
+if [[ "$got" == "$want" ]]; then
+    ok "a failed archive counts once, under FAILED, and the row names the partial"
+else
+    bad "sweep_row archive failure" "got [$got] want [$want]"
+fi
+got=$(sweep_row_probe 0 1)
+want='remove=1 skip=0 fail=1 rows=REMOVE reason='
+if [[ "$got" == "$want" ]]; then
+    ok "a failed removal still counts FAILED (exit 2) on its REMOVE row"
+else
+    bad "sweep_row removal failure" "got [$got] want [$want]"
+fi
+got=$(sweep_row_probe 0 0)
+want='remove=1 skip=0 fail=0 rows=REMOVE reason='
+if [[ "$got" == "$want" ]]; then
+    ok "a clean removal counts neither SKIP nor FAILED"
+else
+    bad "sweep_row clean removal" "got [$got] want [$want]"
 fi
 
 echo "── B5: a clean --apply run (no removals, no failures) exits 0"

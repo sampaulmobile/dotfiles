@@ -186,6 +186,7 @@ fi
 # other/claude/. The two-layer arrangement is described in CLAUDE.md.
 ensure_dir ~/.claude "$other/claude/skills" "$other/claude/rules" "$other/claude/agents"
 [[ -f $other/claude/settings.json ]] && link $other/claude/settings.json ~/.claude/settings.json
+[[ -f $other/claude/repo-props.toml ]] && link $other/claude/repo-props.toml ~/.claude/repo-props.toml
 for kind in skills rules agents; do
     link $other/claude/$kind ~/.claude/$kind
     layer_tracked_items "$dir/claude/$kind" "$other/claude/$kind" ""
