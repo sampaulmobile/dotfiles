@@ -35,33 +35,38 @@ Determine the default branch first: `git symbolic-ref --short refs/remotes/origi
 
 Write the PR body to a file under `/tmp` and pass it with `--body-file <file>` — NEVER pass a multi-line body inline or via HEREDOC; shell quoting mangles backticks, `$`, and code fences, which then requires ugly `gh pr edit` / API-PATCH repair after the fact.
 
-The body is written for the person who has to decide whether to merge it, and their time is the budget: the VISIBLE body — everything above the `<details>` block — MUST be 40 lines or fewer. Count it before posting with `sed -n '1,/<details>/p' <file> | wc -l`, or plain `wc -l` when the body has no `<details>` block at all, and cut until it passes; a collapsed block costs the reader no time, so it does not count against the cap. The first ~15 lines stand alone — someone who reads only those can decide whether to merge. Tradeoffs and "Open for the reviewer" carry at most ~3 items each; more than three things needing human judgement means the PR is too big, not that the list gets longer. Overflow goes into a collapsed `<details>` block placed after the last section and above the `Generated with` line — never silently dropped. A requester's instruction to document something does not suspend the budget: it goes in that collapsed block.
+The body is written for the person deciding whether to merge, and it is sized to the diff, not to the template. It opens with a TL;DR they can stop after; everything below it is only what they still have to judge or could not see in the diff.
 
 These sections, in this order, each DROPPED when it has nothing to say:
 
 ```
-## Why
-<One or two short paragraphs: the problem, and why this shape of fix. Link the evidence — the issue, the failing run, the workplan.>
+## TL;DR
+<Two to four sentences: what changed and why, for a reader who has not opened the diff; how it was verified; the one thing they must judge, if there is one. Reading only this is enough to decide whether to merge.>
 
-## Scope
-<What the change covers, by symbol and path. Not a file-by-file list.>
-
-## Tradeoffs
-<What was given up, and the alternative that was rejected.>
-
-## Blast radius
-<What else this can break, and the one fact that says it doesn't.>
+## Reviewer should check
+<At most three one-line bullets: an assumption never verified, a product decision taken here, a surface that could not be verified. A fourth means the PR is too big.>
 
 ## Verification
-<One line per run that actually happened: the command, then the outcome.>
+<One line per run that actually happened: the command, then the outcome. Skip what the checks tab already shows.>
 
-## Open for the reviewer
-<What a human still has to judge: unverified assumptions, product decisions taken here, surfaces that could not be verified.>
+<details><summary>Detail</summary>
+
+<Why this shape of fix and what was rejected; blast radius and the one fact that bounds it; anything a requester asked to have documented. Link the evidence — the issue, the failing run, the committed workplan — instead of restating it.>
+
+</details>
 
 Generated with [Claude Code](https://claude.com/claude-code)
 ```
 
-No commit SHAs, no file-by-file inventory, no list of test names — the diff and the checks tab already carry those. A repo whose CLAUDE.md prescribes its own PR body format, title types or PR mechanism wins over this section.
+The budget is in WORDS, because a line cap only produces long lines. Count before posting and cut until it passes:
+
+- TL;DR: 80 words or fewer.
+- Visible body, everything above `<details>`: 150 words or fewer; 100 when the diff is under 20 changed lines (`git diff --shortstat <default>...HEAD`). Check with `sed -n '1,/<details>/p' <file> | wc -w` (plain `wc -w` when there is no `<details>` block).
+- Whole body, `<details>` included: 450 words or fewer, `wc -w <file>`. A collapsed block is cheap to skip but not free to write, so it is bounded too.
+
+Overflow is not a reason to exceed the budget. A pipeline run has a committed workplan that already carries the assumptions and the test plan: link it. Everything else goes in the commit messages or the issue. A requester's instruction to document something does not suspend the budget: it goes in the collapsed block, within its cap.
+
+No commit SHAs, no file-by-file inventory, no list of test names, no per-item verdict tables — the diff and the checks tab already carry those. A repo whose CLAUDE.md prescribes its own PR body format, title types or PR mechanism wins over this section.
 
 ## 7. Return the PR URL to the user
 

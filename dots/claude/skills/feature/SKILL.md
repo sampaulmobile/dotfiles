@@ -202,14 +202,14 @@ Findings file `.feature/findings-round-<N>.md`: line 1 the verdict, `CLEAN` or `
 **5. Ship**
 - Write the Lessons (below) FIRST, so a `repo` lesson's CLAUDE.md edit is in the diff the PR opens with and nothing is added to the branch after this step.
 - If this branch already carries a PR, confirm it is still open (`gh pr view --json state`) before anything is committed. A PR that merged while the run was going takes no further commits: branch fresh off <DEFAULT_BRANCH> in its own worktree (`wt switch -c <branch>` run from the repo's MAIN checkout — `dirname $(git rev-parse --git-common-dir)`; never raw `git worktree add`) and ship the remaining work as its own PR, never onto the merged branch.
-- Invoke the `pr` skill (it commits anything outstanding, pushes, opens the PR) and give it the body material in that skill's sections.
-- "Open for the reviewer" carries what a human still has to judge: assumptions the run never verified, the deferred reviewer notes that matter, product decisions taken on the pipeline's own authority, and any surface that could not be verified. The remaining deferred notes go in the commit body, not the PR.
+- Invoke the `pr` skill (it commits anything outstanding, pushes, opens the PR) and give it the body material in that skill's sections and within its word budget. The workplan is committed and the body links it; the body never restates the plan, the assumptions list or the review rounds.
+- "Reviewer should check" carries what a human still has to judge: assumptions the run never verified, the deferred reviewer notes that matter, product decisions taken on the pipeline's own authority, and any surface that could not be verified. The remaining deferred notes go in the commit body, not the PR.
 
 **6. Report**
 `SendMessage` to `<REQUESTER>` — or, with no requester named, print here — ONLY: the PR URL (raw, on its own line; a `--quick` run that produced no commits reports its findings here instead), a 2-line summary of what was built, rounds used, count of unresolved findings, the worktree path, and the Lessons block below.
 
 **Lessons** — at most three, each a FACT the run learned (a gotcha, a convention, a follow-up), never a preference about how the user wants work done. Written at step 5, before the push. Tag each `repo`, `wiki`, `backlog`, `dotfiles` or `none`:
-- `repo` — write it into the repo's CLAUDE.md and name it under "Open for the reviewer": prose the human on the PR judges. Under `--local` there is no PR body, so name it in the report instead.
+- `repo` — write it into the repo's CLAUDE.md and name it under "Reviewer should check": prose the human on the PR judges. Under `--local` there is no PR body, so name it in the report instead.
 - `wiki` — report it; the requester appends it to the repo's module page in the vault and commits, per the knowledge rule.
 - `backlog` — report it; the requester appends it to the hq backlog as an inbox item.
 - `dotfiles` — propose it in the report only. Never apply it.
