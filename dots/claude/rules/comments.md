@@ -9,6 +9,16 @@ agent, at token cost, on every visit — so a comment must pay for itself.
   file (why this path must stay fork-free, why bash 3.2 syntax). Never write
   what the code does — the code already says that. No narrative walkthroughs
   of the implementation.
+- **A docstring is a comment.** It earns its place on the same terms: a
+  gotcha, an invariant, a constraint a caller cannot see, or what a return
+  value MEANS where the signature does not say it. One that restates the
+  name, the signature or the type hints is deleted — `"""Reset the cache."""`
+  over `reset_cache()`, an `Args:` block repeating the annotations, a
+  `Returns:` line repeating `-> bool`, a test docstring that re-reads its own
+  test name. Module and class docstrings state purpose and constraints and
+  are usually the ones worth keeping. The exception is an API consumed
+  outside the repo, where the docstring IS the reference: write that one
+  fully.
 - **A changed line states the new fact, never why it changed.** No
   `(because ...)`, no `(X is reserved for Y)`, no "was Z, now W" appended to
   a value, default, or setting. The why of a change is the commit message
