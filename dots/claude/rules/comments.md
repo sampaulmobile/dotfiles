@@ -38,8 +38,11 @@ agent, at token cost, on every visit — so a comment must pay for itself.
   and the non-obvious constraints, not a table of contents and not a copy of
   the function comments below it. A gotcha belongs where the thing is
   DEFINED and is not restated at the places that use it; the second copy is
-  a pointer or nothing. If changing a fact would mean editing two places,
-  one of them is a duplicate — delete it.
+  a pointer or nothing. When a fact is BOTH architecture and a local guard,
+  the code comment is the home and CLAUDE.md names the symbol and stops —
+  deleting the code must delete the fact, and a CLAUDE.md copy outlives it
+  and rots. If changing a fact would mean editing two places, one of them is
+  a duplicate — delete it.
 - **Never point at ephemeral files.** Pipeline state (`.feature/`), scratch
   dirs, session notes and chat transcripts do not exist for the next reader.
   If the fact matters, write the fact; otherwise write nothing. A pointer to
