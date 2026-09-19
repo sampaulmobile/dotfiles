@@ -39,12 +39,15 @@
   to the user. Born 2026-09-10: a PR branch was rebased to drop two commits
   and force-pushed.
 
-- **Announce the commands before running them.** Before a batch of tool
-  calls, say in plain text what is about to run — the actual commands, not a
-  summary of intent — then run them. A single obvious read needs no
-  ceremony; anything beyond that, anything that writes, and anything
-  touching a live or prod system is announced first and waits.
+- **Two or more commands: list them and wait for approval.** If a turn will
+  run more than one command — read-only ones included — print the exact
+  commands first and stop. A single command may run unannounced. `&&`, `;`,
+  pipelines and heredocs do not collapse a batch into one command. If the
+  plan changes partway through, re-announce the rest before running it.
 
-- **Never edit files the user hand-manages.** `.env*`, secrets, credentials:
-  read them when needed, never write. If a script needs a var that is
-  missing, say which file needs which line and stop.
+- **Never write to env, secret or credential files.** `.env*`, `envvars*.sh`,
+  `*.key`, `*.pem`, `*.crt`, `credentials`, `.npmrc`, and anything else
+  holding keys, tokens or per-env config. Read them to check a value; never
+  create, append to, or edit one — not a one-line append, not a gitignored
+  file. If a script needs a var that is missing, say which file needs which
+  line and stop.
