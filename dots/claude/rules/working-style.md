@@ -39,11 +39,11 @@
   to the user. Born 2026-09-10: a PR branch was rebased to drop two commits
   and force-pushed.
 
-- **Two or more commands: list them and wait for approval.** If a turn will
-  run more than one command — read-only ones included — print the exact
-  commands first and stop. A single command may run unannounced. `&&`, `;`,
-  pipelines and heredocs do not collapse a batch into one command. If the
-  plan changes partway through, re-announce the rest before running it.
+- **Announce before writing or touching live systems.** Print the exact
+  commands and wait when a command writes, deletes, deploys, or runs against
+  a live/prod system — including anything that loops or polls against one.
+  Read-only work (greps, file reads, log and status queries) runs without
+  ceremony.
 
 - **Never write to env, secret or credential files.** `.env*`, `envvars*.sh`,
   `*.key`, `*.pem`, `*.crt`, `credentials`, `.npmrc`, and anything else
