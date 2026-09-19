@@ -38,3 +38,13 @@
   normally. If a force-push looks like the only way forward, stop and hand it
   to the user. Born 2026-09-10: a PR branch was rebased to drop two commits
   and force-pushed.
+
+- **Announce the commands before running them.** Before a batch of tool
+  calls, say in plain text what is about to run — the actual commands, not a
+  summary of intent — then run them. A single obvious read needs no
+  ceremony; anything beyond that, anything that writes, and anything
+  touching a live or prod system is announced first and waits.
+
+- **Never edit files the user hand-manages.** `.env*`, secrets, credentials:
+  read them when needed, never write. If a script needs a var that is
+  missing, say which file needs which line and stop.
