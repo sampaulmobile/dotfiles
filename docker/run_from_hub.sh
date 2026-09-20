@@ -7,7 +7,6 @@ if [ ! -d "$DEV_DIR" ]; then
     exit 1
 fi
 
-# NAME=sampaul/dev
 NAME=sampaul/dev:alpine
 
 docker run -itd \
