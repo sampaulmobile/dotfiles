@@ -38,3 +38,16 @@
   normally. If a force-push looks like the only way forward, stop and hand it
   to the user. Born 2026-09-10: a PR branch was rebased to drop two commits
   and force-pushed.
+
+- **Announce before writing or touching live systems.** Print the exact
+  commands and wait when a command writes, deletes, deploys, or runs against
+  a live/prod system — including anything that loops or polls against one.
+  Read-only work (greps, file reads, log and status queries) runs without
+  ceremony.
+
+- **Never write to env, secret or credential files.** `.env*`, `envvars*.sh`,
+  `*.key`, `*.pem`, `*.crt`, `credentials`, `.npmrc`, and anything else
+  holding keys, tokens or per-env config. Read them to check a value; never
+  create, append to, or edit one — not a one-line append, not a gitignored
+  file. If a script needs a var that is missing, say which file needs which
+  line and stop.
