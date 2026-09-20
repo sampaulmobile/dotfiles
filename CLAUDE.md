@@ -48,7 +48,7 @@ before pushing.
 - `Ctrl+Space` — toggle the agent window per project: jump to/from the window named after the session's agent (`claude` or `codex`, its `@agent` option), creating it on first use (`bin/tmux-claude-window`)
 - `prefix+C` — an extra agent window in the current session, at the caller pane's directory, via `bin/tmux-claude-window --extra`. Named `<agent>+` (e.g. `claude+`), not `<agent>`, so the C-Space by-name lookup never grabs it; the dashboard, statusbar and Ctrl+Y track agents by tty, so it appears in all of them anyway (with its own `session:N` dashboard row). Shadows tmux's default customize-mode binding.
 - `Ctrl+G` — agent session dashboard (status, tokens, model for every claude and codex session)
-- `Ctrl+Y` — jump to whatever needs attention: a permission prompt first, else the newest finished-but-unseen agent pane (landing on its window, not just its session), else a "nothing needs attention" message. Landing on a flagged pane clears its ✅ flag. Passed through untouched to vim/fzf when the current pane runs one (vim-tmux-navigator's own is-vim idiom), since `C-y` is vim's scroll-line-up; elsewhere it shadows readline's rare `yank`. Not `Ctrl+J` (vim-tmux-navigator's pane navigation) and not `Ctrl+O` (Claude Code's toggle-verbose-transcript key, which a root binding would steal in exactly the panes this layer serves).
+- `Ctrl+Y` — jump to whatever needs attention: a permission prompt first, else the newest finished-but-unseen agent pane (landing on its window, not just its session), else a "nothing needs attention" message. Landing on a flagged pane clears its ✅ flag. Passed through untouched to vim/fzf when the current pane runs one (vim-tmux-navigator's own is-vim idiom), since `C-y` is vim's scroll-line-up; elsewhere it shadows readline's rare `yank`.
 - URLs open with **⌘⇧+hover+click** (Ghostty). Shift is required: tmux `mouse on` and Claude Code's TUI capture mouse reporting, so unshifted clicks never reach Ghostty's link handler. `prefix+u` (wfxr/tmux-fzf-url) fuzzy-picks one from the pane instead — also the fix for URLs that wrap inside tmux and so miss Ghostty's regex, since the plugin captures with `-J`; it lists claude's OSC 8 `file://` links too. `prefix+U` (`bin/tmux-url-latest`) skips the picker and opens the newest, filtered to http(s) so the ubiquitous file:// links cannot shadow the web URL just printed.
 - `F12` — toggle keys off (for nested tmux over SSH)
 
@@ -96,8 +96,8 @@ repeated here. This section is only the DOTFILES-specific glue.
   `wt-tmux-cleanup` kills the removed worktree's session. Session naming
   matches the sessionizer, so Ctrl+F/Ctrl+Space/Ctrl+G work on worktrees with
   no special handling.
-- `wt step copy-ignored` cost on the biggest repo here: ~13s / 3.2 GiB — the
-  reason it's kept manual rather than a switch hook.
+- `wt step copy-ignored` runs manually, not as a switch hook; cost on the
+  biggest repo here: ~13s / 3.2 GiB.
 
 The sessionizer still recognizes `.bare/` containers (other machines may lag
 during the transition off that layout); its scripts are in `archive/`.

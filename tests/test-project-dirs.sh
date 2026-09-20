@@ -194,12 +194,6 @@ else
 fi
 
 echo "── session_name_for on a REMOVED path: why wt-tmux-cleanup needs the branch arg"
-# worktrunk's post-remove/post-merge hooks run AFTER the worktree directory
-# is gone, so session_name_for can no longer read <wt>/.git for the branch
-# and falls back to the basename — a DIFFERENT name from the one Ctrl+F
-# created for that worktree while it was alive, which would leak the
-# session. Hence the rule these two cases pin: once the directory is gone,
-# bin/wt-tmux-cleanup must use session_name_for_branch, not session_name_for.
 removed="$work/dev/proj1/.claude/worktrees/agent-removed"
 session_name_for "$removed"
 if [[ "$session_name" == "proj1_agent-removed" ]]; then

@@ -191,9 +191,8 @@ else
                         row_tag[n]=agent
                         ;;
                     *)
-                        # A worktrunk sibling shows its REPO's path (from the
-                        # gitdir pointer), not its own proj.feat-x dir name,
-                        # so every worktree row reads the same way.
+                        # worktree_repo_out: the repo's path, not the
+                        # sibling's dir name (see header).
                         repo="${worktree_repo_out:-$dir}"
                         row_tag[n]=wt
                         ;;

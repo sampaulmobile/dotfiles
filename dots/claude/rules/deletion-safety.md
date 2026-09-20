@@ -8,9 +8,9 @@
   genuinely wanted, print the exact command and hand it to the user.
 - Reviewers and implementers never execute a deletion as a probe or a test,
   however the target is redirected (a scratch `HOME`, a temp prefix, an env
-  var) — env indirection is how the tmux server got killed. Prove containment
-  by reading the code and by printing the path the command WOULD act on. A
-  deletion that cannot be proven safe by reading is redesigned, not tested.
+  var). Prove containment by reading the code and by printing the path the
+  command WOULD act on. A deletion that cannot be proven safe by reading is
+  redesigned, not tested.
 - Fine: `git worktree remove` / `wt remove` on a worktree (git's own guards
   apply), `git clean` inside the worktree, build outputs inside the worktree,
   and a test suite removing the one scratch directory it created itself under

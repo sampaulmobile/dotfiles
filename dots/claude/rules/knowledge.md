@@ -30,8 +30,7 @@
 - Team-shared files never carry personal filesystem paths. A repo's CLAUDE.md,
   its docs, PR bodies and code comments are read by teammates whose machines
   differ — `~/dev/...`, `/Users/<name>/...`, `$HOME`-relative or any other
-  path that only resolves on this laptop is wrong there (review feedback,
-  2026-09-08). Reference the thing
+  path that only resolves on this laptop is wrong there. Reference the thing
   portably instead: repo-relative path, `<org>/<repo>` plus path, or a URL.
   The `~/dev/wiki` vault is PERSONAL, not a team resource — never reference
   it (by path or page name) in a repo's CLAUDE.md or docs. Local paths and
