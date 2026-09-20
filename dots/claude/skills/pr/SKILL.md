@@ -35,31 +35,34 @@ Determine the default branch first: `git symbolic-ref --short refs/remotes/origi
 
 Write the PR body to a file under `/tmp` and pass it with `--body-file <file>` — NEVER pass a multi-line body inline or via HEREDOC; shell quoting mangles backticks, `$`, and code fences, which then requires ugly `gh pr edit` / API-PATCH repair after the fact.
 
-The body is written for the person who has to decide whether to merge it, and their time is the budget: the VISIBLE body — everything above the `<details>` block — MUST be 40 lines or fewer. Count it before posting with `sed -n '1,/<details>/p' <file> | wc -l`, or plain `wc -l` when the body has no `<details>` block at all, and cut until it passes; a collapsed block costs the reader no time, so it does not count against the cap. The first ~15 lines stand alone — someone who reads only those can decide whether to merge. Tradeoffs and "Open for the reviewer" carry at most ~3 items each; more than three things needing human judgement means the PR is too big, not that the list gets longer. Overflow goes into a collapsed `<details>` block placed after the last section and above the `Generated with` line — never silently dropped. A requester's instruction to document something does not suspend the budget: it goes in that collapsed block.
+The body is written for the person deciding whether to merge, and answers three questions in that order: what is this and why, what must I judge, was it checked. Everything else belongs in the diff, the commit messages, or a collapsed block.
+
+Write it in BULLETS, not paragraphs. Each bullet opens with the thing it is about — bolded when it names a symbol, a decision or a tradeoff — then the consequence. A paragraph is what a reviewer skims past; a bolded lead-in is what lets them find the one bullet that concerns them.
 
 These sections, in this order, each DROPPED when it has nothing to say:
 
 ```
-## Why
-<One or two short paragraphs: the problem, and why this shape of fix. Link the evidence — the issue, the failing run, the workplan.>
+## What & why
+<Two or three bullets: the problem, with the number, incident or evidence that shows it, and what the change does about it. Someone who stops here can decide whether to merge.>
 
-## Scope
-<What the change covers, by symbol and path. Not a file-by-file list.>
-
-## Tradeoffs
-<What was given up, and the alternative that was rejected.>
-
-## Blast radius
-<What else this can break, and the one fact that says it doesn't.>
+## Reviewer should check
+<What a human still has to judge, one bullet each: a tradeoff taken and the alternative rejected, an assumption never verified, a product decision made on the pipeline's own authority, a surface that could not be verified, or what this could break and the one fact that bounds it.>
 
 ## Verification
-<One line per run that actually happened: the command, then the outcome.>
+<One bullet per run that ACTUALLY happened: the command, then the outcome. Close with a `Not verified:` bullet naming what was never run — it is usually the most useful line in the section.>
 
-## Open for the reviewer
-<What a human still has to judge: unverified assumptions, product decisions taken here, surfaces that could not be verified.>
+<details><summary>Detail</summary>
+
+<Evidence a reviewer may want and should not have to dig for: how a claim was established, the per-field or per-version verdicts behind it, rejected alternatives, follow-ups deliberately not done here. Tables and code blocks belong here. Link the issue, the failing run or the committed workplan rather than restating them.>
+
+</details>
 
 Generated with [Claude Code](https://claude.com/claude-code)
 ```
+
+There is no word count. The bound is structural: at most three bullets per section, each one to three lines. A fourth bullet under "Reviewer should check" means the PR is too big, not that the list gets longer. Overflow goes into the collapsed block, never silently dropped — including anything a requester asked to have documented.
+
+Keep the evidence and cut the prose. A number, a `file:line`, a tag or a version is what makes a bullet worth reading, and is the first thing a shortening pass wrongly deletes.
 
 No commit SHAs, no file-by-file inventory, no list of test names — the diff and the checks tab already carry those. A repo whose CLAUDE.md prescribes its own PR body format, title types or PR mechanism wins over this section.
 
