@@ -53,19 +53,46 @@ snapshot_cadence() {
     return 1
 }
 
-# snapshot_write <source> — stdin is the body. The file gets a
+# snapshot_write <source> [<start-iso>] — stdin is the body. The file gets a
 # `# generated <ISO time>` first line and lands with one mv, so a reader
 # never sees a half-written snapshot.
+#
+# <start-iso> is when the CALLER began gathering the facts on stdin, not when
+# this function runs: a collection forks gh/git work and can take seconds, so
+# stamping write time would mark a collection that started before a mutation
+# (e.g. a worktree removal) as fresh after landing past it. Every real
+# collector (collect_one, the sessions producer) passes its own start time;
+# a caller that omits it falls back to now.
 snapshot_write() {
-    local name="$1" f tmp
+    local name="$1" start="${2:-}" f tmp
     f=$(snapshot_file "$name")
     tmp="$f.tmp.$$"
     mkdir -p "$SNAPSHOT_DIR" || return 1
-    { printf '# generated %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"; cat; } > "$tmp" || return 1
+    [[ -n "$start" ]] || start="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    { printf '# generated %s\n' "$start"; cat; } > "$tmp" || return 1
     mv -f "$tmp" "$f"
 }
 
+# snapshot_generated_epoch <source> — its `# generated <ISO time>` header,
+# as epoch seconds; exit 1 when the file, or the header line, isn't there.
+# The BSD (-j -f) and GNU (-d) date invocations are tried in that order —
+# same dual-command shape as snapshot_mtime below.
+snapshot_generated_epoch() {
+    local f header iso
+    f=$(snapshot_file "$1")
+    [[ -r "$f" ]] || return 1
+    header=$(head -n1 "$f") || return 1
+    case "$header" in
+        '# generated '*) iso="${header#\# generated }" ;;
+        *) return 1 ;;
+    esac
+    date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$iso" +%s 2>/dev/null \
+        || date -u -d "$iso" +%s 2>/dev/null
+}
+
 # snapshot_mtime <source> — its mtime in epoch seconds; exit 1 when absent.
+# Fallback only, for a file whose header snapshot_generated_epoch can't
+# parse — nothing this script writes should ever hit that path.
 snapshot_mtime() {
     local f
     f=$(snapshot_file "$1")
@@ -73,8 +100,14 @@ snapshot_mtime() {
     stat -f '%m' "$f" 2>/dev/null || stat -c '%Y' "$f" 2>/dev/null
 }
 
-# snapshot_age <source> — seconds since it was written, -1 when absent.
+# snapshot_age <source> — seconds since its collection STARTED (the
+# `# generated` header), -1 when absent. This, not the file's mtime, is the
+# clock a reader trusts: a collection can run for seconds after it starts
+# (gh/git forked per repo/worktree), and must age out on when it began
+# gathering facts, not on when the write happened to land.
 snapshot_age() {
+    local e
+    e=$(snapshot_generated_epoch "$1") && { printf '%s' "$(( $(date +%s) - e ))"; return 0; }
     local m
     m=$(snapshot_mtime "$1") || { printf '%s' -1; return 0; }
     [[ -n "$m" ]] || { printf '%s' -1; return 0; }
@@ -200,8 +233,9 @@ Sources and their cadence, one TSV each under ~/.local/state/hq/snapshot/
   worktrees 15s   bin/worktrees' classification of every project
   prs       30s   bin/prs' GitHub search rows
 
-Every file starts with a `# generated <ISO time>` line. A reader treats a
-snapshot older than three times its cadence as unusable and computes live.
+Every file starts with a `# generated <ISO time>` line, stamped when that
+collection STARTED, not when the write landed. A reader treats a snapshot
+older than three times its cadence as unusable and computes live.
 
 tick is called by bin/tmux-claude-statusbar every ~5s: it collects pipelines
 inline and spawns the slower sources when they are due and not already
@@ -275,18 +309,21 @@ collect_prs() {
 
 # collect_one <source> — produce it, then publish it. The body is held in
 # full first: a producer that fails must leave the previous snapshot alone
-# rather than publish a truncated one.
+# rather than publish a truncated one. The start time is captured before the
+# (possibly multi-second) collection runs, so the published age reflects when
+# the facts were gathered, not when the write landed.
 collect_one() {
-    local name="$1" out
+    local name="$1" out start
     if ! declare -f "collect_$name" >/dev/null 2>&1; then
         echo "hq-snapshot: no such source: $name" >&2
         return 2
     fi
+    start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     out=$("collect_$name") || {
         echo "hq-snapshot: $name collection failed — previous snapshot left in place" >&2
         return 1
     }
-    { [[ -z "$out" ]] || printf '%s\n' "$out"; } | snapshot_write "$name"
+    { [[ -z "$out" ]] || printf '%s\n' "$out"; } | snapshot_write "$name" "$start"
 }
 
 # due <source> — true when its snapshot is older than its own cadence.

@@ -22,6 +22,7 @@
 source ~/dotfiles/bin/tmux-claude-lib
 source ~/dotfiles/bin/hq-snapshot
 
+scan_start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 pane_lines=$(scan_agent_panes)
 status_lines=$(aggregate_session_status "$pane_lines")
 
@@ -41,7 +42,7 @@ fi
 # longer run an agent; the reader additionally ignores it once it is stale.
 # This tick is the only producer that already holds the scan, so it publishes
 # the source itself rather than making `hq-snapshot tick` scan a second time.
-{ [[ -z "$status_lines" ]] || printf '%s\n' "$status_lines"; } | snapshot_write sessions
+{ [[ -z "$status_lines" ]] || printf '%s\n' "$status_lines"; } | snapshot_write sessions "$scan_start"
 ~/dotfiles/bin/hq-snapshot tick >/dev/null 2>&1 &
 
 done_list=$(~/dotfiles/bin/tmux-claude-attention list 2>/dev/null)

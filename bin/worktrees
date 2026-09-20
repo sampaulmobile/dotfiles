@@ -1236,6 +1236,7 @@ sweep_decide() {
     if [[ "$APPLY" == true ]]; then
         if remove_worktree "$repo" "$path" "$branch" "$locked" "$dirty_untracked"; then
             detail+="${detail:+$nl}      removed$REMOVE_NOTE"
+            SWEEP_REMOVED_ANY=true
         else
             CNT_FAIL=$((CNT_FAIL + 1))
             detail+="${detail:+$nl}      $(paint FAILED 6) to remove (left in place)$REMOVE_FAIL_NOTE"
@@ -1402,6 +1403,9 @@ elif [[ "$USE_SNAPSHOT" == false ]] && (( ${#project_dirs_out[@]} )); then
 fi
 
 CNT_REMOVE=0 CNT_SKIP=0 CNT_FAIL=0
+# Set true the moment a worktree is actually removed (not would-remove, not a
+# failed removal): the trigger for the post-sweep snapshot recollect below.
+SWEEP_REMOVED_ANY=false
 
 CNT_LIVE=0 CNT_DIRTY=0 CNT_PRUNABLE=0 CNT_MERGED=0 CNT_ABANDONED=0
 CNT_INREVIEW=0 CNT_PARKED=0 CNT_SHIPPED=0
@@ -1644,6 +1648,14 @@ if (( ${#repos[@]} )); then
         rmdir "$STATUS_PREFETCH_DIR" 2>/dev/null
     fi
 fi
+fi
+
+# sweep --apply is the one operation that knowingly falsifies the stored
+# snapshot: a removed worktree's record must not outlive it. Recollect
+# synchronously, before this run exits, so the very next reader sees the
+# removal — not on a dry run or a no-op run, only once something is gone.
+if [[ "$MODE" == sweep && "$APPLY" == true && "$SWEEP_REMOVED_ANY" == true ]]; then
+    "$DOTFILES/bin/hq-snapshot" worktrees >/dev/null 2>&1
 fi
 
 # --snapshot prints records and nothing else: no table, no summary, no

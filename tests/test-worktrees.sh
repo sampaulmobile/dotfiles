@@ -859,6 +859,7 @@ sweep_row_probe() {
         HOME=/h SWEEP_STAMP=20260913T101500Z
         repo=/r/myrepo
         CNT_REMOVE=0 CNT_SKIP=0 CNT_FAIL=0
+        SWEEP_REMOVED_ANY=false
         labels="" reasons=""
         derive_worktree_facts() {
             f_live=false f_dirty=false f_pr_state=MERGED f_unpushed=false
@@ -873,29 +874,43 @@ sweep_row_probe() {
         remove_worktree() { REMOVE_NOTE="" REMOVE_FAIL_NOTE=""; return "$rmrc"; }
         rows_add() { labels="$labels$1"; reasons="$reasons$5"; }
         sweep_row /r/myrepo.feat-x feat/x false false cafe
-        printf 'remove=%d skip=%d fail=%d rows=%s reason=%s' "$CNT_REMOVE" "$CNT_SKIP" "$CNT_FAIL" "$labels" "$reasons"
+        printf 'remove=%d skip=%d fail=%d removed_any=%s rows=%s reason=%s' \
+            "$CNT_REMOVE" "$CNT_SKIP" "$CNT_FAIL" "$SWEEP_REMOVED_ANY" "$labels" "$reasons"
     )
 }
 got=$(sweep_row_probe 1 0)
-want='remove=0 skip=0 fail=1 rows=FAILED reason=merged, .feature/ archive FAILED, partial at ~/.local/state/hq/runs/myrepo/feat-x/20260913T101500Z.partial'
+want='remove=0 skip=0 fail=1 removed_any=false rows=FAILED reason=merged, .feature/ archive FAILED, partial at ~/.local/state/hq/runs/myrepo/feat-x/20260913T101500Z.partial'
 if [[ "$got" == "$want" ]]; then
     ok "a failed archive counts once, under FAILED, and the row names the partial"
 else
     bad "sweep_row archive failure" "got [$got] want [$want]"
 fi
 got=$(sweep_row_probe 0 1)
-want='remove=1 skip=0 fail=1 rows=REMOVE reason='
+want='remove=1 skip=0 fail=1 removed_any=false rows=REMOVE reason='
 if [[ "$got" == "$want" ]]; then
-    ok "a failed removal still counts FAILED (exit 2) on its REMOVE row"
+    ok "a failed removal still counts FAILED (exit 2) on its REMOVE row, but never sets removed_any"
 else
     bad "sweep_row removal failure" "got [$got] want [$want]"
 fi
 got=$(sweep_row_probe 0 0)
-want='remove=1 skip=0 fail=0 rows=REMOVE reason='
+want='remove=1 skip=0 fail=0 removed_any=true rows=REMOVE reason='
 if [[ "$got" == "$want" ]]; then
-    ok "a clean removal counts neither SKIP nor FAILED"
+    ok "a clean removal counts neither SKIP nor FAILED, and sets removed_any"
 else
     bad "sweep_row clean removal" "got [$got] want [$want]"
+fi
+
+echo "── sweep --apply recollects the worktrees snapshot only after an actual removal"
+# A full sweep --apply against a real merged worktree (wt + gh + lsof, a
+# throwaway git repo with a linked worktree already removed) is not
+# reachable from this offline suite, so this pins the gating instead of the
+# end-to-end effect: the recollect call exists, requires --apply, and is
+# gated on the same SWEEP_REMOVED_ANY sweep_row sets only on success above.
+if grep -q 'MODE" == sweep && "$APPLY" == true && "$SWEEP_REMOVED_ANY" == true' "$repo_dir/bin/worktrees" \
+    && grep -q 'hq-snapshot" worktrees' "$repo_dir/bin/worktrees"; then
+    ok "sweep --apply recollects the worktrees snapshot, gated on an actual removal"
+else
+    bad "post-sweep recollect" "expected an APPLY + SWEEP_REMOVED_ANY-gated 'hq-snapshot worktrees' call"
 fi
 
 echo "── B5: a clean --apply run (no removals, no failures) exits 0"
