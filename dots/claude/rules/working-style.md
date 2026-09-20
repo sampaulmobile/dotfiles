@@ -36,6 +36,14 @@
   verify the check). A private repo's test data is not a production secret; the
   owner's own risk in their own repo is the owner's call.
 
+- **Run in parallel whatever can run in parallel.** The point of worktrees,
+  hubs and pipelines is throughput. Default to launching independent work side
+  by side; stay serial only when one piece consumes what another produces, or
+  when both would write the same new code into the same files — i.e. when
+  reconciling afterwards would cost more than the time saved. Overlap in docs
+  or config that merges in minutes is not a reason to wait. Quality gates
+  (review loops, device tests) are unchanged by this.
+
 - **Never force-push.** Not `--force`, not `--force-with-lease`, not on a branch
   this session created five minutes ago. To remove or undo commits on a pushed
   branch, add a commit (`git revert`, or edit + commit) and push normally. If a
