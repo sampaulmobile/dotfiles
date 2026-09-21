@@ -1,0 +1,581 @@
+#!/usr/bin/env bash
+# hq-inbox — the thread list: one row per pipeline run, bucketed by what it
+# waits on, with the headline the hub last wrote about it. Columns, keys,
+# formats and the bucket rules are usage() below, which is the reference a
+# user reads; CLAUDE.md points here rather than repeating it.
+#
+# It COMPOSES NOTHING and SENDS NOTHING: `g` moves another client to a hub
+# session and the reply is typed there, in a real conversation.
+#
+# Rows come from bin/hq-snapshot's inbox source, which is where the join
+# lives; this script buckets and paints, and never recomputes a row's facts.
+# Its own writes are the two state files under $HQ_INBOX_DIR/_state/, each
+# rewritten <file>.tmp.$$ then mv'ed. Nothing under ~/.local/state/hq is
+# removed, the thread logs included (dots/claude/rules/deletion-safety.md).
+#
+# tmux-safety: list-clients, display, has-session, new-session and
+# switch-client are the only tmux subcommands here, and switch-client only
+# ever targets the caller's own client or an explicitly named other tty.
+#
+# Sourceable — the decisions (inbox_bucket, the record parse, the un-archive
+# and unread rules) are handed back with no view loop, no snapshot read and
+# no directory created. See tests/test-hq-inbox.sh.
+
+DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+SELF="$DOTFILES/bin/hq-inbox"
+# shellcheck source=/dev/null
+source "$DOTFILES/bin/hq-snapshot"
+
+usage() {
+    cat <<'EOF'
+usage: hq-inbox            open (or create) the hq-inbox tmux session
+       hq-inbox --view     run the viewer in this terminal
+       hq-inbox --dump     print the list once and exit (no tmux, no cursor)
+
+One row per thread — a worktree with a /feature or /address-review run, plus
+any thread whose worktree has since been swept. Rows come from the inbox
+snapshot (bin/hq-snapshot inbox); a missing or stale one is recollected here
+and the footer says so.
+
+Columns:
+  REPO/BRANCH  the thread. Painted by its bucket; BOLD while unread.
+  SESSION      the run's tmux session (- once the worktree is swept).
+  STATE        `<phase> r<round> <seat>`, the last .feature/status.jsonl line.
+  AGE          since the thread log's last entry, else since the state's
+               `updated`. 12s / 3m / 2h / 4d.
+  HEADLINE     the first line of the newest entry the hub wrote.
+
+Buckets, first match wins:
+  ARCHIVED     you archived it and nothing has happened since.
+  NEEDS YOU    phase gate or stalled; or PR tag changes-requested, ci-red,
+               approved or merge-conflict.
+  DONE         phase done, or PR tag merged, or the worktree is gone.
+  WORKING      anything else still running.
+
+Keys:
+  j / k   move          ⏎  open the thread in $PAGER and mark it seen
+  a       archive or un-archive the row
+  g       switch your OTHER tmux client to the row's hub session
+  r       recollect     q  quit
+
+Archiving is explicit, un-archiving automatic: a thread log written since the
+mark, or a state that has changed since, drops the row back into its live
+bucket. `a` on a live row that still carries a stale mark refreshes it.
+
+Thread logs live under ~/.local/state/hq/inbox/<repo>/<branch-slug>.md, the
+archive and seen marks under its _state/ (override the whole tree with
+HQ_INBOX_DIR). The hubs write the logs; nothing here ever removes one.
+EOF
+}
+
+# ── decisions (the sourced half) ────────────────────────
+
+# inbox_bucket <state> <pr-tag> <archived?> — the row's section. Order IS the
+# precedence; `archived?` is the already-resolved mark (see
+# inbox_archive_stale), not the raw presence of one.
+inbox_bucket() {
+    local state="$1" tag="$2" archived="$3" phase
+    [[ "$archived" == true ]] && { printf 'ARCHIVED'; return 0; }
+    phase="${state%% *}"
+    case "$phase" in
+        gate|stalled) printf 'NEEDS YOU'; return 0 ;;
+    esac
+    case "$tag" in
+        changes-requested|ci-red|approved|merge-conflict) printf 'NEEDS YOU'; return 0 ;;
+    esac
+    if [[ "$phase" == done || "$tag" == merged ]]; then printf 'DONE'; return 0; fi
+    # No pipelines row left: the run is gone and only the log remains.
+    if [[ -z "$state" || "$state" == "-" ]]; then printf 'DONE'; return 0; fi
+    printf 'WORKING'
+}
+
+# inbox_parse <record> — one inbox.tsv line into $f_worktree $f_session
+# $f_repo $f_branch $f_state $f_pr $f_prtag $f_mtime $f_entries $f_headline,
+# with the TSV's `-` placeholders mapped back to empty. The headline is last
+# because it is the one field that may hold spaces.
+f_worktree=""; f_session=""; f_repo=""; f_branch=""; f_state=""
+f_pr=""; f_prtag=""; f_mtime=""; f_entries=""; f_headline=""
+inbox_parse() {
+    IFS=$'\t' read -r f_worktree f_session f_repo f_branch f_state \
+        f_pr f_prtag f_mtime f_entries f_headline <<< "$1"
+    [[ "$f_worktree" == "-" ]] && f_worktree=""
+    [[ "$f_session"  == "-" ]] && f_session=""
+    [[ "$f_repo"     == "-" ]] && f_repo=""
+    [[ "$f_branch"   == "-" ]] && f_branch=""
+    [[ "$f_state"    == "-" ]] && f_state=""
+    [[ "$f_pr"       == "-" ]] && f_pr=""
+    [[ "$f_prtag"    == "-" ]] && f_prtag=""
+    [[ "$f_mtime"    == "-" ]] && f_mtime=""
+    [[ "$f_headline" == "-" ]] && f_headline=""
+    return 0
+}
+
+# inbox_archive_stale <thread-mtime> <state> <archived-mtime> <archived-state>
+#   true when the mark no longer describes the row — the log has been written
+#   since, or the run moved on — which is what un-archives it.
+inbox_archive_stale() {
+    local mtime="${1:-0}" state="$2" amtime="${3:-0}" astate="$4"
+    [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
+    [[ "$amtime" =~ ^[0-9]+$ ]] || amtime=0
+    if (( mtime > amtime )) || [[ "$state" != "$astate" ]]; then
+        printf 'true'
+    else
+        printf 'false'
+    fi
+}
+
+# inbox_unread <thread-mtime> <seen-mtime> — a thread with no entry is never
+# unread; one never opened always is.
+inbox_unread() {
+    local mtime="$1" seen="$2"
+    [[ "$mtime" =~ ^[0-9]+$ ]] || { printf 'false'; return 0; }
+    [[ "$seen" =~ ^[0-9]+$ ]] || { printf 'true'; return 0; }
+    if (( mtime > seen )); then printf 'true'; else printf 'false'; fi
+}
+
+# iso_to_epoch <YYYY-MM-DDTHH:MM:SSZ> — UTC seconds, fork-free (days_from_civil);
+# empty for anything not that exact shape. status.jsonl's `updated` is the age
+# fallback for a thread with no log yet, and it is read per row.
+iso_to_epoch() {
+    local y mo d h mi sec era yoe doy doe days
+    [[ "$1" =~ ^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})Z$ ]] || return 0
+    y=$((10#${BASH_REMATCH[1]})); mo=$((10#${BASH_REMATCH[2]})); d=$((10#${BASH_REMATCH[3]}))
+    h=$((10#${BASH_REMATCH[4]})); mi=$((10#${BASH_REMATCH[5]})); sec=$((10#${BASH_REMATCH[6]}))
+    (( mo <= 2 )) && (( y-- ))
+    era=$(( (y >= 0 ? y : y - 399) / 400 ))
+    yoe=$(( y - era * 400 ))
+    doy=$(( (153 * (mo + (mo > 2 ? -3 : 9)) + 2) / 5 + d - 1 ))
+    doe=$(( yoe * 365 + yoe / 4 - yoe / 100 + doy ))
+    days=$(( era * 146097 + doe - 719468 ))
+    printf '%s' $(( days * 86400 + h * 3600 + mi * 60 + sec ))
+}
+
+# inbox_thread_author <file> — the author half of the LAST `## <time> · <who>`
+# header; empty when the log has no entry. `g` lands on that session because
+# it is the one that spoke about this thread last.
+inbox_thread_author() {
+    local f="$1" l last=""
+    [[ -r "$f" ]] || return 0
+    while IFS= read -r l || [[ -n "$l" ]]; do
+        case "$l" in '## '*) last="$l" ;; esac
+    done < "$f"
+    case "$last" in
+        *' · '*) printf '%s' "${last##* · }" ;;
+    esac
+    return 0
+}
+
+inbox_state_file() { printf '%s/_state/%s.tsv' "$INBOX_DIR" "$1"; }
+
+# inbox_state_get <file> <repo> <branch> — the rest of the row for that key,
+# tab-separated; empty when the key is not marked.
+inbox_state_get() {
+    local f="$1" key="$2"$'\t'"$3" line
+    [[ -r "$f" ]] || return 0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ "$line" == "$key"$'\t'* ]] || continue
+        printf '%s' "${line#"$key"$'\t'}"
+        return 0
+    done < "$f"
+    return 0
+}
+
+# inbox_state_put <file> <repo> <branch> [<rest>] — replace that key's row,
+# or drop it when <rest> is omitted. The file is rewritten to <file>.tmp.$$
+# and mv'ed, so a reader never sees a half-written mark and no state file is
+# ever unlinked.
+inbox_state_put() {
+    local f="$1" repo="$2" branch="$3" rest="${4-}" key line tmp
+    key="$repo"$'\t'"$branch"
+    tmp="$f.tmp.$$"
+    mkdir -p "${f%/*}" || return 1
+    : > "$tmp" || return 1
+    if [[ -r "$f" ]]; then
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            [[ -n "$line" ]] || continue
+            [[ "$line" == "$key"$'\t'* ]] && continue
+            printf '%s\n' "$line" >> "$tmp"
+        done < "$f"
+    fi
+    [[ -n "$rest" ]] && printf '%s\t%s\n' "$key" "$rest" >> "$tmp"
+    mv -f "$tmp" "$f"
+}
+
+# Sourced by tests/test-hq-inbox.sh: hand back the decisions and stop.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0 2>/dev/null || true
+fi
+
+set -uo pipefail
+
+# ── paint ───────────────────────────────────────────────
+
+# bin/worktrees' palette: yellow = on you, blue = live, green = done.
+RST=""; BOLD=""; DIM=""; SEL=""
+C_NEEDS=""; C_WORKING=""; C_DONE=""; C_ARCH=""
+if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; then
+    RST=$'\033[0m'; BOLD=$'\033[1m'; DIM=$'\033[2m'; SEL=$'\033[48;5;236m'
+    C_NEEDS=$'\033[33m'; C_WORKING=$'\033[34m'; C_DONE=$'\033[32m'; C_ARCH=$'\033[2m'
+fi
+bucket_color() {
+    case "$1" in
+        'NEEDS YOU') printf '%s' "$C_NEEDS" ;;
+        WORKING)     printf '%s' "$C_WORKING" ;;
+        DONE)        printf '%s' "$C_DONE" ;;
+        *)           printf '%s' "$C_ARCH" ;;
+    esac
+}
+term_cols() {
+    local c="${COLUMNS:-}"
+    if [[ ! "$c" =~ ^[0-9]+$ ]] && [[ -n "${TMUX:-}" ]]; then
+        c=$(tmux display -p '#{pane_width}' 2>/dev/null)
+    fi
+    [[ "$c" =~ ^[0-9]+$ ]] || c=$(tput cols 2>/dev/null)
+    [[ "$c" =~ ^[0-9]+$ ]] || c=100
+    printf '%s' "$c"
+}
+
+clip() {
+    local t="$1" w="$2"
+    (( w < 1 )) && { printf ''; return 0; }
+    if (( ${#t} > w )); then printf '%s…' "${t:0:w-1}"; else printf '%s' "$t"; fi
+}
+
+# ── data ────────────────────────────────────────────────
+
+r_repo=(); r_branch=(); r_session=(); r_state=(); r_prtag=(); r_mtime=()
+r_headline=(); r_bucket=(); r_unread=(); r_age=(); r_thread=()
+order=()
+row_count=0
+SOURCE_NOTE=""
+
+load_data() {
+    local recs verdict line now updated_map path session repo branch state pr updated
+    local amark aseen astale amtime astate epoch sortable idx
+    frame_at=0
+    r_repo=(); r_branch=(); r_session=(); r_state=(); r_prtag=(); r_mtime=()
+    r_headline=(); r_bucket=(); r_unread=(); r_age=(); r_thread=()
+    order=(); row_count=0
+
+    verdict=$(snapshot_verdict "$(snapshot_age inbox)" "$(snapshot_cadence inbox)")
+    if [[ "$verdict" == fresh && "${FORCE_COLLECT:-false}" == false ]]; then
+        SOURCE_NOTE="snapshot: $(fmt_secs "$(snapshot_age inbox)") old  (r to recollect)"
+    else
+        "$DOTFILES/bin/hq-snapshot" inbox >/dev/null 2>&1
+        SOURCE_NOTE="snapshot $verdict — collected here"
+        [[ "${FORCE_COLLECT:-false}" == true ]] && SOURCE_NOTE="recollected just now"
+    fi
+    FORCE_COLLECT=false
+
+    # The age fallback for a thread with no entry yet: the run's own
+    # `updated`, which only the pipelines record carries.
+    updated_map=$'\n'
+    while IFS=$'\t' read -r path session repo branch state pr updated; do
+        [[ -n "$repo" && -n "$branch" ]] || continue
+        updated_map+="${repo}/${branch}"$'\t'"${updated}"$'\n'
+    done < <(snapshot_read pipelines 2>/dev/null)
+
+    now=$(date +%s)
+    recs=$(snapshot_read inbox 2>/dev/null)
+    sortable=""
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        inbox_parse "$line"
+        amark=$(inbox_state_get "$(inbox_state_file archived)" "$f_repo" "$f_branch")
+        aseen=$(inbox_state_get "$(inbox_state_file seen)" "$f_repo" "$f_branch")
+        astale=true
+        if [[ -n "$amark" ]]; then
+            case "$amark" in
+                *$'\t'*) amtime="${amark%%$'\t'*}"; astate="${amark#*$'\t'}" ;;
+                *)       amtime="$amark"; astate="" ;;
+            esac
+            astale=$(inbox_archive_stale "$f_mtime" "$f_state" "$amtime" "$astate")
+        fi
+        r_repo+=("$f_repo"); r_branch+=("$f_branch"); r_session+=("$f_session")
+        r_state+=("$f_state"); r_prtag+=("$f_prtag"); r_mtime+=("$f_mtime")
+        r_headline+=("$f_headline")
+        inbox_thread_file "$f_repo" "$f_branch"
+        r_thread+=("$inbox_thread_file_out")
+        if [[ -n "$amark" && "$astale" == false ]]; then
+            r_bucket+=("ARCHIVED")
+        else
+            r_bucket+=("$(inbox_bucket "$f_state" "$f_prtag" false)")
+        fi
+        r_unread+=("$(inbox_unread "$f_mtime" "$aseen")")
+        epoch="$f_mtime"
+        if [[ ! "$epoch" =~ ^[0-9]+$ ]]; then
+            updated="${updated_map#*$'\n'"${f_repo}/${f_branch}"$'\t'}"
+            if [[ "$updated" != "$updated_map" ]]; then
+                epoch=$(iso_to_epoch "${updated%%$'\n'*}")
+            fi
+        fi
+        if [[ "$epoch" =~ ^[0-9]+$ ]]; then
+            r_age+=("$(( now - epoch ))")
+        else
+            r_age+=(-1)
+            epoch=0
+        fi
+        idx=$(( row_count ))
+        sortable+="$(bucket_rank "${r_bucket[$idx]}")"$'\t'"$epoch"$'\t'"$idx"$'\n'
+        row_count=$(( row_count + 1 ))
+    done <<< "$recs"
+
+    (( row_count )) || return 0
+    while IFS=$'\t' read -r _ _ idx; do
+        [[ -n "$idx" ]] && order+=("$idx")
+    done < <(printf '%s' "$sortable" | sort -t$'\t' -k1,1n -k2,2nr)
+    (( selected >= row_count )) && selected=$(( row_count - 1 ))
+    (( selected < 0 )) && selected=0
+    return 0
+}
+
+bucket_rank() {
+    case "$1" in
+        'NEEDS YOU') printf 0 ;;
+        WORKING)     printf 1 ;;
+        DONE)        printf 2 ;;
+        *)           printf 3 ;;
+    esac
+}
+
+# ── frame ───────────────────────────────────────────────
+
+frame_rows=()
+# frame_row_line[<cursor position>] = the frame_rows index it paints, so the
+# section headers and blank separators cannot be landed on.
+frame_row_line=()
+frame_head=""
+frame_foot=""
+frame_cols=0
+frame_at=0
+selected=0
+
+build_frame() {
+    local cols idx name w_name=0 w_sess=0 w_state=0 bucket last_bucket="" row
+    local age headline color n
+    cols=$(term_cols)
+    frame_cols="$cols"
+    frame_at=$(date +%s)
+    frame_rows=()
+    frame_row_line=()
+
+    for idx in ${order[@]+"${order[@]}"}; do
+        name="${r_repo[$idx]}/${r_branch[$idx]}"
+        (( ${#name} > w_name )) && w_name=${#name}
+        n=${#r_session[$idx]}; (( n > w_sess )) && w_sess=$n
+        n=${#r_state[$idx]};   (( n > w_state )) && w_state=$n
+    done
+    (( w_name > 42 )) && w_name=42
+    (( w_sess > 26 )) && w_sess=26
+    (( w_state > 26 )) && w_state=26
+
+    frame_head="${BOLD}INBOX${RST}  ${row_count} thread"
+    (( row_count == 1 )) || frame_head+="s"
+    frame_head+=$'\n\n'
+
+    for idx in ${order[@]+"${order[@]}"}; do
+        bucket="${r_bucket[$idx]}"
+        color=$(bucket_color "$bucket")
+        if [[ "$bucket" != "$last_bucket" ]]; then
+            [[ -n "$last_bucket" ]] && frame_rows+=("")
+            frame_rows+=("${color}${bucket}${RST}")
+            last_bucket="$bucket"
+        fi
+        name=$(clip "${r_repo[$idx]}/${r_branch[$idx]}" "$w_name")
+        age=$(fmt_secs "${r_age[$idx]}")
+        [[ "${r_age[$idx]}" == -1 ]] && age="-"
+        headline="${r_headline[$idx]:--}"
+        row=$(printf '  %-*s  %-*s  %-*s  %5s  ' \
+            "$w_name" "$name" "$w_sess" "$(clip "${r_session[$idx]:--}" "$w_sess")" \
+            "$w_state" "$(clip "${r_state[$idx]:--}" "$w_state")" "$age")
+        row+=$(clip "$headline" $(( cols - ${#row} - 2 )))
+        if [[ "${r_unread[$idx]}" == true ]]; then
+            row="${color}${BOLD}${row}${RST}"
+        else
+            row="${color}${row}${RST}"
+        fi
+        frame_row_line+=("${#frame_rows[@]}")
+        frame_rows+=("$row")
+    done
+    (( row_count )) || frame_rows+=("  ${DIM}no threads yet${RST}")
+
+    frame_foot=$'\n'"${DIM}j/k move · ⏎ open · a archive · g go to hub · r recollect · q quit${RST}"$'\n'
+    frame_foot+="${DIM}${SOURCE_NOTE}${STATUS_NOTE:+  ·  }${STATUS_NOTE:-}${RST}"$'\n'
+}
+
+render() {
+    local cols now out i sel=-1
+    cols=$(term_cols)
+    now=$(date +%s)
+    (( cols != frame_cols || now - frame_at >= 30 )) && build_frame
+    (( selected < ${#frame_row_line[@]} )) && sel="${frame_row_line[$selected]}"
+    out="$frame_head"
+    for i in "${!frame_rows[@]}"; do
+        if (( i == sel )); then
+            out+="${SEL}${frame_rows[$i]}${RST}"$'\n'
+        else
+            out+="${frame_rows[$i]}"$'\n'
+        fi
+    done
+    out+="$frame_foot"
+    printf '\033[H\033[2J%s' "$out"
+}
+
+dump() {
+    local i
+    build_frame
+    printf '%s' "$frame_head"
+    for i in "${!frame_rows[@]}"; do printf '%s\n' "${frame_rows[$i]}"; done
+    printf '%s' "$frame_foot"
+}
+
+# ── actions ─────────────────────────────────────────────
+
+mark_seen() {
+    local idx="$1" m="${r_mtime[$idx]}"
+    [[ "$m" =~ ^[0-9]+$ ]] || return 0
+    inbox_state_put "$(inbox_state_file seen)" "${r_repo[$idx]}" "${r_branch[$idx]}" "$m"
+}
+
+toggle_archive() {
+    local idx="$1" f m="${r_mtime[$idx]}"
+    f=$(inbox_state_file archived)
+    [[ "$m" =~ ^[0-9]+$ ]] || m=0
+    if [[ "${r_bucket[$idx]}" == ARCHIVED ]]; then
+        inbox_state_put "$f" "${r_repo[$idx]}" "${r_branch[$idx]}"
+        STATUS_NOTE="un-archived ${r_repo[$idx]}/${r_branch[$idx]}"
+    else
+        inbox_state_put "$f" "${r_repo[$idx]}" "${r_branch[$idx]}" "$m"$'\t'"${r_state[$idx]}"
+        STATUS_NOTE="archived ${r_repo[$idx]}/${r_branch[$idx]}"
+    fi
+}
+
+# other_client — the tty of the most recently active attached client that is
+# not this one; empty when the inbox is the only client.
+other_client() {
+    local mine act tty best="" bestact=-1
+    mine=$(tmux display -p '#{client_tty}' 2>/dev/null)
+    while read -r act tty; do
+        [[ -n "$tty" && "$tty" != "$mine" ]] || continue
+        [[ "$act" =~ ^[0-9]+$ ]] || continue
+        if (( act > bestact )); then bestact="$act"; best="$tty"; fi
+    done < <(tmux list-clients -F '#{client_activity} #{client_tty}' 2>/dev/null)
+    printf '%s' "$best"
+}
+
+go_to_hub() {
+    local idx="$1" target tty
+    target=$(inbox_thread_author "${r_thread[$idx]}")
+    [[ -n "$target" ]] || target="${r_session[$idx]}"
+    if [[ -z "$target" ]]; then
+        STATUS_NOTE="no hub session for this thread"
+        return 0
+    fi
+    if ! tmux has-session -t "=$target" 2>/dev/null; then
+        STATUS_NOTE="$target is not running"
+        return 0
+    fi
+    tty=$(other_client)
+    if [[ -z "$tty" ]]; then
+        STATUS_NOTE="no other client — the hub is $target"
+        return 0
+    fi
+    tmux switch-client -c "$tty" -t "=$target" 2>/dev/null
+    STATUS_NOTE="sent $tty to $target"
+}
+
+open_thread() {
+    local idx="$1" f="${r_thread[$idx]}"
+    if [[ ! -r "$f" ]]; then
+        STATUS_NOTE="no entries yet for ${r_repo[$idx]}/${r_branch[$idx]}"
+        return 0
+    fi
+    tput cnorm 2>/dev/null
+    "${PAGER:-less}" "$f"
+    tput civis 2>/dev/null
+    mark_seen "$idx"
+    STATUS_NOTE=""
+}
+
+# ── entry ───────────────────────────────────────────────
+
+STATUS_NOTE=""
+FORCE_COLLECT=false
+
+view() {
+    local key seq idx
+    tput civis 2>/dev/null
+    trap 'tput cnorm 2>/dev/null' EXIT
+    load_data
+    render
+    while true; do
+        key=""
+        read -rsn1 key || true
+        if [[ "$key" == $'\x1b' ]]; then
+            read -rsn2 -t 0.1 seq || true
+            case "$seq" in
+                '[A') key="UP" ;;
+                '[B') key="DOWN" ;;
+                *)    key="ESC" ;;
+            esac
+        fi
+        idx=-1
+        (( row_count > 0 && selected < row_count )) && idx="${order[$selected]}"
+        case "$key" in
+            j|DOWN)
+                (( selected++ ))
+                (( selected >= row_count )) && selected=$(( row_count - 1 ))
+                (( selected < 0 )) && selected=0
+                render ;;
+            k|UP)
+                (( selected-- ))
+                (( selected < 0 )) && selected=0
+                render ;;
+            a)
+                (( idx >= 0 )) && { toggle_archive "$idx"; load_data; }
+                render ;;
+            g)
+                (( idx >= 0 )) && go_to_hub "$idx"
+                frame_at=0
+                render ;;
+            r)
+                FORCE_COLLECT=true
+                STATUS_NOTE=""
+                load_data
+                render ;;
+            ""|Enter)
+                (( idx >= 0 )) && { open_thread "$idx"; load_data; }
+                render ;;
+            q|ESC)
+                exit 0 ;;
+        esac
+    done
+}
+
+case "${1:-}" in
+    -h|--help) usage; exit 0 ;;
+    --dump)
+        load_data
+        dump
+        exit 0
+        ;;
+    --view)
+        view
+        ;;
+    "")
+        # Creation and an own-client switch only (tmux-safety): the session
+        # is left alone when it already exists, and no other client moves.
+        if [[ -n "${TMUX:-}" ]]; then
+            tmux has-session -t '=hq-inbox' 2>/dev/null \
+                || tmux new-session -d -s hq-inbox "$SELF --view"
+            tmux switch-client -t '=hq-inbox'
+        else
+            exec tmux new-session -A -s hq-inbox "$SELF --view"
+        fi
+        ;;
+    *)
+        echo "hq-inbox: unknown argument: $1" >&2
+        usage >&2
+        exit 2
+        ;;
+esac

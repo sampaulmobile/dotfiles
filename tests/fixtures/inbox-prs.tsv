@@ -1,0 +1,5 @@
+meta	author	@me
+meta	since	2026-09-21
+open	acme/proj	10	false	MERGEABLE	green	REVIEW_REQUIRED	3600	Gate me	https://github.com/acme/proj/pull/10
+open	acme/proj	11	false	MERGEABLE	red	REVIEW_REQUIRED	7200	CI is red	https://github.com/acme/proj/pull/11
+merged	acme/proj	12	09:30	Shipped it	https://github.com/acme/proj/pull/12

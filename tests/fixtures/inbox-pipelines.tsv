@@ -1,0 +1,5 @@
+~/dev/proj.feat-gate	proj_feat-gate	proj	feat/gate	gate r1 orchestrator	https://github.com/acme/proj/pull/10	2026-09-21T18:00:00Z
+~/dev/proj.feat-ci	proj_feat-ci	proj	feat/ci	review r2 reviewer	11	2026-09-21T18:10:00Z
+~/dev/proj.feat-work	proj_feat-work	proj	feat/work	implement r1 implementer	-	2026-09-21T18:20:00Z
+~/dev/proj.feat-done	proj_feat-done	proj	feat/done	done r3 orchestrator	https://github.com/acme/proj/pull/12	2026-09-21T18:30:00Z
+~/dev/lib.fix-stall	lib_fix-stall	lib	fix/stall	stalled r4 orchestrator	-	2026-09-21T18:40:00Z

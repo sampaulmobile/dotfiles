@@ -35,10 +35,16 @@ DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 
 SNAPSHOT_DIR="${HQ_SNAPSHOT_DIR:-$HOME/.local/state/hq/snapshot}"
 
-# <name>:<cadence seconds>, in collection order. The cadence is both the tick
-# interval a source is collected on and, times three, the age at which a
-# reader stops trusting it.
-SNAPSHOT_SOURCES="sessions:5 pipelines:5 worktrees:15 prs:30"
+# The hub-written thread logs bin/hq-inbox lists, one file per thread:
+# <repo>/<branch with / -> ->.md. Appended to, never rewritten or removed.
+INBOX_DIR="${HQ_INBOX_DIR:-$HOME/.local/state/hq/inbox}"
+
+# <name>:<cadence seconds>. The cadence is both the tick interval a source is
+# collected on and, times three, the age at which a reader stops trusting it.
+# `all` walks this list BACKWARDS (slowest first), so a source that joins two
+# others — inbox, over pipelines and prs — is listed before them to be
+# collected after them.
+SNAPSHOT_SOURCES="inbox:5 sessions:5 pipelines:5 worktrees:15 prs:30"
 
 snapshot_file() { printf '%s/%s.tsv' "$SNAPSHOT_DIR" "$1"; }
 
@@ -65,12 +71,18 @@ snapshot_write() {
     mv -f "$tmp" "$f"
 }
 
+# file_mtime <path> — its mtime in epoch seconds; exit 1 when absent.
+file_mtime() {
+    [[ -e "$1" ]] || return 1
+    stat -f '%m' "$1" 2>/dev/null || stat -c '%Y' "$1" 2>/dev/null
+}
+
 # snapshot_mtime <source> — its mtime in epoch seconds; exit 1 when absent.
 snapshot_mtime() {
     local f
     f=$(snapshot_file "$1")
     [[ -f "$f" ]] || return 1
-    stat -f '%m' "$f" 2>/dev/null || stat -c '%Y' "$f" 2>/dev/null
+    file_mtime "$f"
 }
 
 # snapshot_age <source> — seconds since it was written, -1 when absent.
@@ -117,6 +129,15 @@ snapshot_read() {
         [[ -n "$line" ]] && printf '%s\n' "$line"
     done < "$f"
     return 0
+}
+
+# inbox_thread_file <repo> <branch> — the thread log for one run, into
+# $inbox_thread_file_out. The slug is the branch with / -> -, worktrunk's
+# sanitisation and the same rule session_name_for_branch applies, so a
+# branch, its worktree and its thread agree.
+inbox_thread_file_out=""
+inbox_thread_file() {
+    inbox_thread_file_out="$INBOX_DIR/$1/${2//\//-}.md"
 }
 
 # jsonl_last_line <file> — the last non-empty line; empty when the file is
@@ -199,15 +220,18 @@ Sources and their cadence, one TSV each under ~/.local/state/hq/snapshot/
   pipelines  5s   the last .feature/status.jsonl line of every worktree
   worktrees 15s   bin/worktrees' classification of every project
   prs       30s   bin/prs' GitHub search rows
+  inbox      5s   bin/hq-inbox's threads: pipelines and prs joined to the
+                  hub-written thread logs under ~/.local/state/hq/inbox
+                  (override that directory with HQ_INBOX_DIR)
 
 Every file starts with a `# generated <ISO time>` line. A reader treats a
 snapshot older than three times its cadence as unusable and computes live.
 
 tick is called by bin/tmux-claude-statusbar every ~5s: it collects pipelines
-inline and spawns the slower sources when they are due and not already
-running. sessions is written by the statusbar itself, which has just run the
-scan — `hq-snapshot sessions` is the standalone path, for a machine whose
-status bar is not ticking.
+then inbox inline and spawns the slower sources when they are due and not
+already running. sessions is written by the statusbar itself, which has just
+run the scan — `hq-snapshot sessions` is the standalone path, for a machine
+whose status bar is not ticking.
 
 Nothing under ~/.local/state/hq is ever removed, by this script or any other.
 A failed write leaves <file>.tmp.<pid> behind on purpose; to clear them, run
@@ -271,6 +295,109 @@ collect_worktrees() {
 # own author/window differ cannot use them and searches for itself.
 collect_prs() {
     "$DOTFILES/bin/prs" --snapshot
+}
+
+# thread_facts <file> — one pass over a thread log into $thread_mtime,
+# $thread_entries and $thread_headline; all three empty/0 when the file is
+# not there. The headline is the first non-blank line after the LAST `## `
+# header: the newest entry is what the inbox shows.
+thread_mtime=""; thread_entries=0; thread_headline=""
+thread_facts() {
+    local f="$1" l want=0
+    thread_mtime=""; thread_entries=0; thread_headline=""
+    thread_mtime=$(file_mtime "$f") || { thread_mtime=""; return 0; }
+    while IFS= read -r l || [[ -n "$l" ]]; do
+        case "$l" in
+            '## '*)
+                thread_entries=$(( thread_entries + 1 ))
+                thread_headline=""
+                want=1
+                ;;
+            *)
+                if (( want )) && [[ -n "${l//[[:space:]]/}" ]]; then
+                    thread_headline="$l"
+                    want=0
+                fi
+                ;;
+        esac
+    done < "$f"
+    thread_headline="${thread_headline//$'\t'/ }"
+}
+
+# pr_row_tag <repo> <pr-field> <prs-map> — the bin/prs tag for the PR a
+# pipelines row names, empty when the prs snapshot does not hold it.
+# status.jsonl's `pr` is a URL by contract but a bare PR number in a good
+# deal of real data, so a number is matched too — only within its own repo,
+# by the name half of the search row's owner/name slug.
+pr_row_tag() {
+    local repo="$1" pr="$2" map="$3" url slug num kind draft mergeable ci review
+    [[ -n "$pr" && "$pr" != "-" && -n "$map" ]] || return 0
+    while IFS=$'\t' read -r url slug num kind draft mergeable ci review; do
+        [[ -n "$url" ]] || continue
+        if [[ "$pr" != "$url" ]]; then
+            [[ "$pr" == "$num" && "${slug##*/}" == "$repo" ]] || continue
+        fi
+        if [[ "$kind" == merged ]]; then printf 'merged'; else pr_tag "$draft" "$mergeable" "$ci" "$review"; fi
+        return 0
+    done <<< "$map"
+    return 0
+}
+
+# collect_inbox — one row per thread, the unit bin/hq-inbox lists:
+#   <worktree> <session> <repo> <branch> <state> <pr> <pr-tag>
+#   <thread-mtime> <thread-entries> <headline>
+# It joins the pipelines and prs SNAPSHOTS to the hub-written thread logs and
+# reads nothing else — no gh, no git, no worktree — so it costs a stat per
+# thread and rides the 5s tick. A thread log whose worktree has been swept
+# keeps a row, with - in worktree, session and state, so it stays reachable
+# until it is archived.
+collect_inbox() {
+    local line kind slug num draft mergeable ci review title url
+    local path session repo branch state pr map="" tag seen=$'\n' d f b
+    # pr_tag, so the inbox's tag and the one bin/prs prints cannot disagree.
+    # shellcheck source=/dev/null
+    source "$DOTFILES/bin/prs" || return 1
+    while IFS= read -r line; do
+        case "$line" in
+            "open"$'\t'*)
+                IFS=$'\t' read -r slug num draft mergeable ci review _ title url <<< "${line#open$'\t'}"
+                map+="${url}"$'\t'"${slug}"$'\t'"${num}"$'\t'"open"$'\t'"${draft}"$'\t'"${mergeable}"$'\t'"${ci}"$'\t'"${review}"$'\n'
+                ;;
+            "merged"$'\t'*)
+                IFS=$'\t' read -r slug num _ title url <<< "${line#merged$'\t'}"
+                map+="${url}"$'\t'"${slug}"$'\t'"${num}"$'\t'"merged"$'\t-\t-\t-\t-'$'\n'
+                ;;
+        esac
+    done < <(snapshot_read prs 2>/dev/null)
+
+    while IFS=$'\t' read -r path session repo branch state pr _; do
+        [[ -n "$path" && -n "$repo" ]] || continue
+        [[ "$branch" == "-" ]] && branch=""
+        thread_mtime=""; thread_entries=0; thread_headline=""
+        if [[ -n "$branch" ]]; then
+            inbox_thread_file "$repo" "$branch"
+            thread_facts "$inbox_thread_file_out"
+        fi
+        tag=$(pr_row_tag "$repo" "$pr" "$map")
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$path" "${session:--}" "$repo" "${branch:--}" "${state:--}" \
+            "${pr:--}" "${tag:--}" "${thread_mtime:--}" "$thread_entries" "${thread_headline:--}"
+        seen+="${repo}/${branch//\//-}"$'\n'
+    done < <(snapshot_read pipelines 2>/dev/null)
+
+    for d in "$INBOX_DIR"/*/; do
+        [[ -d "$d" ]] || continue
+        repo="${d%/}"; repo="${repo##*/}"
+        [[ "$repo" == "_state" ]] && continue
+        for f in "$d"*.md; do
+            [[ -f "$f" ]] || continue
+            b="${f##*/}"; b="${b%.md}"
+            [[ "$seen" == *$'\n'"${repo}/${b}"$'\n'* ]] && continue
+            thread_facts "$f"
+            printf -- '-\t-\t%s\t%s\t-\t-\t-\t%s\t%s\t%s\n' \
+                "$repo" "$b" "${thread_mtime:--}" "$thread_entries" "${thread_headline:--}"
+        done
+    done
 }
 
 # collect_one <source> — produce it, then publish it. The body is held in
@@ -352,6 +479,7 @@ case "${1:-}" in
         ;;
     tick)
         collect_one pipelines || rc=1
+        collect_one inbox || rc=1
         for s in worktrees prs; do
             declare -f "collect_$s" >/dev/null 2>&1 || continue
             due "$s" || continue

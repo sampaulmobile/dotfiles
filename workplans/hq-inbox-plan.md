@@ -180,3 +180,4 @@ PR 2 — collector and viewer:
 
 - 2026-09-21: drafted from the discussion in the dotfiles hub, uncommitted.
 - 2026-09-21: PR 1 (the writers) on branch `feat/hq-inbox-writers`.
+- 2026-09-21: PR 2 (the collector and viewer) on the same branch: `inbox` source in `bin/hq-snapshot`, `bin/hq-inbox`, `tests/test-hq-inbox.sh`.
