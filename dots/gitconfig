@@ -1,10 +1,6 @@
 [user]
 	name = SP
 	email = sampaulmobile@gmail.com
-[include]
-	# machine-local overrides (untracked) — git expands ~/ but not env vars,
-	# so this must be a literal path. See other/README.md.
-	path = ~/dotfiles/other/gitconfig.local
 [push]
 	default = simple
 	autoSetupRemote = true
@@ -76,3 +72,9 @@
 [credential "https://gist.github.com"]
 	helper =
 	helper = !/opt/homebrew/bin/gh auth git-credential
+[include]
+	# machine-local overrides (untracked) — git expands ~/ but not env vars,
+	# so this must be a literal path. See other/README.md. Must stay LAST:
+	# git applies config in file order, so an include placed higher is
+	# overridden by every section below it rather than overriding them.
+	path = ~/dotfiles/other/gitconfig.local
