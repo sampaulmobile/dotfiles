@@ -109,6 +109,10 @@ ask the user, before dispatching.
   it arrived here as a message, and otherwise it is at the top of that
   worktree's `workplans/<slug>-plan.md`, or of `.feature/plan.md` when
   workplans are off.
+- Before relaying a digest, a result, a stalled notice or `--quick` findings,
+  append it to that thread's inbox log — format and rule are in the feature
+  skill's requester-side section (`dots/claude/skills/feature/SKILL.md`,
+  "After a Launch, on the requester's side").
 - Relay results to the user as they land — PR URLs and summaries, or the
   findings when a `--quick` run produced no commits, not implementation detail.
 - Multi-repo: report per-piece status; the feature is done only when every

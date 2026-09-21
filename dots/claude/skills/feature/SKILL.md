@@ -23,7 +23,7 @@ Every run therefore lives in its own worktree and its own tmux session, as a pee
 **Entry point and addressing**
 - `--run` — execute the pipeline in the worktree this session is in. Its absence means Launch.
 - `--repo=<path>` — the main checkout to launch from. Default: the repo the cwd is in.
-- `--requester=<session>` — the session Run reports the digest and the final result to, by `SendMessage`. Set it only to a session name that answers in `ListAgents` (a dispatcher such as hq names itself here). Omitted, Run reports in its own terminal, where the human reads it.
+- `--requester=<session>` — the session Run reports the digest and the final result to, by `SendMessage`. Launch names itself here whenever its own tmux session name answers in `ListAgents` — hub or hq alike; pass it explicitly to report to a different session. With no name answering in `ListAgents`, Run reports in its own terminal, where the human reads it.
 
 **Behavior**
 - `--quick` — small task: skip the workplan doc, the plan gate and the review loop entirely (one implementer seat, no review). The deliverable follows the work — a PR when the run produced commits, the findings themselves when it produced none.
@@ -79,7 +79,7 @@ LAUNCH_EOF
 ~/dotfiles/bin/tmux-task-session --model <ORCH_MODEL> --effort <ORCH_EFFORT> "$WT" "$(cat /tmp/feature-launch-<SLUG>.md)"
 ```
 
-The quoted heredoc delimiter and the `"$(cat ...)"` are what make this exact: the task, the flags and the requester reach Run through a file, never through a string a model retyped. `<PASSTHROUGH FLAGS>` is every flag this Launch received except `--repo=` and `--orchestrator=`, whose seat is already on the claude command line above. Drop `--requester=` entirely when no session should be reported to, and the `Plan:` line when no workplan was given.
+The quoted heredoc delimiter and the `"$(cat ...)"` are what make this exact: the task, the flags and the requester reach Run through a file, never through a string a model retyped. `<PASSTHROUGH FLAGS>` is every flag this Launch received except `--repo=` and `--orchestrator=`, whose seat is already on the claude command line above, and `--requester=`, filled in below. `<REQUESTER>` is that flag's value when Launch received one, else this session's own tmux session name whenever it answers in `ListAgents` — hub or hq alike. Drop `--requester=` entirely only when neither is available, and drop the `Plan:` line when no workplan was given.
 
 `tmux-task-session` prints the session name. It is creation-only: it never switches a client, so the caller's screen does not move, and it leaves an existing session of that name alone.
 
@@ -87,11 +87,13 @@ The quoted heredoc delimiter and the `"$(cat ...)"` are what make this exact: th
 
 ### After a Launch, on the requester's side
 
-When this Launch named this session as `--requester=`, the task session's FIRST message back is the plan digest (unless `--go`), and nothing else arrives until it is answered. Relay the digest verbatim — to the user, and onward to the session that dispatched this run when one did — and stop. On a go, `SendMessage` the task session BY NAME with "go" plus any correction; a second `/feature` would start over. Everything said about the plan goes back the same way. With no requester named, the digest appears in the task session's own terminal instead: tell the user the session name to visit (Ctrl+F) and there is nothing to relay.
+Before relaying a digest, a result, a stalled notice or a `--quick` run's findings to the user, append it as an entry to `~/.local/state/hq/inbox/<repo>/<branch-slug>.md` (`<branch-slug>` is the branch with `/` → `-`); `mkdir -p` the directory on first write — the file is append-only, never rewritten, never removed. An entry is a header line, a blank line, then a body: the header is `## <date '+%Y-%m-%d %H:%M %Z'> · <this session's tmux name>` (the time from running that `date` command, never typed from memory), and the body's FIRST line is the headline the inbox shows, its text what this session tells the user about that thread in full — the relayed content plus this session's own commentary. On a go, append the go with any corrections as sent. This is the entry format's one home.
+
+When this Launch named this session as `--requester=`, the task session's FIRST message back is the plan digest (unless `--go`), and nothing else arrives until it is answered. Append it, then relay it verbatim — to the user, and onward to the session that dispatched this run when one did — and stop. On a go, `SendMessage` the task session BY NAME with "go" plus any correction; a second `/feature` would start over. Everything said about the plan goes back, and gets appended, the same way. With no requester named — the launching session's tmux name did not answer in `ListAgents` — the digest appears in the task session's own terminal instead: tell the user the session name to visit (Ctrl+F) and there is nothing to relay or append.
 
 This session never edits the pipeline's branch or PR by hand — not to fix a wrong result, not to finish a partial one. The loop's guarantee is that no code ships unreviewed, and a hand edit here is exactly that. A wrong or empty result is relayed as it is; the fix is a corrected brief and a new run, a resume of the task session with the correction, or the human's own hands.
 
-When the task session reports back at the end, relay to the user: the PR URL (the findings themselves when a `--quick` run produced no commits), the summary, rounds used, any deferred non-blocking notes, and the Lessons block — or, if the loop escalated instead of shipping, the branch/worktree and open blockers awaiting a human decision. Apply the `wiki` and `backlog` lessons here after relaying them; the task session works in the feature's worktree and must not commit in another repo. Keep this conversation clean — do not pull implementation details into it.
+When the task session reports back at the end, append it, then relay to the user: the PR URL (the findings themselves when a `--quick` run produced no commits), the summary, rounds used, any deferred non-blocking notes, and the Lessons block — or, if the loop escalated instead of shipping, the branch/worktree and open blockers awaiting a human decision. Apply the `wiki` and `backlog` lessons here after relaying them; the task session works in the feature's worktree and must not commit in another repo. Keep this conversation clean — do not pull implementation details into it.
 
 Multiple `/feature` runs may be in flight at once — each has its own worktree and its own session.
 
