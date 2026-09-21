@@ -51,3 +51,9 @@
   create, append to, or edit one — not a one-line append, not a gitignored
   file. If a script needs a var that is missing, say which file needs which
   line and stop.
+
+- **Temp files go in the session scratchpad, never a bare `/tmp` path.** Every
+  session on this machine resolves `/tmp/claude-501/` to the same directory,
+  so a fixed name there (`pr-body.md`) is shared with every concurrent
+  pipeline, and one session reads or publishes another's file. Use the
+  scratchpad directory the session's prompt names, or `mktemp`.

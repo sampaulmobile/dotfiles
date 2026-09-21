@@ -63,7 +63,9 @@ fi
 alias c='clear'
 alias cp='cp -iv'
 alias mv='mv -iv'
-alias rm='rm -iv'
+# `rm -i` reads its answer from stdin. An agent shell has none, so every delete
+# is declined and rm still exits 0.
+[ -z "$CLAUDECODE" ] && alias rm='rm -iv'
 alias rmdir='rmdir -v'
 alias ln='ln -v'
 alias grep='grep --colour=auto'
