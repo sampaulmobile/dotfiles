@@ -12,7 +12,13 @@
 # fields to `-` both ways; the headline is the first non-blank body line of
 # the LAST entry; a thread whose worktree has been swept keeps a row; each
 # phase and each pr-tag lands in its documented bucket; an archive mark goes
-# stale on a newer log or a changed state, which is what un-archives a row.
+# stale on a newer log or a changed state, which is what un-archives a row;
+# and both state files key by the branch SLUG, so a mark made while the
+# worktree was alive still matches the row the sweep leaves behind.
+#
+# The key loop itself has no test: it is one blocking `read` on a tty. What
+# is asserted here instead is that no fractional `read -t` has come back,
+# which is the form bash 3.2 rejects.
 #
 # TZ=UTC is load-bearing: the thread mtimes are set with `touch -t`, whose
 # argument is local time, and the fixture state files carry the epochs.
@@ -62,6 +68,13 @@ if ! grep -qwE '\brm\b|rmdir|unlink|-delete' "$repo/bin/hq-inbox"; then
 else
     bad "the viewer contains a deletion" "$(grep -nwE '\brm\b|rmdir|unlink|-delete' "$repo/bin/hq-inbox")"
 fi
+# bash 3.2 answers a fractional timeout with `invalid timeout specification`
+# and rc 1, so the key being read falls through to the wrong branch.
+if ! grep -qE 'read .*-t *[0-9]*\.[0-9]' "$repo/bin/hq-inbox"; then
+    ok "the key loop has no fractional read -t"
+else
+    bad "a fractional read -t is back" "$(grep -nE 'read .*-t *[0-9]*\.[0-9]' "$repo/bin/hq-inbox")"
+fi
 
 # ── fixtures ──
 
@@ -72,6 +85,7 @@ touch -t 202609211002.00 "$HQ_INBOX_DIR/proj/feat-gate.md"
 touch -t 202609210930.00 "$HQ_INBOX_DIR/proj/feat-work.md"
 touch -t 202609210945.00 "$HQ_INBOX_DIR/lib/fix-stall.md"
 touch -t 202609201600.00 "$HQ_INBOX_DIR/proj/feat-swept.md"
+touch -t 202609201600.00 "$HQ_INBOX_DIR/proj/feat-held.md"
 { echo '# generated 2026-09-21T19:00:00Z'; cat "$here/fixtures/inbox-pipelines.tsv"; } > "$HQ_SNAPSHOT_DIR/pipelines.tsv"
 { echo '# generated 2026-09-21T19:00:00Z'; cat "$here/fixtures/inbox-prs.tsv"; } > "$HQ_SNAPSHOT_DIR/prs.tsv"
 
@@ -167,6 +181,21 @@ inbox_state_put "$seen_file" proj feat/gate
 check "put with no value drops the row" "$(inbox_state_get "$seen_file" proj feat/gate)" ""
 if [[ -f "$seen_file" ]]; then ok "the state file is still there"; else bad "the state file is gone" "$seen_file"; fi
 
+echo "── a mark survives the sweep: both files key by the branch SLUG"
+inbox_state_put "$seen_file" proj feat/x 5150
+check "a mark made while the branch is feat/x" \
+    "$(inbox_state_get "$seen_file" proj feat/x)"  "5150"
+check "still matches once the row comes back as the slug feat-x" \
+    "$(inbox_state_get "$seen_file" proj feat-x)"  "5150"
+if grep -q "^proj$(printf '\t')feat-x$(printf '\t')5150$" "$seen_file"; then
+    ok "and it is the slug that is on disk"
+else
+    bad "the mark is not keyed by the slug" "$(cat "$seen_file")"
+fi
+inbox_state_put "$seen_file" proj feat-x
+check "and the slug drops the row the branch wrote" \
+    "$(inbox_state_get "$seen_file" proj feat/x)"  ""
+
 echo "── --dump renders the buckets over the fixtures"
 dump=$(NO_COLOR=1 COLUMNS=120 "${BASH:-bash}" "$repo/bin/hq-inbox" --dump 2>"$work/dump.err")
 if [[ -s "$work/dump.err" ]]; then bad "--dump wrote to stderr" "$(cat "$work/dump.err")"; fi
@@ -174,8 +203,10 @@ bucket_of() { printf '%s\n' "$dump" | awk -v pat="$1" '/^[A-Z]/{b=$0} $0 ~ pat {
 check "a gate run needs you"                "$(bucket_of 'proj/feat/gate')"  "NEEDS YOU"
 check "a red-CI run needs you"              "$(bucket_of 'proj/feat/ci')"    "NEEDS YOU"
 check "an implementing run is working"      "$(bucket_of 'proj/feat/work')"  "WORKING"
-check "a held archive mark stays archived"  "$(bucket_of 'proj/feat/done')"  "ARCHIVED"
+check "a slug-keyed mark holds a live slashed branch" "$(bucket_of 'proj/feat/done')" "ARCHIVED"
 check "a log newer than its mark comes back" "$(bucket_of 'proj/feat-swept')" "DONE"
+check "a mark newer than the log holds, with - read back as no state" \
+    "$(bucket_of 'proj/feat-held')" "ARCHIVED"
 check "a changed state brings it back live" "$(bucket_of 'lib/fix/stall')"   "NEEDS YOU"
 if [[ "$dump" == *"Plan digest ready"* ]]; then
     ok "the headline reaches the row"

@@ -89,10 +89,8 @@ inbox_bucket() {
     printf 'WORKING'
 }
 
-# inbox_parse <record> — one inbox.tsv line into $f_worktree $f_session
-# $f_repo $f_branch $f_state $f_pr $f_prtag $f_mtime $f_entries $f_headline,
-# with the TSV's `-` placeholders mapped back to empty. The headline is last
-# because it is the one field that may hold spaces.
+# inbox_parse <record> — one inbox.tsv line into the $f_* variables, with the
+# TSV's `-` placeholders mapped back to empty.
 f_worktree=""; f_session=""; f_repo=""; f_branch=""; f_state=""
 f_pr=""; f_prtag=""; f_mtime=""; f_entries=""; f_headline=""
 inbox_parse() {
@@ -134,8 +132,7 @@ inbox_unread() {
 }
 
 # iso_to_epoch <YYYY-MM-DDTHH:MM:SSZ> — UTC seconds, fork-free (days_from_civil);
-# empty for anything not that exact shape. status.jsonl's `updated` is the age
-# fallback for a thread with no log yet, and it is read per row.
+# empty for anything not that exact shape.
 iso_to_epoch() {
     local y mo d h mi sec era yoe doy doe days
     [[ "$1" =~ ^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})Z$ ]] || return 0
@@ -168,9 +165,12 @@ inbox_thread_author() {
 inbox_state_file() { printf '%s/_state/%s.tsv' "$INBOX_DIR" "$1"; }
 
 # inbox_state_get <file> <repo> <branch> — the rest of the row for that key,
-# tab-separated; empty when the key is not marked.
+# tab-separated; empty when the key is not marked. Both state files key by
+# <repo> and the branch slug (inbox_slug), never the branch itself.
 inbox_state_get() {
-    local f="$1" key="$2"$'\t'"$3" line
+    local f="$1" key line
+    inbox_slug "$3"
+    key="$2"$'\t'"$inbox_slug_out"
     [[ -r "$f" ]] || return 0
     while IFS= read -r line || [[ -n "$line" ]]; do
         [[ "$line" == "$key"$'\t'* ]] || continue
@@ -185,8 +185,9 @@ inbox_state_get() {
 # and mv'ed, so a reader never sees a half-written mark and no state file is
 # ever unlinked.
 inbox_state_put() {
-    local f="$1" repo="$2" branch="$3" rest="${4-}" key line tmp
-    key="$repo"$'\t'"$branch"
+    local f="$1" repo="$2" rest="${4-}" key line tmp
+    inbox_slug "$3"
+    key="$repo"$'\t'"$inbox_slug_out"
     tmp="$f.tmp.$$"
     mkdir -p "${f%/*}" || return 1
     : > "$tmp" || return 1
@@ -260,10 +261,13 @@ load_data() {
     verdict=$(snapshot_verdict "$(snapshot_age inbox)" "$(snapshot_cadence inbox)")
     if [[ "$verdict" == fresh && "${FORCE_COLLECT:-false}" == false ]]; then
         SOURCE_NOTE="snapshot: $(fmt_secs "$(snapshot_age inbox)") old  (r to recollect)"
-    else
-        "$DOTFILES/bin/hq-snapshot" inbox >/dev/null 2>&1
+    elif "$DOTFILES/bin/hq-snapshot" inbox >/dev/null 2>&1; then
         SOURCE_NOTE="snapshot $verdict — collected here"
         [[ "${FORCE_COLLECT:-false}" == true ]] && SOURCE_NOTE="recollected just now"
+    else
+        # A failed collection leaves the previous snapshot standing, so the
+        # rows below are that one.
+        SOURCE_NOTE="collection FAILED — showing the $verdict snapshot"
     fi
     FORCE_COLLECT=false
 
@@ -289,6 +293,7 @@ load_data() {
                 *$'\t'*) amtime="${amark%%$'\t'*}"; astate="${amark#*$'\t'}" ;;
                 *)       amtime="$amark"; astate="" ;;
             esac
+            [[ "$astate" == "-" ]] && astate=""
             astale=$(inbox_archive_stale "$f_mtime" "$f_state" "$amtime" "$astate")
         fi
         r_repo+=("$f_repo"); r_branch+=("$f_branch"); r_session+=("$f_session")
@@ -445,7 +450,8 @@ toggle_archive() {
         inbox_state_put "$f" "${r_repo[$idx]}" "${r_branch[$idx]}"
         STATUS_NOTE="un-archived ${r_repo[$idx]}/${r_branch[$idx]}"
     else
-        inbox_state_put "$f" "${r_repo[$idx]}" "${r_branch[$idx]}" "$m"$'\t'"${r_state[$idx]}"
+        inbox_state_put "$f" "${r_repo[$idx]}" "${r_branch[$idx]}" \
+            "$m"$'\t'"${r_state[$idx]:--}"
         STATUS_NOTE="archived ${r_repo[$idx]}/${r_branch[$idx]}"
     fi
 }
@@ -502,8 +508,11 @@ open_thread() {
 STATUS_NOTE=""
 FORCE_COLLECT=false
 
+# Enter arrives as the empty string. No escape-sequence decoding here: bash
+# 3.2, the shell this runs under, rejects the fractional `read -t` that
+# distinguishing an arrow key from a bare ESC needs.
 view() {
-    local key seq idx
+    local key idx
     tput civis 2>/dev/null
     trap 'tput cnorm 2>/dev/null' EXIT
     load_data
@@ -511,23 +520,15 @@ view() {
     while true; do
         key=""
         read -rsn1 key || true
-        if [[ "$key" == $'\x1b' ]]; then
-            read -rsn2 -t 0.1 seq || true
-            case "$seq" in
-                '[A') key="UP" ;;
-                '[B') key="DOWN" ;;
-                *)    key="ESC" ;;
-            esac
-        fi
         idx=-1
         (( row_count > 0 && selected < row_count )) && idx="${order[$selected]}"
         case "$key" in
-            j|DOWN)
+            j)
                 (( selected++ ))
                 (( selected >= row_count )) && selected=$(( row_count - 1 ))
                 (( selected < 0 )) && selected=0
                 render ;;
-            k|UP)
+            k)
                 (( selected-- ))
                 (( selected < 0 )) && selected=0
                 render ;;
@@ -543,10 +544,10 @@ view() {
                 STATUS_NOTE=""
                 load_data
                 render ;;
-            ""|Enter)
+            "")
                 (( idx >= 0 )) && { open_thread "$idx"; load_data; }
                 render ;;
-            q|ESC)
+            q)
                 exit 0 ;;
         esac
     done
@@ -563,8 +564,6 @@ case "${1:-}" in
         view
         ;;
     "")
-        # Creation and an own-client switch only (tmux-safety): the session
-        # is left alone when it already exists, and no other client moves.
         if [[ -n "${TMUX:-}" ]]; then
             tmux has-session -t '=hq-inbox' 2>/dev/null \
                 || tmux new-session -d -s hq-inbox "$SELF --view"

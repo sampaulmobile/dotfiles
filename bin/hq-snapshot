@@ -131,13 +131,23 @@ snapshot_read() {
     return 0
 }
 
-# inbox_thread_file <repo> <branch> — the thread log for one run, into
-# $inbox_thread_file_out. The slug is the branch with / -> -, worktrunk's
+# inbox_slug <branch> — into $inbox_slug_out: / -> -, worktrunk's
 # sanitisation and the same rule session_name_for_branch applies, so a
-# branch, its worktree and its thread agree.
+# branch, its worktree and its thread agree. It is a thread's ONLY identity
+# that survives a sweep — once the worktree is gone the collector has just
+# the file name, so anything keyed per thread (the inbox's archive and seen
+# marks included) keys by this and never by the real branch.
+inbox_slug_out=""
+inbox_slug() {
+    inbox_slug_out="${1//\//-}"
+}
+
+# inbox_thread_file <repo> <branch> — the thread log for one run, into
+# $inbox_thread_file_out.
 inbox_thread_file_out=""
 inbox_thread_file() {
-    inbox_thread_file_out="$INBOX_DIR/$1/${2//\//-}.md"
+    inbox_slug "$2"
+    inbox_thread_file_out="$INBOX_DIR/$1/$inbox_slug_out.md"
 }
 
 # jsonl_last_line <file> — the last non-empty line; empty when the file is
@@ -382,7 +392,8 @@ collect_inbox() {
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
             "$path" "${session:--}" "$repo" "${branch:--}" "${state:--}" \
             "${pr:--}" "${tag:--}" "${thread_mtime:--}" "$thread_entries" "${thread_headline:--}"
-        seen+="${repo}/${branch//\//-}"$'\n'
+        inbox_slug "$branch"
+        seen+="${repo}/${inbox_slug_out}"$'\n'
     done < <(snapshot_read pipelines 2>/dev/null)
 
     for d in "$INBOX_DIR"/*/; do

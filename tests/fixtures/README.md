@@ -28,13 +28,15 @@ paths.
 `inbox-pipelines.tsv`, `inbox-prs.tsv`, `inbox-threads/` and
 `inbox-state/` are `tests/test-hq-inbox.sh`'s stand-ins for a live
 `~/.local/state/hq`: two snapshot bodies (without their `# generated` line,
-which the suite adds), four hub-written thread logs and the archive/seen
+which the suite adds), five hub-written thread logs and the archive/seen
 marks over them. Hand-written against the real record shapes; the repos are
 `proj`/`lib` on `acme`, the worktree paths the `~/dev/proj` placeholder.
 `inbox-prs.tsv` covers an open PR joined by URL, one joined by a bare number
 (what `status.jsonl` carries in practice) and a merged one;
 `inbox-state/archived.tsv` carries the epochs the suite `touch -t`s the logs
-to, so it must be edited together with those `touch` lines.
+to, so it must be edited together with those `touch` lines. Both state files
+key by the branch SLUG (`feat-done`, not `feat/done`), and an archived row
+with no state writes `-`.
 
 The codex captures (the pane text above and `codex-rollout.jsonl`, the real
 rollout `tests/test-codex-rollout.sh` reads) were taken on a throwaway tmux
