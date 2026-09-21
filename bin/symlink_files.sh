@@ -159,8 +159,49 @@ layer_tracked_items() {
     done
 }
 
+# ===== gitconfig =====
+# ~/.gitconfig is a REAL file that INCLUDES the tracked one, never a link to
+# it. `git config --global` follows a symlink and writes into the target, so
+# a link puts every global write inside this PUBLIC repo — actions/checkout
+# adds a safe.directory line per job, carrying $HOME paths and the private
+# repo's name into a tracked file. Writes land in this stub instead. (Same
+# reason codex's config.toml below stays private and writable.)
+gitconfig_include="path = ~/dotfiles/dots/gitconfig"
+# Header for the stub, so the next person to open ~/.gitconfig knows why it is
+# two lines and does not "tidy" it back into a symlink.
+gitconfig_header="# Written by ~/dotfiles/bin/symlink_files.sh — do NOT replace this file with a
+# symlink into the dotfiles repo: \`git config --global\` follows symlinks and
+# would write into a PUBLIC repo. Keep the include FIRST; everything below it,
+# including whatever git appends here, overrides the version-controlled config."
+if [[ -L ~/.gitconfig ]]; then
+    gitconfig_state="a link into the repo"
+elif [[ ! -e ~/.gitconfig ]]; then
+    gitconfig_state="missing"
+elif ! grep -qF "$gitconfig_include" ~/.gitconfig; then
+    gitconfig_state="a real file that does not include dots/gitconfig"
+else
+    gitconfig_state=""
+fi
+if [[ -n "$gitconfig_state" ]]; then
+    if (( check )); then
+        echo "  GITCONFIG $(short ~/.gitconfig) is $gitconfig_state"
+        issues=$((issues + 1))
+    elif [[ "$gitconfig_state" == "a real file"* ]]; then
+        # someone else owns this file; prepend rather than overwrite
+        { printf '%s\n[include]\n\t%s\n\n' "$gitconfig_header" "$gitconfig_include"; cat ~/.gitconfig; } > ~/.gitconfig.new
+        mv ~/.gitconfig.new ~/.gitconfig
+        echo "  include  $(short ~/.gitconfig)  (prepended include of dots/gitconfig)"
+        changed=$((changed + 1))
+    else
+        [[ -L ~/.gitconfig ]] && mv ~/.gitconfig "$deldir/.gitconfig"
+        printf '%s\n[include]\n\t%s\n' "$gitconfig_header" "$gitconfig_include" > ~/.gitconfig
+        echo "  seed     $(short ~/.gitconfig)  (real file including dots/gitconfig)"
+        changed=$((changed + 1))
+    fi
+fi
+
 # ===== Common dotfiles (both platforms) =====
-common_files="gitconfig gitignore tmux.conf tmux.remote.conf"
+common_files="gitignore tmux.conf tmux.remote.conf"
 
 for file in $common_files; do
     link $dir/$file ~/.$file
