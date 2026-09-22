@@ -1,9 +1,34 @@
 # other/ — machine-local config
 
-Everything machine-specific or private lives here, in one place, so it's easy
-to see, back up, and migrate (e.g. `tar czf other.tgz other/` + AirDrop when
-setting up a new machine). Only this README and the `*.example` templates are
-tracked — the real files are gitignored and never leave the machine.
+Everything machine-specific or private lives here, in one place. The public
+dotfiles repo tracks only this README and the `*.example` templates; the real
+files are gitignored by it and belong to a second, PRIVATE git repo rooted at
+this directory (`other/.git`), which is how two machines share them. The
+nesting is clean: the outer repo keeps tracking the README and templates, and
+the inner repo ignores exactly those (its `.gitignore`: `.DS_Store`, `*.zip`,
+`README.md`, `*.example`), so every file has one home. `*.zip` stays local —
+the repo-secrets archive must never leave the machine.
+
+## Cross-machine sync
+
+`bin/sync` (in this directory) is run by a launchd job every 5 minutes: it
+commits, merges from origin and pushes this repo and `~/dev/hq`, and only
+merges and pushes `~/dev/wiki` (whose commits are the wiki write-back flow's,
+and which it skips while dirty). A conflict is aborted and logged, never
+resolved; nothing is ever force-pushed. `bin/sync --check` is `bin/doctor`'s
+"private state repos" section; `bin/sync --install` does the per-machine
+wiring (gitleaks `pre-commit` via `core.hooksPath` in each repo, the plist in
+`launchd/` loaded into `~/Library/LaunchAgents`). Log:
+`~/.local/state/private-sync/sync.log`.
+
+Second machine, in order: clone the private `other` repo to `~/dotfiles/other`
+(delete nothing — the outer checkout's README and templates are already
+there and ignored by the clone), clone `hq` and `wiki` to `~/dev`, run
+`setup.sh` (its seeding finds every live file present and creates nothing),
+then `other/bin/sync --install`.
+
+Never a credential VALUE in any of the three repos: reference the 1Password
+item or the env-var name. The gitleaks hook is the backstop, not the rule.
 
 | File | Consumed by | Purpose |
 |------|-------------|---------|
