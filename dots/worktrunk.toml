@@ -31,9 +31,14 @@ pre-start = "wt step copy-ignored"
 
 # copy-ignored copies ALL gitignored files by default; exclude the fat,
 # regenerable build/dep caches so only ENV/secrets/config/IDE settings copy over.
-# (Built-in excludes already skip VCS/tool-state dirs.)
+# (Built-in excludes already skip VCS/tool-state dirs.) `other` is its own
+# repo (see other/README.md): a worktree must not carry a git-less copy of it.
+# It needs the `/**` form: other/ holds tracked files, so it is never an
+# ignored directory the way .venv is, and the bare name matches nothing
+# (wt v0.68.0, verified with --dry-run).
 [step.copy-ignored]
 exclude = [
+  "other/**",
   "node_modules",
   ".venv",
   ".dart_tool",

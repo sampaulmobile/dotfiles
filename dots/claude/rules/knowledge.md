@@ -23,8 +23,12 @@
   acting, then stamp `last_verified` on the page.
 - Write back: when you learn or verify something cross-repo (a location, a
   rule, a gotcha), capture it in the wiki per its SCHEMA.md — edit/create the
-  page, update `wiki/_index/` (INDEX + LOG entry), commit. Knowledge that
-  stays only in a session dies with it.
+  page, update `wiki/_index/` (INDEX + LOG entry), commit AND push. The
+  vault is shared between machines through its private remote: `git pull
+  --no-rebase` before the first edit of a write-back, commit, `git push` —
+  never leave it dirty or ahead. On a merge conflict, `git merge --abort` and
+  hand it to the user; never resolve one. Knowledge that stays only in a
+  session dies with it.
 - Day-to-day routing (which repo, alert channels, tmux sessions) is
   `~/dev/hq/CLAUDE.md`; the wiki is knowledge, hq is dispatch.
 - Team-shared files never carry personal filesystem paths. A repo's CLAUDE.md,

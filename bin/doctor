@@ -24,6 +24,13 @@ section "symlinks"
 section "status snapshot (~/.local/state/hq/snapshot)"
 "$DOTFILES/bin/hq-snapshot" --check || failed=1
 
+section "private state repos (other/, hq, wiki)"
+if [ -x "$DOTFILES/other/bin/sync" ]; then
+    "$DOTFILES/other/bin/sync" --check || failed=1
+else
+    echo "  other/ is not the private repo — skipped (see other/README.md)"
+fi
+
 section "brew (etc/Brewfile_mac)"
 if command -v brew >/dev/null 2>&1; then
     # --verbose names the missing deps; plain output only says "can't satisfy".
