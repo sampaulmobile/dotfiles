@@ -5,7 +5,7 @@
 # picker's extractor: its xre binary dedupes matches keeping the FIRST
 # occurrence, so "tail -1" gives the URL whose first sighting is newest —
 # a URL that already appeared once in scrollback can then never be "latest"
-# again (this opened a stale URL over the PR link at the screen bottom).
+# again.
 # A perl scan keeps true position order. http(s) only: claude output carries
 # an OSC 8 file:// link on nearly every tool call, which would otherwise
 # shadow the web URL just printed — use the picker for file links.
