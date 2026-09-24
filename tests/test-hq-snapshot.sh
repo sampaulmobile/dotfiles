@@ -93,6 +93,49 @@ else
     bad "empty body" "got [$body]"
 fi
 
+echo "── snapshot_age reads the collection START time, not the write time"
+# mk_past_iso <secs-ago> — an ISO header value <secs-ago> seconds before now,
+# via whichever of BSD/GNU date this machine has (same dual-command shape as
+# snapshot_generated_epoch/snapshot_mtime in bin/hq-snapshot).
+mk_past_iso() {
+    local e
+    e=$(( $(date +%s) - $1 ))
+    date -u -j -f '%s' "$e" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$e" +%Y-%m-%dT%H:%M:%SZ
+}
+printf 'a\tb\n' | snapshot_write demo "$(mk_past_iso 20)"
+age=$(snapshot_age demo)
+if (( age >= 19 && age <= 22 )); then
+    ok "a collection started 20s ago reads back as ~${age}s old, not 0"
+else
+    bad "snapshot_age with a start time" "got ${age}s, want ~20s"
+fi
+# The staleness threshold (three cadences, snapshot_verdict) has to key off
+# that same start time — mirroring the synthetic verdict_ cases below, but
+# through a real header this time.
+printf 'a\tb\n' | snapshot_write demo "$(mk_past_iso 44)"
+v=$(snapshot_verdict "$(snapshot_age demo)" 15)
+if [[ "$v" == fresh ]]; then
+    ok "a collection started 44s ago (cadence 15) is still fresh"
+else
+    bad "age-out threshold, 44s/cadence 15" "got [$v] want fresh"
+fi
+printf 'a\tb\n' | snapshot_write demo "$(mk_past_iso 46)"
+v=$(snapshot_verdict "$(snapshot_age demo)" 15)
+if [[ "$v" == stale ]]; then
+    ok "a collection started 46s ago (cadence 15) has aged out"
+else
+    bad "age-out threshold, 46s/cadence 15" "got [$v] want stale"
+fi
+# A caller with no start time (an old-style direct snapshot_write) still
+# gets correct behavior: it falls back to now, not to a missing/garbage age.
+printf 'a\tb\n' | snapshot_write demo
+age=$(snapshot_age demo)
+if (( age >= 0 && age <= 2 )); then
+    ok "an omitted start time falls back to now (got ${age}s old)"
+else
+    bad "snapshot_write with no start time" "got ${age}s, want ~0s"
+fi
+
 echo "── snapshot_read/snapshot_age on a source that was never written"
 if ! snapshot_read never-written >/dev/null 2>&1; then
     ok "snapshot_read exits 1 for a missing source"
