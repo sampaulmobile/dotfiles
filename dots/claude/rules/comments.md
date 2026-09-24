@@ -30,8 +30,11 @@ agent, at token cost, on every visit — so a comment must pay for itself.
   because the stdlib already exports Z", "we use an exception here so the
   task reaches the DLQ" are all commit-message, PR-body or workplan text.
   This applies to EVERY file an agent edits, not just code: skills, rules,
-  CLAUDE.md, READMEs, configs, YAML. Before finishing an edit, reread the
-  diff for added parentheticals and justifications and delete them.
+  CLAUDE.md, READMEs, configs, YAML. Before finishing an edit, reread the diff
+  for added parentheticals and justifications and delete them. No origin stories
+  in rules, skills, CLAUDE.md or memory: no "Born <date>: ...", no "added after
+  ...", no incident anecdote. The incident goes in the commit message. A date on
+  a *fact* ("verified 2026-09-19") is fine; a date on a rule's backstory is not.
 - **One home per fact.** Cross-file behavior, architecture and operating
   knowledge live in the repo's CLAUDE.md (or its docs). A local invariant
   lives in ONE comment at the code it protects. A file header states purpose
