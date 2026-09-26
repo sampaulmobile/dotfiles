@@ -4,7 +4,9 @@
 # Based on ThePrimeagen's tmux-sessionizer. Which directories are candidates
 # and how sessions are named is in bin/project-dirs-lib.
 #
-# Rows: live sessions first, then project dirs with no session yet.
+# Rows: live sessions first (a repo's hub session above its own worktree
+# sessions — see order_sessions_hub_first), then project dirs with no session
+# yet.
 #   red        session waiting on a permission prompt
 #   green      finished-but-unseen agent
 #   blue       working; dim blue = idle agent
@@ -39,8 +41,59 @@ parse_fzf_expect() {
     selected="${out#*$'\n'}"
 }
 
-# Sourced (tests/test-fzf-expect.sh) rather than executed: hand back the
-# helpers above and run none of the picker below.
+# Reorders the MRU-ordered session names on stdin so a repo's HUB session
+# comes out above that repo's WORKTREE sessions. fzf scores `myapp` and
+# `myapp_feat-x` identically for any query that matches the repo name, so
+# --tiebreak=index decides, and raw MRU order alone puts whichever worktree you
+# last visited above the hub.
+#   A session is a worktree of hub H when its name is "H_<rest>" and H is
+# itself in the list — derived from the set rather than by splitting on "_",
+# or a repo whose own name contains one (web_shop) would read as a
+# worktree of a hub that does not exist.
+#   Groups keep their MRU position (a group sits where its most recent member
+# sat) and worktrees keep MRU order within a group, so nothing but the
+# hub-below-its-own-worktrees case moves.
+order_sessions_hub_first() {
+    awk '
+        NF { name[++n] = $0 }
+        END {
+            # root[i] = the shortest listed name that i hangs off, so a whole
+            # chain lands in ONE group; depth[i] = how many listed names i
+            # hangs off, which is what orders a group (a name has strictly
+            # smaller depth than anything hanging off it, so a hub can never
+            # be printed below its own worktree).
+            for (i = 1; i <= n; i++) {
+                root[i] = name[i]
+                depth[i] = 0
+                shortest = 0
+                for (j = 1; j <= n; j++) {
+                    if (name[j] == name[i]) continue
+                    if (index(name[i], name[j] "_") != 1) continue
+                    depth[i]++
+                    if (shortest == 0 || length(name[j]) < shortest) {
+                        shortest = length(name[j])
+                        root[i] = name[j]
+                    }
+                    if (depth[i] > maxd) maxd = depth[i]
+                }
+            }
+            for (i = 1; i <= n; i++) {
+                g = root[i]
+                if (!(g in first)) first[g] = i
+            }
+            for (i = 1; i <= n; i++) {
+                g = root[i]
+                if (first[g] != i) continue
+                for (d = 0; d <= maxd; d++)
+                    for (k = 1; k <= n; k++)
+                        if (root[k] == g && depth[k] == d) print name[k]
+            }
+        }
+    '
+}
+
+# Sourced (tests/test-fzf-expect.sh, tests/test-session-order.sh) rather than
+# executed: hand back the helpers above and run none of the picker below.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 0
 fi
@@ -102,7 +155,8 @@ else
     current_session="${tmux_out%%$'\n'*}"
     existing=$(printf '%s' "${tmux_out#*$'\n'}" |
         sort -rn |
-        awk -v skip="$current_session" '$2 != skip {print $2}')
+        awk -v skip="$current_session" '$2 != skip {print $2}' |
+        order_sessions_hub_first)
 
     # The sessions snapshot is ignored when stale (statusbar not ticking);
     # the .done flags are event-driven (Stop hook), so they need no
