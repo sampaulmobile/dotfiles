@@ -1,0 +1,319 @@
+#!/usr/bin/env bash
+# runners — self-hosted GitHub Actions runners for one repo, kept as numbered,
+# interchangeable copies under $runners_root/<repo>/<n>/ (runners_root is owned
+# by bin/project-dirs-lib). Each runs detached through the runner's own run.sh,
+# logging to <n>/run.log. Nothing is installed into launchd, so a reboot leaves
+# every runner stopped until `runners start`.
+#
+# A runner is up while a process's command line names <n>/run.sh or
+# <n>/bin/Runner.Listener: run.sh relaunches the listener after a retryable
+# exit or a self-update, so the listener alone is briefly absent while the
+# runner is still up. Stopping TERMs run.sh first so nothing relaunches, then
+# INTs the listener, which cancels its job and exits 0.
+#
+# Never deletes anything: unregistering and removing a runner directory is
+# printed by --help for the user to run.
+set -uo pipefail
+
+DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+# shellcheck source=/dev/null
+source "$DOTFILES/bin/project-dirs-lib"
+
+usage() {
+    cat <<'USAGE'
+usage: runners [status]      this repo's runners: set up, running, GitHub's view
+       runners start [N]     bring N more runners up (default 1): stopped ones
+                             first, then new ones created and registered
+       runners stop [N]      stop N running runners, highest number first
+                             (default: all); a busy runner's job is cancelled
+
+Inside a git repo (hub or worktree) that repo; anywhere else an fzf picker over
+Ctrl+F's project list. Runners live in ~/dev/gha-runners/<repo>/<n>/, named
+<host>-<repo>-<n> on GitHub, log to <n>/run.log, and run until stopped or
+until the machine reboots.
+
+Removing runner <n> is manual (stop it first):
+  cd ~/dev/gha-runners/<repo>/<n> && ./config.sh remove --token \
+    "$(gh api -X POST repos/<owner>/<repo>/actions/runners/remove-token --jq .token)"
+  rm -rf ~/dev/gha-runners/<repo>/<n>
+USAGE
+}
+
+# plan_start <count> <n:state>...
+#   Prints "start <n>" / "create <n>" lines for bringing <count> runners up,
+#   given every runner dir's state (running|stopped|unconfigured), sorted by n.
+#   Stopped runners first, then unconfigured dirs (a create that failed part
+#   way, configured again in place), then the lowest unused numbers.
+plan_start() {
+    local count="$1" s n state used=" " next=1
+    shift
+    for s in "$@"; do
+        n="${s%%:*}"; state="${s#*:}"
+        used+="$n "
+        if [[ "$state" == stopped ]] && (( count > 0 )); then
+            echo "start $n"; count=$(( count - 1 ))
+        fi
+    done
+    for s in "$@"; do
+        n="${s%%:*}"; state="${s#*:}"
+        if [[ "$state" == unconfigured ]] && (( count > 0 )); then
+            echo "create $n"; count=$(( count - 1 ))
+        fi
+    done
+    while (( count > 0 )); do
+        while [[ "$used" == *" $next "* ]]; do next=$(( next + 1 )); done
+        echo "create $next"; used+="$next "; count=$(( count - 1 ))
+    done
+}
+
+# plan_stop <count|all> <n:state>...
+#   Prints "stop <n>" lines for the highest-numbered running runners.
+plan_stop() {
+    local count="$1" s i
+    shift
+    local -a running=()
+    for s in "$@"; do
+        [[ "${s#*:}" == running ]] && running+=("${s%%:*}")
+    done
+    for (( i = ${#running[@]} - 1; i >= 0; i-- )); do
+        [[ "$count" != all ]] && (( count <= 0 )) && break
+        echo "stop ${running[$i]}"
+        [[ "$count" != all ]] && count=$(( count - 1 ))
+    done
+}
+
+# runner_asset <uname-s> <uname-m>
+#   The release asset's platform part, e.g. osx-arm64; nothing when unsupported.
+runner_asset() {
+    local os arch
+    case "$1" in
+        Darwin) os=osx ;;
+        Linux)  os=linux ;;
+        *) return 0 ;;
+    esac
+    case "$2" in
+        arm64|aarch64) arch=arm64 ;;
+        x86_64)        arch=x64 ;;
+        *) return 0 ;;
+    esac
+    printf '%s-%s' "$os" "$arch"
+}
+
+# github_slug <repo-dir> — owner/name from the origin remote; nothing when
+# origin is not on github.com.
+github_slug() {
+    local r
+    r=$(git -C "$1" remote get-url origin 2>/dev/null) || return 0
+    [[ "$r" == *github.com* ]] || return 0
+    r="${r%/}"; r="${r%.git}"
+    r="${r#*github.com:}"; r="${r#*github.com/}"
+    printf '%s' "$r"
+}
+
+# Sourced (tests/test-runners.sh): hand back the helpers above, run nothing.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
+
+die() { echo "runners: $*" >&2; exit 1; }
+
+cmd="${1:-status}"
+arg="${2:-}"
+case "$cmd" in
+    -h|--help|help) usage; exit 0 ;;
+    status) [[ -z "$arg" ]] || die "status takes no argument" ;;
+    start)
+        arg="${arg:-1}"
+        [[ "$arg" =~ ^[1-9][0-9]*$ ]] || die "start: N must be a positive number, got '$arg'"
+        ;;
+    stop)
+        arg="${arg:-all}"
+        [[ "$arg" == all || "$arg" =~ ^[1-9][0-9]*$ ]] || die "stop: N must be a positive number or 'all', got '$arg'"
+        ;;
+    *) usage >&2; exit 1 ;;
+esac
+(( $# <= 2 )) || die "too many arguments"
+
+# ---- Which repo ----
+common=$(git rev-parse --git-common-dir 2>/dev/null)
+if [[ -n "$common" ]]; then
+    common=$(cd "$common" 2>/dev/null && pwd -P)
+    hub="${common%/.git}"
+else
+    command -v fzf >/dev/null || die "not in a git repo, and fzf is not installed for the picker"
+    project_dirs
+    hub=$(
+        for cand in ${project_dirs_out[@]+"${project_dirs_out[@]}"}; do
+            [[ -d "$cand/.git" ]] || continue
+            [[ "$cand" == "$HOME/"* ]] && cand="~/${cand#"$HOME"/}"
+            printf '%s\n' "$cand"
+        done | fzf --prompt "runners $cmd> " --height 40% --reverse
+    ) || exit 0
+    [[ "$hub" == "~/"* ]] && hub="$HOME/${hub#\~/}"
+fi
+[[ -d "$hub/.git" ]] || die "could not resolve a repo from '$hub'"
+
+repo="${hub##*/}"
+slug=$(github_slug "$hub")
+[[ -n "$slug" ]] || die "$repo: origin is not a github.com remote"
+root="$runners_root/$repo"
+host=$(hostname -s)
+
+# ---- Local state ----
+runner_pids() {
+    pgrep -f "$root/$1/(run\.sh|bin/Runner\.Listener)" 2>/dev/null | tr '\n' ' '
+}
+
+# Fills `states` with "n:state" for every numeric dir under $root, sorted by n.
+collect_states() {
+    states=()
+    local n d
+    shopt -s nullglob
+    local -a dirs=("$root"/*/)
+    shopt -u nullglob
+    (( ${#dirs[@]} )) || return 0
+    while read -r n; do
+        d="$root/$n"
+        if [[ ! -f "$d/.runner" ]]; then
+            states+=("$n:unconfigured")
+        elif [[ -n "$(runner_pids "$n")" ]]; then
+            states+=("$n:running")
+        else
+            states+=("$n:stopped")
+        fi
+    done < <(for d in "${dirs[@]}"; do
+                 d="${d%/}"; d="${d##*/}"
+                 [[ "$d" =~ ^[0-9]+$ ]] && echo "$d"
+             done | sort -n)
+}
+
+# ---- Actions ----
+# Prints the cached tarball path, downloading the latest release on a miss.
+ensure_tarball() {
+    local asset ver file url
+    asset=$(runner_asset "$(uname -s)" "$(uname -m)")
+    [[ -n "$asset" ]] || { echo "runners: no runner build for $(uname -s)/$(uname -m)" >&2; return 1; }
+    ver=$(gh api repos/actions/runner/releases/latest --jq .tag_name) || return 1
+    ver="${ver#v}"
+    file="$runners_root/_cache/actions-runner-$asset-$ver.tar.gz"
+    if [[ ! -f "$file" ]]; then
+        mkdir -p "${file%/*}"
+        url="https://github.com/actions/runner/releases/download/v$ver/actions-runner-$asset-$ver.tar.gz"
+        echo "downloading runner $ver ..." >&2
+        curl -fsSL -o "$file.partial" "$url" && mv "$file.partial" "$file" || return 1
+    fi
+    printf '%s' "$file"
+}
+
+reg_token=""
+create_runner() {
+    local n="$1" d="$root/$1" tarball
+    tarball=$(ensure_tarball) || return 1
+    if [[ -z "$reg_token" ]]; then
+        reg_token=$(gh api -X POST "repos/$slug/actions/runners/registration-token" --jq .token) \
+            || { echo "runners: could not get a registration token for $slug (repo admin needed)" >&2; return 1; }
+    fi
+    mkdir -p "$d"
+    tar xzf "$tarball" -C "$d" || return 1
+    (cd "$d" && ./config.sh --unattended --replace \
+        --url "https://github.com/$slug" --token "$reg_token" \
+        --name "$host-$repo-$n" --work _work) >>"$d/config.log" 2>&1 \
+        || { echo "runners: config.sh failed for #$n, see $d/config.log" >&2; return 1; }
+    echo "created #$n ($host-$repo-$n)"
+}
+
+start_runner() {
+    local n="$1" d="$root/$1" i pids
+    nohup "$d/run.sh" >>"$d/run.log" 2>&1 </dev/null &
+    for (( i = 0; i < 20; i++ )); do
+        pids=$(pgrep -f "$d/bin/Runner\.Listener" 2>/dev/null | tr '\n' ' ')
+        [[ -n "$pids" ]] && { echo "started #$n (pid ${pids% })"; return 0; }
+        sleep 0.5
+    done
+    echo "runners: #$n has no listener after 10s, see $d/run.log" >&2
+    return 1
+}
+
+stop_runner() {
+    local n="$1" d="$root/$1" i
+    pkill -TERM -f "$d/run\.sh" 2>/dev/null
+    pkill -INT -f "$d/bin/Runner\.Listener" 2>/dev/null
+    for (( i = 0; i < 60; i++ )); do
+        [[ -z "$(runner_pids "$n")" ]] && { echo "stopped #$n"; return 0; }
+        sleep 0.5
+    done
+    echo "runners: #$n still running after 30s: $(runner_pids "$n")" >&2
+    return 1
+}
+
+show_status() {
+    local s n state pids gh_rows gh_err="" gh_text name gstatus busy running=0 total=0
+    local mine=" "
+    local root_disp="$root"
+    [[ "$root_disp" == "$HOME/"* ]] && root_disp="~/${root_disp#"$HOME"/}"
+    collect_states
+    gh_rows=$(gh api --paginate "repos/$slug/actions/runners" \
+        --jq '.runners[] | [.name, .status, (if .busy then "busy" else "-" end)] | @tsv' 2>&1) \
+        || { gh_err="${gh_rows##*$'\n'}"; gh_rows=""; }
+    echo "$repo  $slug  $root_disp"
+    for s in ${states[@]+"${states[@]}"}; do
+        n="${s%%:*}"; state="${s#*:}"
+        total=$(( total + 1 ))
+        pids=""
+        if [[ "$state" == running ]]; then
+            running=$(( running + 1 ))
+            pids="pid $(runner_pids "$n")"
+        fi
+        mine+="$host-$repo-$n "
+        gh_text="?"
+        if [[ -z "$gh_err" ]]; then
+            gh_text="not registered"
+            while IFS=$'\t' read -r name gstatus busy; do
+                [[ "$name" == "$host-$repo-$n" ]] || continue
+                gh_text="$gstatus"
+                [[ "$busy" == busy ]] && gh_text+=", busy"
+            done <<< "$gh_rows"
+        fi
+        printf '  #%-3s %-13s %-12s github: %s\n' "$n" "$state" "${pids% }" "$gh_text"
+    done
+    while IFS=$'\t' read -r name gstatus busy; do
+        [[ -z "$name" || "$mine" == *" $name "* ]] && continue
+        [[ "$busy" == busy ]] && gstatus+=", busy"
+        printf '  %-31s github: %s %s\n' "elsewhere" "$name" "$gstatus"
+    done <<< "$gh_rows"
+    if (( total )); then
+        echo "  $total set up, $running running"
+    else
+        echo "  none set up (runners start)"
+    fi
+    [[ -n "$gh_err" ]] && echo "  github: $gh_err"
+    return 0
+}
+
+states=()
+rc=0
+case "$cmd" in
+    status) show_status ;;
+    start)
+        collect_states
+        while read -r action n; do
+            [[ -z "$action" ]] && continue
+            if [[ "$action" == create ]]; then
+                create_runner "$n" </dev/null || { rc=1; break; }
+            fi
+            start_runner "$n" </dev/null || rc=1
+        done < <(plan_start "$arg" ${states[@]+"${states[@]}"})
+        echo; show_status
+        ;;
+    stop)
+        collect_states
+        plan=$(plan_stop "$arg" ${states[@]+"${states[@]}"})
+        [[ -n "$plan" ]] || echo "nothing running"
+        while read -r _ n; do
+            [[ -z "$n" ]] && continue
+            stop_runner "$n" </dev/null || rc=1
+        done <<< "$plan"
+        echo; show_status
+        ;;
+esac
+exit "$rc"
