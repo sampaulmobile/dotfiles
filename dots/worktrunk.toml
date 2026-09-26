@@ -42,6 +42,10 @@ exclude = [
   "node_modules",
   ".venv",
   ".dart_tool",
+  ".fvm",
+  ".symlinks",
+  "ephemeral",
+  "Pods",
   "build",
   "target",
   "dist",
@@ -52,4 +56,5 @@ exclude = [
   ".mypy_cache",
   ".ruff_cache",
   "*.log",
+  ".DS_Store",
 ]
