@@ -485,6 +485,63 @@ load_pr_cache() {
     return 0
 }
 
+# prefetch_guards — one background worktree_ignored_at_risk per worktree, from
+# the parallel _wt_paths/_wt_repos arrays, results in GUARD_PREFETCH_DIR keyed
+# by path. Sweep only: the report never asks the guard anything. Does NOT wait
+# — the caller's single `wait` before the rows loop collects this too.
+#   This is the one piece of per-worktree work that still scaled linearly in
+#   the foreground: it reads (and on the non---force path hashes) a whole
+#   worktree's gitignored data, so 30 worktrees meant 30 serial traversals.
+#   The `.rc` file is what makes a prefetch SAFE to trust: an absent or
+#   non-zero rc means the job did not finish, and guard_at_risk recomputes
+#   rather than read a short file as "nothing at risk" — empty output is the
+#   verdict that lets a worktree be DELETED.
+#   IN BATCHES of hw.ncpu, not all at once: each job reads (and off the --force
+#   path hashes) a whole worktree's gitignored data, so one job per worktree
+#   puts tens of GiB in flight at once. Measured over 50 Flutter worktrees,
+#   2026-09-26: serial 499s, width 4 263s, width 8 159s. GUARD_JOBS overrides.
+GUARD_PREFETCH_DIR=""
+prefetch_guards() {
+    local i p hub key any="" width n=0
+    [[ "$MODE" == sweep ]] || return 0
+    (( ${#_wt_paths[@]} )) || return 0
+    [[ "$FORCE" == true ]] && any=first
+    width="${GUARD_JOBS:-}"
+    [[ "$width" =~ ^[1-9][0-9]*$ ]] || width=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
+    (( width > 0 )) || width=4
+    GUARD_PREFETCH_DIR=$(mktemp -d "${TMPDIR:-/tmp}/worktrees-gd.XXXXXX") || { GUARD_PREFETCH_DIR=""; return 0; }
+    for i in "${!_wt_paths[@]}"; do
+        p="${_wt_paths[i]}"
+        hub="${_wt_repos[i]}"
+        key="${p//\//_}"
+        ( worktree_ignored_at_risk "$p" "$hub" "$any" > "$GUARD_PREFETCH_DIR/$key"
+          echo $? > "$GUARD_PREFETCH_DIR/$key.rc" ) &
+        n=$(( n + 1 ))
+        if (( n % width == 0 )); then
+            wait
+        fi
+    done
+}
+
+# guard_at_risk <worktree> <hub> <any>
+#   prefetch_guards' answer for this worktree, or the guard run here and now
+#   when there is no trustworthy one. <any> must match what the prefetch used;
+#   both read the same FORCE, which cannot change mid-run.
+guard_at_risk() {
+    local p="$1" hub="$2" any="$3" key rc
+    if [[ -n "$GUARD_PREFETCH_DIR" ]]; then
+        key="${p//\//_}"
+        if [[ -f "$GUARD_PREFETCH_DIR/$key.rc" ]]; then
+            read -r rc < "$GUARD_PREFETCH_DIR/$key.rc"
+            if [[ "$rc" == 0 ]]; then
+                cat "$GUARD_PREFETCH_DIR/$key"
+                return 0
+            fi
+        fi
+    fi
+    worktree_ignored_at_risk "$p" "$hub" "$any"
+}
+
 # default_ref_for <repo> — the default-branch commit-ish to compare worktree
 # HEADs against: origin/HEAD's symbolic ref, falling back to a local
 # main/master. Empty when a repo has neither (merged_local then reports
@@ -875,22 +932,25 @@ parse_copy_ignored_excludes() {
 }
 
 # _seg_is_cache <relpath> — true if <relpath> is, or is under, a name in
-# sweep_excludes. worktrunk writes excludes gitignore-style (".cache/"), so
-# trailing slashes are trimmed on both sides. Only DIRECTORY segments count:
-# ancestors always are; the final segment only when rel ends in "/" — a
-# gitignored FILE named "build" is not a cache.
+# sweep_excludes. Excludes are gitignore-style and the TRAILING SLASH carries
+# gitignore's own meaning: "build/" matches only a directory, "build" matches a
+# file of that name too. Every ancestor segment is a directory and so matches
+# either way; only the final segment of a FILE path turns on the distinction —
+# which is what lets a plain ".DS_Store" or "*.log" entry cover the junk files
+# that would otherwise pin a worktree in place forever.
 _seg_is_cache() {
-    local rel="$1" seg ex rest is_dir=false first=true
+    local rel="$1" seg ex pat rest is_dir=false first=true
     (( ${#sweep_excludes[@]} )) || return 1
     [[ "$rel" == */ ]] && is_dir=true
     rest="${rel%/}"
     while [[ -n "$rest" ]]; do
         seg="${rest##*/}"
-        if [[ "$first" == false || "$is_dir" == true ]]; then
-            for ex in "${sweep_excludes[@]}"; do
-                [[ "$seg" == "${ex%/}" ]] && return 0
-            done
-        fi
+        for ex in "${sweep_excludes[@]}"; do
+            pat="${ex%/}"
+            # A dir-only pattern cannot vouch for the final segment of a file.
+            [[ "$ex" == */ && "$first" == true && "$is_dir" == false ]] && continue
+            [[ "$seg" == $pat ]] && return 0
+        done
         [[ "$rest" == */* ]] || break
         rest="${rest%/*}"
         first=false
@@ -898,30 +958,49 @@ _seg_is_cache() {
     return 1
 }
 
+# _dir_is_cache <reldir> — _seg_is_cache for a directory, memoized on the last
+# directory asked about. Only ANCESTOR segments decide a FILE's verdict, so a
+# file's answer is its parent directory's, and `git ls-files` emits one
+# directory's files contiguously — hence a one-entry memo answers a whole
+# directory. Valid only for paths that are files; ask _seg_is_cache directly
+# about a directory entry.
+_memo_dir=""
+_memo_cache=1
+_dir_is_cache() {
+    if [[ "$1" != "$_memo_dir" ]]; then
+        _memo_dir="$1"
+        if _seg_is_cache "$1"; then _memo_cache=0; else _memo_cache=1; fi
+    fi
+    return $_memo_cache
+}
+
 # classify_ignored_file <relpath> <wt> <hub>
 #   Verdict for one gitignored entry as `git ls-files --directory` prints it
-#   (a fully-ignored dir arrives collapsed, with a trailing slash):
+#   (a fully-ignored dir arrives collapsed, with a trailing slash), in
+#   CLASSIFY_VERDICT rather than on stdout — a `$(...)` here is a fork per
+#   gitignored entry, and a CocoaPods or vendored dir makes that thousands:
 #     safe-cache  regenerable cache (a segment in sweep_excludes)
-#     safe-copy   plain file byte-identical to the hub's copy
+#     compare     plain file; byte-identity against the hub decides, and the
+#                 caller batches that check across every such file
 #     recurse     ignored DIRECTORY, not a cache and not .feature/ — the
 #                 caller lists its files and classifies each
-#     at-risk     everything else (worktree-unique, or copied-in then edited)
+#     at-risk     worktree-unique (the hub has no file there at all)
 #   .feature/ is /feature pipeline scratch with no hub counterpart: disposable.
 classify_ignored_file() {
     local rel="$1" wt="$2" hub="$3"
     if _seg_is_cache "$rel"; then
-        echo "safe-cache"; return
+        CLASSIFY_VERDICT="safe-cache"; return
     fi
     if [[ "$rel" == */ ]]; then
         if [[ "$rel" == .feature/ || "$rel" == */.feature/ ]]; then
-            echo "safe-cache"; return
+            CLASSIFY_VERDICT="safe-cache"; return
         fi
-        echo "recurse"; return
+        CLASSIFY_VERDICT="recurse"; return
     fi
-    if [[ -f "$hub/$rel" ]] && cmp -s "$wt/$rel" "$hub/$rel"; then
-        echo "safe-copy"; return
+    if [[ -f "$hub/$rel" && -f "$wt/$rel" ]]; then
+        CLASSIFY_VERDICT="compare"; return
     fi
-    echo "at-risk"
+    CLASSIFY_VERDICT="at-risk"
 }
 
 # LS_FILES_FAILED — a failed listing announces itself in its own stream:
@@ -930,25 +1009,85 @@ classify_ignored_file() {
 # reported at-risk, never safe.
 LS_FILES_FAILED='<git ls-files failed — cannot verify gitignored contents, treating as at-risk>'
 
-# _ignored_dir_at_risk <reldir> <wt> <hub>
-#   At-risk files inside a non-cache ignored dir: listed WITHOUT --directory
-#   so nested entries come back individually. A listing failure fails closed
-#   (the whole dir is at-risk).
-_ignored_dir_at_risk() {
-    local reldir="$1" wt="$2" hub="$3" sub verdict
-    while IFS= read -r -d '' sub; do
-        [[ -z "$sub" ]] && continue
-        if [[ "$sub" == "$LS_FILES_FAILED" ]]; then
-            printf '%s\n' "$reldir"
-            return
+# _bulk_lines <count> <command...>   (args: NUL-separated paths on stdin)
+#   Run <command> over every path via xargs and read its stdout into
+#   bulk_out[], requiring exactly <count> lines. xargs preserves argument
+#   order across however many invocations it splits into, so the Nth line
+#   describes the Nth path and nothing parses a filename out of the output —
+#   the only newline- and non-ASCII-safe way to pair these up. A short read
+#   means a path the tool could not stat or read (it wrote to stderr and
+#   emitted no line), which desynchronises the pairing: fail, and the caller
+#   fails closed.
+#   Answers in bulk_out, so callers must REDIRECT the path list in rather than
+#   pipe it: a pipeline would run this in a subshell and the array would never
+#   reach the caller — silently empty, which reads as "nothing at risk".
+_bulk_lines() {
+    local want="$1"; shift
+    local line n=0
+    bulk_out=()
+    while IFS= read -r line; do
+        bulk_out[n]="$line"
+        n=$((n + 1))
+    done < <(xargs -0 "$@" 2>/dev/null)
+    (( n == want ))
+}
+
+# _bulk_at_risk <wt> <hub>   (stdin: NUL-separated relpaths, all regular files
+#                             present on both sides)
+#   The batched half of the byte-identity test, printing the paths that are NOT
+#   byte-identical to the hub's copy. `cmp` per file is one fork per file; this
+#   is a fixed handful for the whole worktree. Sizes first, since a file the
+#   worktree created or grew is settled without reading a byte; only same-size
+#   pairs are hashed, and a hash reads exactly what `cmp` would have.
+#   FAILS CLOSED: any failure reports every candidate at-risk.
+_bulk_at_risk() {
+    local wt="$1" hub="$2" any="${3:-}" rel i n
+    local cand=() w_size=() h_size=() same=()
+    while IFS= read -r -d '' rel; do
+        [[ -n "$rel" ]] && cand+=("$rel")
+    done
+    n=${#cand[@]}
+    (( n )) || return 0
+
+    if ! _bulk_lines "$n" stat -f '%z' < <(printf '%s\0' "${cand[@]/#/$wt/}"); then
+        printf '%s\n' "${cand[@]}"; return
+    fi
+    w_size=("${bulk_out[@]}")
+    if ! _bulk_lines "$n" stat -f '%z' < <(printf '%s\0' "${cand[@]/#/$hub/}"); then
+        printf '%s\n' "${cand[@]}"; return
+    fi
+    h_size=("${bulk_out[@]}")
+
+    for (( i = 0; i < n; i++ )); do
+        if [[ "${w_size[i]}" == "${h_size[i]}" ]]; then
+            same+=("${cand[i]}")
+        else
+            printf '%s\n' "${cand[i]}"
+            [[ -z "$any" ]] || return
         fi
-        verdict="$(classify_ignored_file "$sub" "$wt" "$hub")"
-        case "$verdict" in
-            safe-cache|safe-copy) : ;;
-            *) printf '%s\n' "$sub" ;;
-        esac
-    done < <(git -C "$wt" ls-files --others --ignored --exclude-standard -z -- "$reldir" 2>/dev/null \
-        || printf '%s\0' "$LS_FILES_FAILED")
+    done
+    n=${#same[@]}
+    (( n )) || return 0
+
+    # `openssl dgst -r` prints "<hash> *<path>"; only the leading hash is
+    # read, so a path with a space cannot confuse the pairing, and a path with
+    # a NEWLINE comes back escaped on ONE line — escaped identically on both
+    # sides, so the compare still holds. Not /usr/bin/shasum: it is perl, and
+    # ~6x slower over a vendored tree.
+    local w_hash=()
+    if ! _bulk_lines "$n" openssl dgst -sha1 -r < <(printf '%s\0' "${same[@]/#/$wt/}"); then
+        printf '%s\n' "${same[@]}"; return
+    fi
+    for (( i = 0; i < n; i++ )); do w_hash+=("${bulk_out[i]%% *}"); done
+    if ! _bulk_lines "$n" openssl dgst -sha1 -r < <(printf '%s\0' "${same[@]/#/$hub/}"); then
+        printf '%s\n' "${same[@]}"; return
+    fi
+    for (( i = 0; i < n; i++ )); do
+        if [[ "${w_hash[i]}" != "${bulk_out[i]%% *}" ]]; then
+            printf '%s\n' "${same[i]}"
+            [[ -z "$any" ]] || return
+        fi
+    done
 }
 
 # worktree_ignored_at_risk <wt> <hub>
@@ -959,22 +1098,65 @@ _ignored_dir_at_risk() {
 #   a wholly-ignored cache dir to one segment check. -z throughout: with
 #   core.quotePath, plain output octal-quotes non-ASCII names and the byte
 #   compare would never match.
+#   Three passes: classify the collapsed listing, expand every non-cache dir in
+#   ONE `ls-files` (a failure there fails that whole set closed), then settle
+#   every byte-identity question in one batch. The batch emits after the paths
+#   classified inline, so the sort is load-bearing — it is what keeps this
+#   listing, and summarize_at_risk's root order, stable.
+#   <any> non-empty asks only whether ANYTHING is at risk: the walk stops at
+#   the first hit. --force needs exactly that — it drops the data whatever it
+#   is, and the row it prints names the CATEGORY, never the files — and
+#   stopping skips the hashing that dominates this function.
 worktree_ignored_at_risk() {
-    local wt="$1" hub="$2" rel verdict
+    _worktree_at_risk_raw "$1" "$2" "${3:-}" | LC_ALL=C sort
+}
+
+_worktree_at_risk_raw() {
+    local wt="$1" hub="$2" any="${3:-}" rel
+    local dirs=() cands=()
+    _memo_dir=""
+    _memo_cache=1
     while IFS= read -r -d '' rel; do
         [[ -z "$rel" ]] && continue
         if [[ "$rel" == "$LS_FILES_FAILED" ]]; then
             printf '%s\n' "$LS_FILES_FAILED"
             return
         fi
-        verdict="$(classify_ignored_file "$rel" "$wt" "$hub")"
-        case "$verdict" in
-            safe-cache|safe-copy) : ;;
-            recurse) _ignored_dir_at_risk "$rel" "$wt" "$hub" ;;
-            *) printf '%s\n' "$rel" ;;
+        classify_ignored_file "$rel" "$wt" "$hub"
+        case "$CLASSIFY_VERDICT" in
+            safe-cache) : ;;
+            compare) cands+=("$rel") ;;
+            recurse) dirs+=("$rel") ;;
+            *) printf '%s\n' "$rel"; [[ -z "$any" ]] || return ;;
         esac
     done < <(git -C "$wt" ls-files --others --ignored --exclude-standard --directory -z 2>/dev/null \
         || printf '%s\0' "$LS_FILES_FAILED")
+
+    if (( ${#dirs[@]} )); then
+        local sub
+        while IFS= read -r -d '' sub; do
+            [[ -z "$sub" ]] && continue
+            if [[ "$sub" == "$LS_FILES_FAILED" ]]; then
+                printf '%s\n' "${dirs[@]}"
+                cands=()
+                break
+            fi
+            # Every path here sits under one of dirs[], so it has a parent.
+            if _dir_is_cache "${sub%/*}/"; then
+                continue
+            fi
+            if [[ -f "$hub/$sub" && -f "$wt/$sub" ]]; then
+                cands+=("$sub")
+            else
+                printf '%s\n' "$sub"
+                [[ -z "$any" ]] || return
+            fi
+        done < <(git -C "$wt" ls-files --others --ignored --exclude-standard -z -- "${dirs[@]}" 2>/dev/null \
+            || printf '%s\0' "$LS_FILES_FAILED")
+    fi
+
+    (( ${#cands[@]} )) || return 0
+    printf '%s\0' "${cands[@]}" | _bulk_at_risk "$wt" "$hub" "$any"
 }
 
 # summarize_at_risk   (stdin: at-risk paths, one per line)
@@ -1177,7 +1359,10 @@ sweep_decide() {
         return 0
     fi
 
-    at_risk=$(worktree_ignored_at_risk "$path" "$repo")
+    # --force never prints the listing, so ask only whether anything is there.
+    local any=""
+    [[ "$FORCE" == true ]] && any=first
+    at_risk=$(guard_at_risk "$path" "$repo" "$any")
     local untracked="" what=""
     if [[ "$dirty_untracked" == true ]]; then
         untracked=$(worktree_untracked "$path")
@@ -1518,6 +1703,27 @@ render_snapshot_rows() {
 sweep_snapshot_rows() {
     local kind r_repo bucket branch pr_disp flags age where pipe epoch path locked sweepable
     local pr_state pr_head wt_head merged_local
+    # Two passes over ONE read of the records: the first starts the guards for
+    # every MERGED row (the only rows that ask, and the expensive part of each),
+    # the second builds the rows. Read ONCE and buffered, because the statusbar
+    # republishes this source every few seconds — re-reading it let the passes
+    # see different snapshots, and a row the prefetch paid for then rendered as
+    # a different bucket, or not at all.
+    local records
+    records=$(snapshot_read worktrees)
+    _wt_paths=()
+    _wt_repos=()
+    while IFS=$'\t' read -r kind r_repo bucket branch pr_disp flags age where pipe epoch path locked sweepable \
+        pr_state pr_head wt_head merged_local; do
+        [[ "$kind" == row ]] || continue
+        [[ -n "${SCOPED:-}" && "$r_repo" != "$SCOPED" ]] && continue
+        [[ "$bucket" == MERGED ]] || continue
+        _wt_paths+=("$path")
+        _wt_repos+=("$r_repo")
+    done < <(printf '%s\n' "$records")
+    prefetch_guards
+    wait
+    prof "guard prefetch"
     rows_reset
     repos=()
     repos_seen=$'\n'
@@ -1544,7 +1750,7 @@ sweep_snapshot_rows() {
         repo="$r_repo"
         sweep_snapshot_row "$path" "$branch" "$locked" "$bucket" "$sweepable" \
             "$pr_disp" "$flags" "$pr_state" "$pr_head" "$wt_head" "$merged_local"
-    done < <(snapshot_read worktrees)
+    done < <(printf '%s\n' "$records")
     (( ${#repos[@]} )) && rows_render 6
     return 0
 }
@@ -1591,6 +1797,7 @@ if (( ${#repos[@]} )); then
     _with_wts=()
     _porc=()
     _wt_paths=()
+    _wt_repos=()
     for repo in "${repos[@]}"; do
         _p=$(git -C "$repo" worktree list --porcelain 2>/dev/null)
         (( $(printf '%s\n' "$_p" | grep -c '^worktree ') > 1 )) || continue
@@ -1600,6 +1807,7 @@ if (( ${#repos[@]} )); then
             [[ "$_l" == "worktree "* ]] || continue
             [[ "${_l#worktree }" == "$repo" ]] && continue
             _wt_paths+=("${_l#worktree }")
+            _wt_repos+=("$repo")
         done <<< "$_p"
     done
     repos=()
@@ -1608,8 +1816,9 @@ if (( ${#repos[@]} )); then
 fi
 if (( ${#repos[@]} )); then
     (( ${#_wt_paths[@]} )) && prefetch_statuses "${_wt_paths[@]}"
+    prefetch_guards
     wait
-    prof "prefetch (gh + status)"
+    prof "prefetch (gh + status + guard)"
     rows_reset
     for _i in "${!repos[@]}"; do
         repo="${repos[_i]}"
@@ -1642,6 +1851,10 @@ if (( ${#repos[@]} )); then
     if [[ -n "$STATUS_PREFETCH_DIR" ]]; then
         rm -f "$STATUS_PREFETCH_DIR"/* 2>/dev/null
         rmdir "$STATUS_PREFETCH_DIR" 2>/dev/null
+    fi
+    if [[ -n "$GUARD_PREFETCH_DIR" ]]; then
+        rm -f "$GUARD_PREFETCH_DIR"/* 2>/dev/null
+        rmdir "$GUARD_PREFETCH_DIR" 2>/dev/null
     fi
 fi
 fi

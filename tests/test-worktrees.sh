@@ -367,10 +367,13 @@ pipeline_ "no .feature dir -> blank" ""
 # The classify_ignored_file cases that matter: a regenerable cache (a segment
 # in sweep_excludes, at any depth) is safe-cache and never content-checked
 # (L2: only when that segment names a DIRECTORY — a gitignored FILE that
-# happens to share a cache's name is not); a plain file is safe-copy ONLY when
-# byte-identical to the hub's copy (a copied-in file the worktree later
-# edited must fall through to at-risk, or the sweep would silently drop the
-# edit); a file absent from the hub is at-risk; a non-cache, non-.feature/
+# happens to share a cache's name is not — a trailing slash means
+# directory-only, exactly as in gitignore, while a slashless entry such as
+# ".DS_Store" or "*.log" covers files too); a plain file the hub also has is
+# "compare", deferred to the batched byte-identity test, where it counts as
+# safe ONLY when byte-identical (a copied-in file the worktree later edited
+# must come back at-risk, or the sweep would silently drop the edit); a file
+# absent from the hub is at-risk; a non-cache, non-.feature/
 # ignored DIRECTORY is "recurse", never dropped as a whole unit (B7) — the
 # caller (worktree_ignored_at_risk) must expand it and compare its files
 # individually. The parse_copy_ignored_excludes case that matters: the
@@ -496,9 +499,13 @@ printf 'A=1\nB=2\n' > "$wt/.config"
 printf 'data\n' > "$wt/local.db"
 
 # case_ <label> <relpath> <want>
+# classify_ignored_file answers in CLASSIFY_VERDICT, not on stdout: a command
+# substitution here would reintroduce the fork-per-file it exists to avoid.
 case_() {
     local label="$1" rel="$2" want="$3" got
-    got=$(classify_ignored_file "$rel" "$wt" "$hub")
+    CLASSIFY_VERDICT=""
+    classify_ignored_file "$rel" "$wt" "$hub"
+    got="$CLASSIFY_VERDICT"
     if [[ "$got" == "$want" ]]; then
         ok "$label -> $got"
     else
@@ -508,18 +515,29 @@ case_() {
 
 case_ "cache dir (top level)"        "node_modules/"          safe-cache
 case_ "cache dir (nested segment)"   "packages/x/.venv/"      safe-cache
-case_ "file identical to hub"        ".env"                   safe-copy
-case_ "copied-in file since edited"  ".config"                at-risk
+case_ "file present in hub -> batched compare" ".env"          compare
+case_ "copied-in file since edited"  ".config"                compare
 case_ "file absent from hub"         "local.db"               at-risk
 case_ "non-cache directory (not .feature/)" "data-test/"       recurse
 case_ ".feature/ pipeline state"     ".feature/"               safe-cache
 
-echo "── _seg_is_cache (L2): gitignore-style trailing slash; files never match"
+echo "── _seg_is_cache (L2): a trailing slash means directory-only, as in gitignore"
 sweep_excludes=("node_modules" ".venv" "build/")
 case_ "exclude entry with trailing slash still matches a dir"  "build/"  safe-cache
 printf 'not a cache\n' > "$hub/build"
 printf 'not a cache\n' > "$wt/build"
-case_ "gitignored FILE named like a cache dir is not safe-cache" "build" safe-copy
+case_ "dir-only entry (build/) does NOT vouch for a FILE named build" "build" compare
+sweep_excludes=("node_modules" ".venv" "build")
+case_ "slashless entry (build) DOES vouch for a FILE named build" "build" safe-cache
+
+# The junk-file entries this distinction exists for: without them a single
+# .DS_Store or stray log pins a merged worktree in place forever.
+sweep_excludes=(".DS_Store" "*.log")
+printf 'junk\n' > "$wt/.DS_Store"
+case_ "a bare .DS_Store entry covers the file"        ".DS_Store"        safe-cache
+case_ "and covers one nested in a subdirectory"      "research/.DS_Store" safe-cache
+case_ "a glob entry covers a matching file"          "api/api.log"      safe-cache
+case_ "but not a file it does not match"             "api/report.xml"   at-risk
 sweep_excludes=("node_modules" ".venv" "build")
 
 echo "── worktree_ignored_at_risk: real-git integration (B1, B7, L5)"
@@ -544,6 +562,10 @@ printf 'same\n' > "$gitwt/mydir2/same.txt"
 printf 'same\n' > "$hub/mydir2/same.txt"
 printf 'worktree edit\n' > "$gitwt/mydir2/changed.txt"
 printf 'hub original\n' > "$hub/mydir2/changed.txt"
+# same LENGTH, different bytes: the only case that reaches the content hash,
+# the size pre-filter having settled every other differing pair for free.
+printf 'AAAA\n' > "$gitwt/mydir2/samesize.txt"
+printf 'BBBB\n' > "$hub/mydir2/samesize.txt"
 
 # .feature/ pipeline state, no hub counterpart at all -> always safe
 mkdir -p "$gitwt/.feature"
@@ -559,6 +581,11 @@ if [[ "$at_risk" == *"mydir2/changed.txt"* ]]; then
     ok "nested at-risk file surfaced by its own path (mydir2/changed.txt)"
 else
     bad "nested at-risk file" "got [$at_risk], want it to contain mydir2/changed.txt"
+fi
+if [[ "$at_risk" == *"mydir2/samesize.txt"* ]]; then
+    ok "same-size differing file is at-risk (content hash, not just size)"
+else
+    bad "same-size differing file" "got [$at_risk], want it to contain mydir2/samesize.txt"
 fi
 if [[ "$at_risk" != *"mydir/file.txt"* && "$at_risk" != *"mydir2/same.txt"* ]]; then
     ok "nested files identical to the hub are not at-risk"
