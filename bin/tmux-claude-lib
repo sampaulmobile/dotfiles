@@ -226,8 +226,7 @@ get_claude_panes() {
 classify_pane_status() {
     local raw="$1"
 
-    # codex screens look nothing like claude's; its classifier lives in
-    # tmux-claude-lib-codex so this one stays undisturbed.
+    # codex screens look nothing like claude's.
     if [[ "${2:-claude}" == "codex" ]]; then
         classify_codex_pane_status "$raw"
         return
@@ -1020,9 +1019,8 @@ short_model() {
 }
 
 # ── codex ───────────────────────────────────────────────
-# The codex half (classifier, rollout reader) lives in its own file so the
-# claude paths above stay undisturbed. Resolved relative to THIS file, so a
-# worktree copy sources its own sibling rather than ~/dotfiles.
+# Resolved relative to THIS file, so a worktree copy sources its own sibling
+# rather than ~/dotfiles.
 _agent_lib_dir="${BASH_SOURCE[0]%/*}"
 [[ "$_agent_lib_dir" == "${BASH_SOURCE[0]}" ]] && _agent_lib_dir="$HOME/dotfiles/bin"
 # shellcheck source=/dev/null

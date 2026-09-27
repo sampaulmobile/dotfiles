@@ -1,6 +1,6 @@
 -- Editor enhancements
 return {
-  -- Undotree (preserved from original config)
+  -- Undotree
   {
     "mbbill/undotree",
     keys = {

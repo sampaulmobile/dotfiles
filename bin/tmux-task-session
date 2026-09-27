@@ -55,10 +55,9 @@ task_session_name() {
 
 # task_claude_command <session-name> <prompt-file> [model] [effort]
 #   The line typed into the agent window, into the global
-#   task_claude_command_out. Model and effort ride the command line rather
-#   than being left to the machine's settings.json, so the seat is whatever
-#   the caller asked for. Both are typed unquoted and so are refused unless
-#   they are bare words. Returns 1 without setting the global on a refusal.
+#   task_claude_command_out. Model and effort ride the command line, not
+#   settings.json. Both are typed unquoted and so are refused unless they
+#   are bare words. Returns 1 without setting the global on a refusal.
 task_claude_command() {
     local name="$1" prompt_file="$2" model="${3:-}" effort="${4:-}"
     local cmd

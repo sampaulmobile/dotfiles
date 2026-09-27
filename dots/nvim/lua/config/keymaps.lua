@@ -3,7 +3,6 @@
 
 local k = vim.keymap
 
--- jj to exit insert mode
 k.set("i", "jj", "<esc>", { desc = "Exit insert mode" })
 
 -- Misc <leader> mappings
@@ -34,8 +33,6 @@ k.set("n", "#", "#zz", { silent = true, desc = "Search word backward (centered)"
 k.set("n", "g*", "g*zz", { silent = true, desc = "Search partial word (centered)" })
 k.set("n", "g#", "g#zz", { silent = true, desc = "Search partial word backward (centered)" })
 
--- Clear searches with ESC
 k.set("n", "<esc>", "<cmd>noh<cr><esc>", { silent = true, desc = "Clear search highlight" })
 
--- Format JSON
 k.set("n", "fj", "<cmd>%!python -m json.tool<cr>", { desc = "Format JSON" })

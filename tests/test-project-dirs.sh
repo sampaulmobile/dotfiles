@@ -40,6 +40,9 @@ echo "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" > "$work/dev/proj1/.git/worktree
 mkdir -p "$work/dev/bareproj/.bare"
 mkdir -p "$work/dev/bareproj/feature-y"
 
+# $work/dev/gha-runners  — bin/runners' root: excluded
+mkdir -p "$work/dev/gha-runners/proj1/1"
+
 # $work/dotfiles         — depth-0 entry (a repo), with two "path.*" siblings
 mkdir -p "$work/dotfiles/.git"
 mkdir -p "$work/dotfiles.bak/.git"                 # non-worktree sibling: excluded
@@ -54,6 +57,7 @@ search_dirs=(
     "$work/dotfiles:0"
 )
 PROJECT_DIRS_LOCAL=/nonexistent
+runners_root="$work/dev/gha-runners"
 # shellcheck source=/dev/null
 source "$repo/bin/project-dirs-lib"
 
@@ -87,6 +91,12 @@ if [[ "$got_joined" == *"dotfiles.bak"* ]]; then
     bad "dotfiles.bak excluded" "found dotfiles.bak in enumeration"
 else
     ok "dotfiles.bak (non-worktree sibling) excluded"
+fi
+
+if [[ "$got_joined" == *"gha-runners"* ]]; then
+    bad "runners_root excluded" "found gha-runners in enumeration"
+else
+    ok "runners_root excluded"
 fi
 
 echo "── worktree_branch: normal and detached"
@@ -194,12 +204,6 @@ else
 fi
 
 echo "── session_name_for on a REMOVED path: why wt-tmux-cleanup needs the branch arg"
-# worktrunk's post-remove/post-merge hooks run AFTER the worktree directory
-# is gone, so session_name_for can no longer read <wt>/.git for the branch
-# and falls back to the basename — a DIFFERENT name from the one Ctrl+F
-# created for that worktree while it was alive, which would leak the
-# session. Hence the rule these two cases pin: once the directory is gone,
-# bin/wt-tmux-cleanup must use session_name_for_branch, not session_name_for.
 removed="$work/dev/proj1/.claude/worktrees/agent-removed"
 session_name_for "$removed"
 if [[ "$session_name" == "proj1_agent-removed" ]]; then

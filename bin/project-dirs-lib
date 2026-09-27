@@ -2,7 +2,8 @@
 
 # The single home for search_dirs, the machine-local override and the
 # tmux-session naming rule. Sourced by bin/tmux-sessionizer, bin/worktrees,
-# bin/wt-tmux-jump and bin/wt-tmux-cleanup, none of which keep a second copy.
+# bin/wt-tmux-jump, bin/wt-tmux-cleanup and bin/runners, none of which keep a
+# second copy.
 #
 # Constraints: project_dirs() runs on the sessionizer's hot path before fzf
 # draws, so this file must stay fork-free (globs, [[ ]], `read`, parameter
@@ -21,6 +22,12 @@ if [[ -z "${search_dirs+x}" ]]; then
         "$HOME/research:1"
         "$HOME/dotfiles:0"
     )
+fi
+
+# bin/runners' self-hosted Actions runners; never a project, even when it sits
+# inside a depth-1 search dir.
+if [[ -z "${runners_root+x}" ]]; then
+    runners_root="$HOME/dev/gha-runners"
 fi
 
 # Machine-local override (untracked): may redefine search_dirs entirely. See
@@ -194,6 +201,7 @@ project_dirs() {
         else
             for cand in "$dir"/*/; do
                 cand="${cand%/}"
+                [[ "$cand" == "$runners_root" ]] && continue
                 _project_dirs_add_candidate "$cand"
             done
         fi
