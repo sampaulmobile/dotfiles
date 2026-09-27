@@ -26,8 +26,8 @@ usage: runners [status]      this repo's runners: set up, running, GitHub's view
                              first, then new ones created and registered
        runners stop [N]      stop N running runners, highest number first
                              (default: all); a busy runner's job is abandoned
-                             and GitHub fails it — the listener ignores the
-                             graceful SIGINT when it runs detached
+                             and GitHub fails it — a detached listener ignores
+                             SIGINT, so there is no graceful stop
 
 Inside a git repo (hub or worktree) that repo; anywhere else an fzf picker over
 Ctrl+F's project list. Runners live in ~/dev/gha-runners/<repo>/<n>/, named
@@ -284,26 +284,20 @@ stop_pids() {
 
 # stop_runner <n>
 #   TERM run.sh first: it installs no handler, so it dies at once and nothing
-#   relaunches the listener. Then INT the listener, which is its graceful exit
-#   (cancel the job, exit 0) — but only briefly, because a DETACHED listener has
-#   no console and ignores INT, leaving it and run-helper.sh orphaned. That is
-#   why the stop escalates to TERM rather than waiting the whole timeout out.
+#   relaunches the listener. Then TERM the helper and the listener. No SIGINT
+#   first: INT is the listener's documented graceful exit, but a DETACHED
+#   listener has no console and ignores it — sent one and it was still alive six
+#   seconds later (2026-09-26) — so trying it only adds a wait to every stop.
 stop_runner() {
     local n="$1" d="$root/$1" i left
     pkill -TERM -f "$d/run\.sh" 2>/dev/null
-    pkill -INT -f "$d/bin/Runner\.Listener" 2>/dev/null
-    for (( i = 0; i < 4; i++ )); do
-        left=$(stop_pids "$n")
-        [[ -z "$left" ]] && { echo "stopped #$n"; return 0; }
-        sleep 0.5
-    done
     pkill -TERM -f "$d/(run-helper\.sh|bin/Runner\.Listener)" 2>/dev/null
     for (( i = 0; i < 40; i++ )); do
         left=$(stop_pids "$n")
         [[ -z "$left" ]] && { echo "stopped #$n"; return 0; }
         sleep 0.5
     done
-    echo "runners: #$n still running after 22s: $left" >&2
+    echo "runners: #$n still running after 20s: $left" >&2
     return 1
 }
 
