@@ -226,14 +226,21 @@ bucket_color() {
         *)           printf '%s' "$C_ARCH" ;;
     esac
 }
-term_cols() {
-    local c="${COLUMNS:-}"
-    if [[ ! "$c" =~ ^[0-9]+$ ]] && [[ -n "${TMUX:-}" ]]; then
-        c=$(tmux display -p '#{pane_width}' 2>/dev/null)
+# term_size — sets term_w and term_h with at most one fork; a subshell would
+# lose them, so it is called bare, never inside $( ).
+term_size() {
+    local w="${COLUMNS:-}" h="${LINES:-}" tw th
+    if [[ ! "$w" =~ ^[0-9]+$ || ! "$h" =~ ^[0-9]+$ ]] && [[ -n "${TMUX:-}" ]]; then
+        read -r tw th < <(tmux display -p '#{pane_width} #{pane_height}' 2>/dev/null)
+        [[ "$w" =~ ^[0-9]+$ ]] || w="$tw"
+        [[ "$h" =~ ^[0-9]+$ ]] || h="$th"
     fi
-    [[ "$c" =~ ^[0-9]+$ ]] || c=$(tput cols 2>/dev/null)
-    [[ "$c" =~ ^[0-9]+$ ]] || c=100
-    printf '%s' "$c"
+    [[ "$w" =~ ^[0-9]+$ ]] || w=$(tput cols 2>/dev/null)
+    [[ "$h" =~ ^[0-9]+$ ]] || h=$(tput lines 2>/dev/null)
+    [[ "$w" =~ ^[0-9]+$ ]] || w=100
+    [[ "$h" =~ ^[0-9]+$ ]] || h=40
+    term_w="$w"
+    term_h="$h"
 }
 
 clip() {
@@ -354,11 +361,15 @@ frame_foot=""
 frame_cols=0
 frame_at=0
 selected=0
+# frame_top — the first frame_rows index on screen; render scrolls it just
+# enough to keep the cursor's row, and its bucket header, in view.
+frame_top=0
 
 build_frame() {
     local cols idx name w_name=0 w_sess=0 w_state=0 bucket last_bucket="" row
     local age headline color n
-    cols=$(term_cols)
+    term_size
+    cols="$term_w"
     frame_cols="$cols"
     frame_at=$(date +%s)
     frame_rows=()
@@ -409,19 +420,44 @@ build_frame() {
 }
 
 render() {
-    local cols now out i sel=-1
-    cols=$(term_cols)
+    local cols now out i sel=-1 body first last total
+    term_size
+    cols="$term_w"
     now=$(date +%s)
     (( cols != frame_cols || now - frame_at >= 30 )) && build_frame
     (( selected < ${#frame_row_line[@]} )) && sel="${frame_row_line[$selected]}"
+    total=${#frame_rows[@]}
+    # head 2 lines, position line 1, foot 3, and its trailing newline would
+    # scroll a full screen up by one.
+    body=$(( term_h - 7 ))
+    (( body < 1 )) && body=1
+    if (( sel >= 0 )); then
+        first="$sel"
+        # Pull the bucket header in with the first row of its bucket.
+        if (( selected == 0 )) || (( ${frame_row_line[$((selected - 1))]} != sel - 1 )); then
+            first=$(( sel - 1 ))
+        fi
+        (( first < frame_top )) && frame_top="$first"
+        (( sel >= frame_top + body )) && frame_top=$(( sel - body + 1 ))
+    fi
+    (( frame_top > total - body )) && frame_top=$(( total - body ))
+    (( frame_top < 0 )) && frame_top=0
+    last=$(( frame_top + body - 1 ))
+    (( last >= total )) && last=$(( total - 1 ))
+
     out="$frame_head"
-    for i in "${!frame_rows[@]}"; do
+    for (( i = frame_top; i <= last; i++ )); do
         if (( i == sel )); then
             out+="${SEL}${frame_rows[$i]}${RST}"$'\n'
         else
             out+="${frame_rows[$i]}"$'\n'
         fi
     done
+    if (( frame_top > 0 || last < total - 1 )); then
+        out+="${DIM}  ↑ ${frame_top} more · ↓ $(( total - 1 - last )) more${RST}"$'\n'
+    else
+        out+=$'\n'
+    fi
     out+="$frame_foot"
     printf '\033[H\033[2J%s' "$out"
 }
