@@ -25,7 +25,9 @@ usage: runners [status]      this repo's runners: set up, running, GitHub's view
        runners start [N]     bring N more runners up (default 1): stopped ones
                              first, then new ones created and registered
        runners stop [N]      stop N running runners, highest number first
-                             (default: all); a busy runner's job is cancelled
+                             (default: all); a busy runner's job is abandoned
+                             and GitHub fails it — a detached listener ignores
+                             SIGINT, so there is no graceful stop
 
 Inside a git repo (hub or worktree) that repo; anywhere else an fzf picker over
 Ctrl+F's project list. Runners live in ~/dev/gha-runners/<repo>/<n>/, named
@@ -108,6 +110,37 @@ github_slug() {
     r="${r%/}"; r="${r%.git}"
     r="${r#*github.com:}"; r="${r#*github.com/}"
     printf '%s' "$r"
+}
+
+# runner_env_strip / runner_env_args — AWS variables dropped before run.sh.
+# `runners start` runs from an interactive shell and an Actions job inherits the
+# runner's whole environment, so whatever happened to be exported in that pane
+# becomes every job's environment until the runner is restarted. AWS_PROFILE is
+# the one that breaks a deploy: a job that configures static credentials still
+# loses to an inherited profile, because the SDK prefers it, and the credential
+# action fails with "Credentials loaded by the SDK do not match the access key
+# ID configured by the action" (observed 2026-09-26). Region and the static keys
+# confuse that action the same way.
+#   `env` is the only way to do this: a child process cannot be handed a clean
+# environment by starting a new shell, because a shell INHERITS what it was
+# given and a login shell only adds to it. `env -i` plus a login shell does
+# start clean, but loses Homebrew — brew shellenv lives in .zshrc, which zsh
+# skips for non-interactive shells — so a job would find no node, aws or
+# flutter.
+runner_env_strip=(
+    AWS_PROFILE AWS_DEFAULT_PROFILE AWS_REGION AWS_DEFAULT_REGION
+    AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+)
+
+# Answers in runner_env_args_out: one `-u <name>` pair per stripped name, for
+# `env` to drop before it execs run.sh.
+runner_env_args_out=()
+runner_env_args() {
+    local v
+    runner_env_args_out=()
+    for v in "${runner_env_strip[@]}"; do
+        runner_env_args_out+=(-u "$v")
+    done
 }
 
 # Sourced (tests/test-runners.sh): hand back the helpers above, run nothing.
@@ -224,7 +257,15 @@ create_runner() {
 
 start_runner() {
     local n="$1" d="$root/$1" i pids
-    nohup "$d/run.sh" >>"$d/run.log" 2>&1 </dev/null &
+    # `env` execs run.sh, so the command line the stop path matches on is
+    # unchanged.
+    #   RUNNER_MANUALLY_TRAP_SIG is deliberately NOT set: it makes run.sh trap
+    # TERM and forward INT to the listener's process group, and a detached
+    # listener has no console and ignores INT — run.sh then blocks in `wait`
+    # and NOTHING exits. Untrapped, TERM kills run.sh outright, which is what
+    # stop_runner relies on.
+    runner_env_args
+    nohup env "${runner_env_args_out[@]}" "$d/run.sh" >>"$d/run.log" 2>&1 </dev/null &
     for (( i = 0; i < 20; i++ )); do
         pids=$(pgrep -f "$d/bin/Runner\.Listener" 2>/dev/null | tr '\n' ' ')
         [[ -n "$pids" ]] && { echo "started #$n (pid ${pids% })"; return 0; }
@@ -234,15 +275,29 @@ start_runner() {
     return 1
 }
 
+# stop_pids <n> — every process of runner <n>, run-helper.sh included. Wider
+# than runner_pids on purpose: an orphaned helper means the runner is not
+# actually stopped, and only the stop path needs to see that.
+stop_pids() {
+    pgrep -f "$root/$1/(run\.sh|run-helper\.sh|bin/Runner\.Listener)" 2>/dev/null | tr '\n' ' '
+}
+
+# stop_runner <n>
+#   TERM run.sh first: it installs no handler, so it dies at once and nothing
+#   relaunches the listener. Then TERM the helper and the listener. No SIGINT
+#   first: INT is the listener's documented graceful exit, but a DETACHED
+#   listener has no console and ignores it — sent one and it was still alive six
+#   seconds later (2026-09-26) — so trying it only adds a wait to every stop.
 stop_runner() {
-    local n="$1" d="$root/$1" i
+    local n="$1" d="$root/$1" i left
     pkill -TERM -f "$d/run\.sh" 2>/dev/null
-    pkill -INT -f "$d/bin/Runner\.Listener" 2>/dev/null
-    for (( i = 0; i < 60; i++ )); do
-        [[ -z "$(runner_pids "$n")" ]] && { echo "stopped #$n"; return 0; }
+    pkill -TERM -f "$d/(run-helper\.sh|bin/Runner\.Listener)" 2>/dev/null
+    for (( i = 0; i < 40; i++ )); do
+        left=$(stop_pids "$n")
+        [[ -z "$left" ]] && { echo "stopped #$n"; return 0; }
         sleep 0.5
     done
-    echo "runners: #$n still running after 30s: $(runner_pids "$n")" >&2
+    echo "runners: #$n still running after 20s: $left" >&2
     return 1
 }
 
