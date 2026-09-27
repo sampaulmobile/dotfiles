@@ -12,13 +12,10 @@ NAME=dev
 # DOCKERFILE=alpine.Dockerfile
 # NAME=dev-alpine
 
-# build the image
 docker build -f $DOCKERFILE -t $NAME ..
 
-# create volume for zsh history
 docker volume create zsh_history
 
-# run container (in background)
 docker run -td \
     --name $NAME \
     --hostname dev-docker \

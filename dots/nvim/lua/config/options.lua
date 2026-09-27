@@ -6,8 +6,8 @@ vim.g.maplocalleader = "\\"
 
 local opt = vim.opt
 
--- Custom options (preserved from original config)
-opt.wrap = false              -- Don't wrap lines
+-- Custom options
+opt.wrap = false
 opt.visualbell = true         -- No sounds
 opt.synmaxcol = 300           -- Stop syntax highlight after x lines for performance
 
@@ -18,12 +18,12 @@ opt.shiftwidth = 4
 opt.expandtab = true
 
 -- Scrolling
-opt.scrolloff = 8             -- Start scrolling 8 lines from top/bottom margin
-opt.sidescrolloff = 15        -- Start scrolling 15 lines from left/right margin
-opt.sidescroll = 1            -- Scroll horizontally by 1 character at time
+opt.scrolloff = 8
+opt.sidescrolloff = 15
+opt.sidescroll = 1
 
 -- Splits
-opt.splitright = false        -- Put new window left of current one
+opt.splitright = false
 
 -- Clipboard
 opt.clipboard = "unnamed"     -- Use OS clipboard

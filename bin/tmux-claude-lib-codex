@@ -20,9 +20,8 @@ classify_codex_pane_status() {
         return
     fi
 
-    # Same windowing as the claude classifier, duplicated on purpose: that
-    # path is hot and well-tested, and not worth disturbing for a dozen
-    # lines.
+    # Same windowing as the claude classifier, duplicated on purpose — do
+    # not merge the two.
     local -a all filtered
     IFS=$'\n' read -rd '' -a all <<< "$raw"
     local line
@@ -174,9 +173,8 @@ _codex_newest_rollout_for_cwd() {
 # codex_get_context_and_model <rollout-path>
 #   Prints tab-separated: context model context_window
 #   Context is the last turn's prompt size; the window comes from the
-#   transcript itself (model_context_window) rather than a per-model table,
-#   so the dashboard needs no codex model list to keep up to date. Reads
-#   only the tail of the file, like its claude counterpart.
+#   transcript itself (model_context_window). Reads only the tail of the
+#   file, like its claude counterpart.
 codex_get_context_and_model() {
     local jsonl="$1"
     [[ ! -f "$jsonl" ]] && printf '0\tunknown\t0' && return
