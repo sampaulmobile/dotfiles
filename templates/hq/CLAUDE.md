@@ -21,7 +21,9 @@ don't re-derive them here.
 
 Coordinator notes for this session:
 
-- Track outstanding delegations; relay results to the user as they land.
+- Track outstanding delegations: read the inbox thread files under
+  `~/.local/state/hq/inbox/` before `state/backlog.md`; relay results to the
+  user as they land.
 - Steering: relay user feedback to the task session by message. If the user
   wants hands-on control, tell them the session name to jump to (Ctrl+F).
 - **Cross-cutting reads** (chat, alerts, email, tickets) → handle here,
