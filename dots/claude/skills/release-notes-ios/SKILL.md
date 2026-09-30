@@ -40,6 +40,18 @@ Style rules:
 
 User-visible changes only. Leave out anything a user would read as "wasn't that always true?" (a compliance or catch-up feature such as account deletion), anything that reads as "fixed bugs I never saw" (a fix for a state most users never hit, e.g. a notification tap landing on the wrong screen), any performance claim without a number, and everything internal (observability, analytics, tests, tooling, refactors, CI). At most 5 bullets, `•` bullets, one line each, plain words, no headers, no exclamation marks, no marketing voice. An App Store reviewer reads this first, so every bullet must be something visible on the build being submitted. Group small related fixes into one bullet ("Loading indicators and reliability fixes for flaky connections") rather than listing each.
 
+A bullet is a label, not a sentence: name the feature, never how it works or what it contains. `Dark mode`, not `Dark mode, with controls in the display settings`; `Photo editor: redesigned toolbar`, not the shape of the redesign. Add detail only when the user needs it to find the thing.
+
+Reference — the register to match:
+
+```
+• Dark mode
+• Share a list: send it to your contacts, recent collaborators, or a link
+• Photo editor: redesigned toolbar
+• Larger text sizes fit properly on every screen
+• Loading indicators and reliability fixes for flaky connections
+```
+
 ## 5. Write and report, then stop
 
 1. Write the bullets to `<iOS dir>/fastlane/metadata/en-US/release_notes.txt`, creating the directories if needed. The file holds the bullets and nothing else.
