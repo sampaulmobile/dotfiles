@@ -69,14 +69,14 @@ WT=$(git -C <repo> worktree list --porcelain | awk -v b="refs/heads/<branch>" '/
 **6. Task session.** Write the Run invocation to a scratch file, then hand it to the launcher:
 
 ```
-cat > /tmp/feature-launch-<SLUG>.md <<'LAUNCH_EOF'
+LAUNCH_FILE=$(mktemp) && cat > "$LAUNCH_FILE" <<'LAUNCH_EOF'
 /feature --run --requester=<REQUESTER> <PASSTHROUGH FLAGS>
 
 Plan: <ABSOLUTE plan path>
 
 <FEATURE / the brief, verbatim>
 LAUNCH_EOF
-~/dotfiles/bin/tmux-task-session --model <ORCH_MODEL> --effort <ORCH_EFFORT> "$WT" "$(cat /tmp/feature-launch-<SLUG>.md)"
+~/dotfiles/bin/tmux-task-session --model <ORCH_MODEL> --effort <ORCH_EFFORT> "$WT" "$(cat "$LAUNCH_FILE")"
 ```
 
 The quoted heredoc delimiter and the `"$(cat ...)"` are what make this exact: the task, the flags and the requester reach Run through a file, never through a string a model retyped. `<PASSTHROUGH FLAGS>` is every flag this Launch received except `--repo=` and `--orchestrator=`, whose seat is already on the claude command line above, and `--requester=`, filled in below. `<REQUESTER>` is that flag's value when Launch received one, else this session's own tmux session name whenever it answers in `ListAgents` — hub or hq alike. Drop `--requester=` entirely only when neither is available, and drop the `Plan:` line when no workplan was given.
@@ -109,7 +109,7 @@ Feature, flags and requester come from the invocation you were started with, whi
 - `mkdir -p .feature` at the worktree root, and ensure it is ignored: append `.feature/` to `$(git rev-parse --git-common-dir)/info/exclude` if not already present. NEVER commit anything under `.feature/`.
 - `.feature/launch-prompt.md` — what Launch asked for, written before this session started. It is the brief of record; re-read it after a `/clear`.
 - `.feature/NOTES.md` — running log. You and every subagent MUST append to it before finishing a step: decisions made and why, dead ends hit, gotchas, flaky tests. Write for a reader with zero memory of this session.
-- `.feature/findings-round-<N>.md` — reviewer output per round, written by you (the orchestrator) from the reviewer subagent's returned report; the reviewer cannot Write it directly.
+- `.feature/findings-round-<N>.md` — reviewer output per round, written by you (the orchestrator) from the reviewer subagent's returned report.
 - `.feature/status.jsonl` — the pipeline status contract, what a coordinator (hq) and `bin/worktrees` read to see where the pipeline is without a transcript. APPEND one JSON line per phase change and whenever the active seat or task changes; never rewrite or delete a line, so the file is also the run's history. The LAST line is the current state: `{"repo","branch","pr" (URL or null),"phase" (plan|gate|implement|review|review-fix|ship|done|stalled),"round","seat" (orchestrator|implementer|reviewer),"task" (one line),"last_commit","pushed" (bool),"updated" (the OUTPUT of `date -u +%Y-%m-%dT%H:%M:%SZ`, never typed from memory — screens publish it as the run's age),"started_by" ("user:/feature" or "hq:<session>" — whoever invoked the pipeline)}`. Tell every subagent to append a line with its `seat`/`task` when it starts and another with `last_commit` when it commits. Append `phase: done` in step 6, `phase: stalled` with the blockers in `task` when the loop stops without shipping.
 
 ### Quick mode (--quick)
