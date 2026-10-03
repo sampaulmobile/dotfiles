@@ -6,24 +6,20 @@
 # are usage() below, the reference a user reads; CLAUDE.md points here
 # rather than restating it.
 #
-# tmux: `g` is the one subcommand group that touches tmux (display,
-# list-clients, has-session, switch-client -c), copied from bin/hq-inbox so
-# the two never drift apart on the same read-only pattern. Terminal size
-# never uses tmux: $COLUMNS/$LINES, then `stty size </dev/tty`, then `tput`
-# — see term_size. `o` shells out to `git -C <repo> remote get-url origin`
-# (read-only) and `open <url>`.
+# tmux: only `g` (go_to_hub/other_client) touches tmux, read-only otherwise.
+# Terminal size never uses tmux: $COLUMNS/$LINES, then `stty size </dev/tty`,
+# then `tput` — see term_size. `o` shells out to
+# `git -C <repo> remote get-url origin` (read-only) and `open <url>`.
 #
 # The screen's ONE write: the interactive viewer stamps
 # $HQ_DECISIONS_DIR/_state/seen (tmp+mv); `--dump` never writes it.
 #
-# Loop shape matches bin/hq-inbox: load_data -> cached build_frame -> paint.
-# Unlike hq-inbox's blocking read, this loop ticks on `read -rsn1 -t 2` to
-# notice new decisions without a manual recollect key — bash 3.2 rejects a
-# fractional -t, so the tick is a whole 2 seconds; see view() for how a
-# timeout is told apart from a key. LIST and DETAIL share one scrolling
-# `paint()`: frame_head/frame_tail/frame_foot are fixed, frame_rows scrolls,
-# and the one line between frame_tail and frame_foot is either a status note
-# or an "N more" scroll indicator.
+# The view loop ticks on `read -rsn1 -t 2` — bash 3.2 rejects a fractional
+# -t, so the tick is a whole 2 seconds; see view() for how a timeout is told
+# apart from a key. LIST and DETAIL share one scrolling `paint()`:
+# frame_head/frame_tail/frame_foot are fixed, frame_rows scrolls, and the
+# one line between frame_tail and frame_foot is either a status note or an
+# "N more" scroll indicator.
 #
 # Width/padding discipline (bash 3.2 gotcha): `printf '%-Ns'` pads by BYTES
 # and `${#x}` counts bytes under a non-UTF-8 locale, so every multi-byte
@@ -276,9 +272,10 @@ decisions_open_pr() {
     STATUS_NOTE="opened PR #$pr"
 }
 
+# other_client/go_to_hub are the only tmux callers in this file: display,
+# list-clients, has-session, switch-client -c.
 # other_client — the tty of the most recently active attached client that is
-# not this one; empty when the inbox is the only client. Copied from
-# bin/hq-inbox's function of the same name.
+# not this one; empty when this screen is the only client.
 other_client() {
     local mine act tty best="" bestact=-1
     mine=$(tmux display -p '#{client_tty}' 2>/dev/null)
@@ -507,7 +504,7 @@ render_list_row() {
     where_rep="${where_padded:0:repo_len}"
     where_rest="${where_padded:repo_len}"
 
-    line="  ${age_c}$(pad "$age" 4 right)${RST}  "
+    line="  ${age_c}$(pad "$(clip "$age" 5)" 5 right)${RST}  "
     line+="${BOLD}${where_rep}${RST}${where_rest}  "
     line+="${title_style}${title_padded}${RST}  "
     line+="${DIM}${asked_padded}${RST}  "
@@ -550,7 +547,7 @@ build_list_frame() {
     local where_w=$(( where_max < 28 ? where_max : 28 ))
     local asked_w=$(( asked_max < 18 ? asked_max : 18 ))
     local last_w=$(( last_max < 32 ? last_max : 32 ))
-    local title_w=$(( term_w - 14 - where_w - asked_w - last_w ))
+    local title_w=$(( term_w - 15 - where_w - asked_w - last_w ))
     local narrow=false
     if (( term_w < 40 )); then
         narrow=true
@@ -561,7 +558,7 @@ build_list_frame() {
             elif (( where_w > 6 )); then where_w=$(( where_w - 1 ))
             else break
             fi
-            title_w=$(( term_w - 14 - where_w - asked_w - last_w ))
+            title_w=$(( term_w - 15 - where_w - asked_w - last_w ))
         done
         (( title_w < 1 )) && title_w=1
     fi
@@ -589,7 +586,8 @@ build_list_frame() {
     if [[ "$narrow" == true ]]; then
         label_line=""
     else
-        label_line="  $(pad AGE 4 right)  $(pad WHERE "$where_w")  $(pad DECISION "$title_w")  $(pad 'ASKED BY' "$asked_w")  RECOMMENDS"
+        label_line="  $(pad AGE 5 right)  $(pad WHERE "$where_w")  $(pad DECISION "$title_w")  $(pad 'ASKED BY' "$asked_w")  RECOMMENDS"
+        label_line="$(clip "$label_line" "$term_w")"
     fi
     frame_head="${header_line}"$'\n\n'
     [[ -n "$label_line" ]] && frame_head+="${DIM}${label_line}${RST}"$'\n'
@@ -604,7 +602,7 @@ build_list_frame() {
                 auto) section_label="AUTO-TAKEN · taken for you, say so to reverse" ;;
                 *)    section_label="ANSWERED" ;;
             esac
-            frame_rows+=("${DIM}${section_label}${RST}")
+            frame_rows+=("${DIM}$(clip "$section_label" "$term_w")${RST}")
             cur_kind="${row_kind[i]}"
         fi
         cursor_map+=("${row_kind[i]}:${row_idx[i]}")
@@ -630,7 +628,8 @@ build_list_frame() {
     fi
 
     frame_tail=""
-    frame_foot="${DIM}j/k move · ⏎ open · a show/hide answered · g jump to hub · q quit${RST}"$'\n'
+    local foot_plain="j/k move · ⏎ open · a show/hide answered · g jump to hub · q quit"
+    frame_foot="${DIM}$(clip "$foot_plain" "$term_w")${RST}"$'\n'
 }
 
 # ── DETAIL frame ────────────────────────────────────────
@@ -661,41 +660,53 @@ append_detail_option() {
         mark="★"; suffix=" · recommended"; head_color="${C_AMBER}${BOLD}"
     fi
 
-    local head="${mark} ${o_id}  ${o_label}${suffix}" wline first=true
+    # Mark column is 2 wide (blank for an unmarked option) so every id in the
+    # block starts at the same offset; description/why/note wrap underneath
+    # the label, indented to that same offset (prefix_w).
+    local mark_col prefix prefix_w rem_w wline first=true indent
+    mark_col="$(pad "$mark" 2)"
+    prefix="${mark_col}${o_id}  "
+    prefix_w=${#prefix}
+    rem_w=$(( dw - prefix_w )); (( rem_w < 1 )) && rem_w=1
     while IFS= read -r wline || [[ -n "$wline" ]]; do
         if [[ "$first" == true ]]; then
-            frame_rows+=("${head_color}${wline}${RST}"); first=false
+            frame_rows+=("${head_color}${prefix}${wline}${RST}"); first=false
         else
-            frame_rows+=("  ${head_color}${wline}${RST}")
+            frame_rows+=("${head_color}$(printf '%*s' "$prefix_w" '')${wline}${RST}")
         fi
-    done <<< "$(wrap_text "$head" "$dw")"
+    done <<< "$(wrap_text "${o_label}${suffix}" "$rem_w")"
 
+    indent="$(printf '%*s' "$prefix_w" '')"
+    local body_w=$(( dw - prefix_w )); (( body_w < 1 )) && body_w=1
     if [[ -n "$o_desc" && "$o_desc" != "-" ]]; then
         while IFS= read -r wline || [[ -n "$wline" ]]; do
-            frame_rows+=("    $wline")
-        done <<< "$(wrap_text "$o_desc" $(( dw - 4 )))"
+            frame_rows+=("${indent}$wline")
+        done <<< "$(wrap_text "$o_desc" "$body_w")"
     fi
     if [[ "$is_rec" == true && -n "${d_why[$idx]}" ]]; then
         while IFS= read -r wline || [[ -n "$wline" ]]; do
-            frame_rows+=("    $wline")
-        done <<< "$(wrap_text "why: ${d_why[$idx]}" $(( dw - 4 )))"
+            frame_rows+=("${indent}$wline")
+        done <<< "$(wrap_text "why: ${d_why[$idx]}" "$body_w")"
     fi
     if [[ "$is_chosen" == true ]]; then
         if [[ -n "${d_anote[$idx]}" ]]; then
             while IFS= read -r wline || [[ -n "$wline" ]]; do
-                frame_rows+=("    $wline")
-            done <<< "$(wrap_text "note: ${d_anote[$idx]}" $(( dw - 4 )))"
+                frame_rows+=("${indent}$wline")
+            done <<< "$(wrap_text "note: ${d_anote[$idx]}" "$body_w")"
         fi
         local verb="answered"; [[ "$detail_section" == auto ]] && verb="taken"
-        frame_rows+=("    ${verb} $(age_of "${d_aat[$idx]}") ago")
+        frame_rows+=("${indent}${verb} $(age_of "${d_aat[$idx]}") ago")
     fi
 }
 
 # build_detail_bar <idx> — the fixed TO ANSWER / TO REVERSE / answered-by
-# bar, wrapped as plain text with the label colored in afterward so the
-# wrap width is never skewed by escape codes.
+# bar. wrap_text re-joins words with single spaces, so it cannot wrap "label
+# message" and keep the label's deliberate 2-space gap: wrap "label message"
+# (one space, same word boundaries wrap_text would use anyway) at
+# (term_w - 1), then splice the second space back into the first line — the
+# reserved column keeps the result within term_w either way.
 build_detail_bar() {
-    local idx="$1" label="" message wrapped first=true wline
+    local idx="$1" label="" message full wrap_w first=true wline
     case "$detail_section" in
         open)
             label="TO ANSWER"
@@ -711,23 +722,30 @@ build_detail_bar() {
             message="answered by you $(age_of "${d_aat[$idx]}") ago"
             ;;
     esac
-    local plain_bar="$message"
-    [[ -n "$label" ]] && plain_bar="${label}  ${message}"
-    wrapped=$(wrap_text "$plain_bar" "$term_w")
+    full="$message"
+    wrap_w="$term_w"
+    if [[ -n "$label" ]]; then
+        full="${label} ${message}"
+        wrap_w=$(( term_w - 1 )); (( wrap_w < 1 )) && wrap_w=1
+    fi
     frame_tail=""
     while IFS= read -r wline || [[ -n "$wline" ]]; do
         if [[ "$first" == true && -n "$label" ]]; then
-            frame_tail+="${DIM}${label}${RST}${wline:${#label}}"$'\n'
+            frame_tail+="${DIM}${label}${RST}  ${wline:$(( ${#label} + 1 ))}"$'\n'
         else
             frame_tail+="${wline}"$'\n'
         fi
         first=false
-    done <<< "$wrapped"
+    done <<< "$(wrap_text "$full" "$wrap_w")"
 }
 
 build_detail_frame() {
     local idx="$LOCATE_IDX" dw
-    decisions_locate_id "$detail_id" && idx="$LOCATE_IDX"
+    if decisions_locate_id "$detail_id"; then
+        idx="$LOCATE_IDX"
+        detail_section="$LOCATE_SECTION"
+        detail_pos="$LOCATE_POS"
+    fi
     dw=$term_w; (( dw > 100 )) && dw=100
 
     local section_word="$detail_section"
@@ -747,18 +765,27 @@ build_detail_frame() {
     else
         line1="${left1} ${right1}"
     fi
+    (( ${#line1} > term_w )) && line1="$(clip "$line1" "$term_w")"
 
-    local state_word verb
+    local state_word state_plain verb
     case "$detail_section" in
-        open)     state_word="${C_AMBER}OPEN${RST}"; verb="asked" ;;
-        auto)     state_word="${C_TEAL}● AUTO-TAKEN${RST}"; verb="taken" ;;
-        *)        state_word="${C_GREEN}✓ ANSWERED${RST}"; verb="answered" ;;
+        open)     state_word="${C_AMBER}OPEN${RST}"; state_plain="OPEN"; verb="asked" ;;
+        auto)     state_word="${C_TEAL}● AUTO-TAKEN${RST}"; state_plain="● AUTO-TAKEN"; verb="taken" ;;
+        *)        state_word="${C_GREEN}✓ ANSWERED${RST}"; state_plain="✓ ANSWERED"; verb="answered" ;;
     esac
     local ref="${d_pr[$idx]}"
     [[ "$ref" != "-" ]] && ref="#${d_pr[$idx]}" || ref="${d_branch[$idx]}"
     local when_iso="${d_created[$idx]}"
     [[ "$detail_section" != open ]] && when_iso="${d_aat[$idx]}"
-    local line2="${state_word} · ${BOLD}${d_repo[$idx]}${RST} · ${ref} · ${verb} $(age_of "$when_iso") ago by $(session_text "${d_session[$idx]}") · ${d_id[$idx]}"
+    local when_age; when_age=$(age_of "$when_iso")
+    local sess_text; sess_text=$(session_text "${d_session[$idx]}")
+    local line2_plain="${state_plain} · ${d_repo[$idx]} · ${ref} · ${verb} ${when_age} ago by ${sess_text} · ${d_id[$idx]}"
+    local line2
+    if (( ${#line2_plain} > term_w )); then
+        line2="$(clip "$line2_plain" "$term_w")"
+    else
+        line2="${state_word} · ${BOLD}${d_repo[$idx]}${RST} · ${ref} · ${verb} ${when_age} ago by ${sess_text} · ${d_id[$idx]}"
+    fi
 
     frame_head="${line1}"$'\n'"${line2}"$'\n'
 
@@ -793,7 +820,8 @@ build_detail_frame() {
 
     build_detail_bar "$idx"
     frame_cursor_line=-1
-    frame_foot="${DIM}J/K next/prev decision · o open PR · g jump to $(session_text "${d_session[$idx]}") · q quit${RST}"$'\n'
+    local foot_plain="J/K next/prev decision · o open PR · g jump to ${sess_text} · q quit"
+    frame_foot="${DIM}$(clip "$foot_plain" "$term_w")${RST}"$'\n'
 }
 
 # ── loop-shared frame/paint ─────────────────────────────
@@ -866,9 +894,10 @@ paint() {
     done
     out+="$frame_tail"
     if (( frame_top > 0 || last < total - 1 )) && [[ -z "$STATUS_NOTE" ]]; then
-        out+="${DIM}  ↑ ${frame_top} more · ↓ $(( total - 1 - last )) more${RST}"$'\n'
+        local scroll_plain="  ↑ ${frame_top} more · ↓ $(( total - 1 - last )) more"
+        out+="${DIM}$(clip "$scroll_plain" "$term_w")${RST}"$'\n'
     else
-        out+="${STATUS_NOTE}"$'\n'
+        out+="$(clip "$STATUS_NOTE" "$term_w")"$'\n'
     fi
     out+="$frame_foot"
     screen_out="$out"
