@@ -14,9 +14,7 @@
 # so a cursor move alone forks nothing. Unlike hq-inbox's blocking read,
 # this loop ticks on `read -rsn1 -t 2` to notice new decisions without a
 # manual recollect key — bash 3.2 rejects a fractional -t, so the tick is a
-# whole 2 seconds, and a timeout is told apart from Enter (both read as an
-# empty key) by read's own exit status: > 128 means the time ran out, 0
-# means a key (Enter included) actually arrived.
+# whole 2 seconds; see view() for how a timeout is told apart from a key.
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 # shellcheck source=/dev/null
@@ -48,7 +46,8 @@ Keys:
   a       show/hide the answered section (shown by default)
   q       quit
 
-Zero decisions recorded prints `no decisions recorded` and nothing else.
+Zero decisions still prints the header (`DECISIONS  0 open · 0 answered`),
+with `no decisions recorded` in place of any cards.
 EOF
 }
 
@@ -84,11 +83,14 @@ clip() {
 # Prints the wrapped lines, one per line, to stdout.
 wrap_text() {
     local text="$1" width="$2" para line word out="" first_para=true
+    local IFS=$' \t\n'
+    local -a words
     (( width < 1 )) && width=1
     while IFS= read -r para || [[ -n "$para" ]]; do
         if [[ "$first_para" == true ]]; then first_para=false; else out+=$'\n'; fi
         line=""
-        for word in $para; do
+        read -ra words <<< "$para"
+        for word in "${words[@]}"; do
             while (( ${#word} > width )); do
                 if [[ -n "$line" ]]; then
                     out+="$line"$'\n'
@@ -248,10 +250,12 @@ append_option_lines() {
     local b64="$1" rec_id="$2" cols="$3" indent="$4" o_id o_label o_desc
     local optline is_rec color wline first wrapped opts
 
-    # Bash 3.2 miscounts the /dev/fd/* slot it hands out when a process
-    # substitution is opened while another is still being read in the same
-    # function, so both loops below read from a captured string (command
-    # substitution + here-string) instead of nesting `< <(...)`.
+    # Observed under this machine's bash 3.2.57: nesting a process
+    # substitution inside a loop that is itself reading one makes the
+    # inner loop's body run zero times (the inner read sees EOF at once,
+    # though the command it reads from does run and produce output) — so
+    # both loops below read from a captured string (command substitution +
+    # here-string) instead of nesting `< <(...)`.
     opts=$(jq -nr --arg b64 "$b64" '
         def flat: gsub("[\t\n]"; " ");
         $b64 | @base64d | fromjson | .[]
@@ -288,7 +292,7 @@ append_option_lines() {
 append_context_lines() {
     local text="$1" cols="$2" indent="$3" wline
     [[ -n "$text" ]] || return 0
-    while IFS= read -r wline; do
+    while IFS= read -r wline || [[ -n "$wline" ]]; do
         frame_rows+=("${indent}${wline}")
     done < <(wrap_text "$text" $(( cols - ${#indent} )))
 }
@@ -366,7 +370,6 @@ build_frame() {
     (( selected < 0 )) && selected=0
 
     frame_foot=$'\n'"${DIM}j/k move · ⏎/space expand-collapse · a toggle answered · q quit${RST}"$'\n'
-    frame_foot+="${DIM}${STATUS_NOTE:-}${RST}"$'\n'
 }
 
 paint() {
@@ -422,11 +425,9 @@ dump() {
 
 # ── entry ───────────────────────────────────────────────
 
-STATUS_NOTE=""
-
 # Enter arrives as the empty string, space as " ". A read -t timeout ALSO
 # leaves the key empty — read's own exit status (> 128 on timeout) is the
-# only way to tell a timeout from Enter; see the file header.
+# only way to tell a timeout from Enter.
 view() {
     local key rc kind idx entry last_sig sig
     tput civis 2>/dev/null
@@ -450,6 +451,8 @@ view() {
                 render
             fi
             continue
+        elif (( rc != 0 )); then
+            exit 0
         fi
         entry=""
         (( ${#cursor_map[@]} > 0 && selected < ${#cursor_map[@]} )) && entry="${cursor_map[$selected]}"
