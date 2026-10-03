@@ -80,9 +80,17 @@ fi
 # $LINES, then tput, then a default. Called bare (never inside $( )) so the
 # globals survive.
 term_size() {
-    local w="${COLUMNS:-}" h="${LINES:-}"
-    [[ "$w" =~ ^[0-9]+$ ]] || w=$(tput cols 2>/dev/null)
-    [[ "$h" =~ ^[0-9]+$ ]] || h=$(tput lines 2>/dev/null)
+    local w="${COLUMNS:-}" h="${LINES:-}" sz
+    # An explicit non-zero COLUMNS/LINES wins. Then stty on the controlling
+    # tty, the only answer that ignores how stdio is wired; tput reads stdout
+    # and reports 80x24 when it cannot.
+    if ! [[ "$w" =~ ^[1-9][0-9]*$ && "$h" =~ ^[1-9][0-9]*$ ]] \
+       && sz=$( { stty size </dev/tty; } 2>/dev/null ) \
+       && [[ "$sz" =~ ^[1-9][0-9]*\ [1-9][0-9]*$ ]]; then
+        h="${sz% *}"; w="${sz#* }"
+    fi
+    [[ "$w" =~ ^[1-9][0-9]*$ ]] || w=$(tput cols 2>/dev/null)
+    [[ "$h" =~ ^[1-9][0-9]*$ ]] || h=$(tput lines 2>/dev/null)
     [[ "$w" =~ ^[0-9]+$ ]] || w=100
     [[ "$h" =~ ^[0-9]+$ ]] || h=40
     term_w="$w"
@@ -505,7 +513,9 @@ view() {
         key=""
         read -rsn1 -t 2 key
         rc=$?
-        if (( rc > 128 )); then
+        # bash 3.2 returns 1 on a read timeout, not >128; on a tty a non-zero
+        # read is the idle tick, never EOF.
+        if (( rc > 128 )) || (( rc != 0 )) && [[ -t 0 ]]; then
             sig=$(decisions_signature)
             if [[ "$sig" != "$last_sig" ]]; then
                 last_sig="$sig"
