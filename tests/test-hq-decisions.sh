@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# bin/hq-decisions: the read-only screen over bin/hq-decision's records.
+# bin/hq-decisions: read-only over bin/hq-decision's records; its one write
+# is _state/seen, interactive viewer only.
 #
 #   tests/test-hq-decisions.sh
 #
@@ -49,7 +50,7 @@ else
     bad "sourcing created the decisions directory" "$HQ_DECISIONS_DIR exists"
 fi
 
-echo "── the screen is read-only and tmux-free"
+echo "── the screen is read-only over the records and tmux-free"
 if ! grep -qwE '\brm\b|rmdir|unlink|-delete' "$HQDS"; then
     ok "the screen contains no deletion"
 else
@@ -70,6 +71,17 @@ if ! grep -qE 'read .*-t *[0-9]*\.[0-9]' "$HQDS"; then
 else
     bad "a fractional read -t is present" "$(grep -nE 'read .*-t *[0-9]*\.[0-9]' "$HQDS")"
 fi
+
+# ── seen-stamp writer/reader round trip ──
+
+echo "── decisions_write_seen/decisions_read_seen_cutoff round trip"
+decisions_write_seen
+seen_file="$HQ_DECISIONS_DIR/_state/seen"
+check "the seen file exists with one ISO line" "$(grep -cE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$seen_file")" "1"
+decisions_read_seen_cutoff
+check "SEEN_CUTOFF_EPOCH is set from it" "$([[ "$SEEN_CUTOFF_EPOCH" -gt 0 ]] && echo yes || echo no)" "yes"
+check "no .tmp. file is left behind" "$(find "$HQ_DECISIONS_DIR/_state" -type f -name '*.tmp.*' | wc -l | tr -d ' ')" "0"
+rm -f "$seen_file"
 
 # ── wrap_text unit cases ──
 

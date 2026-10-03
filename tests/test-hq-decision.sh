@@ -204,6 +204,12 @@ before_json=$(cat "$f6")
 check "answer --auto on a non-recommended option exits 2" "$?" "2"
 check "the file is unchanged" "$(cat "$f6")" "$before_json"
 
+echo "── answer --auto on an already-answered record refuses"
+before_json5=$(cat "$f5")
+"$HQD" answer --auto "$id5" json >/dev/null 2>"$work/e_autoanswered"
+check "answer --auto on an already-answered record exits 1" "$?" "1"
+check "the file is unchanged" "$(cat "$f5")" "$before_json5"
+
 echo "── a plain answer writes answer.by=owner, and --auto is also accepted after OPTION-ID"
 id7=$("$HQD" add --repo proj --pr 22 --title "Pick a timeout" \
     --option 'a|5s' --option 'b|10s' --recommend a)
