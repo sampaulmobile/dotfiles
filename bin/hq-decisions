@@ -1,89 +1,115 @@
 #!/usr/bin/env bash
 # hq-decisions — read-only over bin/hq-decision's records; its one write is
-# _state/seen, interactive viewer only (see below). Every OPEN decision
-# renders as a card (repo/ref, title, age, session, context, options with
-# the recommendation marked), answered ones folded below. Columns, keys and
-# formats are usage() below, the reference a user reads; CLAUDE.md points
-# here rather than restating it.
+# _state/seen, interactive viewer only (see below). Two views: a flat LIST
+# (one line per decision, sections OPEN / AUTO-TAKEN / ANSWERED) and a
+# full-screen DETAIL of one decision (⏎ on a row). Columns, keys and formats
+# are usage() below, the reference a user reads; CLAUDE.md points here
+# rather than restating it.
 #
-# tmux-free: no tmux subcommand anywhere in this file, not even for terminal
-# size (bin/hq-decision may call `tmux display -p` for a session name; this
-# screen never does). Terminal size comes from $COLUMNS/$LINES, then `tput`,
-# then a default — see term_size.
+# tmux: `g` is the one subcommand group that touches tmux (display,
+# list-clients, has-session, switch-client -c), copied from bin/hq-inbox so
+# the two never drift apart on the same read-only pattern. Terminal size
+# never uses tmux: $COLUMNS/$LINES, then `stty size </dev/tty`, then `tput`
+# — see term_size. `o` shells out to `git -C <repo> remote get-url origin`
+# (read-only) and `open <url>`.
 #
 # The screen's ONE write: the interactive viewer stamps
-# $HQ_DECISIONS_DIR/_state/seen (tmp+mv); `--dump` never writes it. Cutoff
-# semantics and format: usage() below.
+# $HQ_DECISIONS_DIR/_state/seen (tmp+mv); `--dump` never writes it.
 #
-# Loop shape matches bin/hq-inbox: load_data -> cached build_frame -> paint,
-# so a cursor move alone forks nothing. Unlike hq-inbox's blocking read,
-# this loop ticks on `read -rsn1 -t 2` to notice new decisions without a
-# manual recollect key — bash 3.2 rejects a fractional -t, so the tick is a
-# whole 2 seconds; see view() for how a timeout is told apart from a key.
+# Loop shape matches bin/hq-inbox: load_data -> cached build_frame -> paint.
+# Unlike hq-inbox's blocking read, this loop ticks on `read -rsn1 -t 2` to
+# notice new decisions without a manual recollect key — bash 3.2 rejects a
+# fractional -t, so the tick is a whole 2 seconds; see view() for how a
+# timeout is told apart from a key. LIST and DETAIL share one scrolling
+# `paint()`: frame_head/frame_tail/frame_foot are fixed, frame_rows scrolls,
+# and the one line between frame_tail and frame_foot is either a status note
+# or an "N more" scroll indicator.
+#
+# Width/padding discipline (bash 3.2 gotcha): `printf '%-Ns'` pads by BYTES
+# and `${#x}` counts bytes under a non-UTF-8 locale, so every multi-byte
+# glyph (★ ● ✓ ›) breaks column math. decisions_ensure_utf8_locale forces a
+# UTF-8 LC_CTYPE so `${#x}` is character-based, and `pad`/`clip` are the only
+# places width is measured — always on PLAIN text, with color codes spliced
+# in afterward so they never count toward a width.
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 # shellcheck source=/dev/null
 source "$DOTFILES/bin/hq-decision"
+# shellcheck source=/dev/null
+source "$DOTFILES/bin/project-dirs-lib"
+
+decisions_ensure_utf8_locale() {
+    case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+        *UTF-8*|*utf8*|*UTF8*) return 0 ;;
+    esac
+    if locale -a 2>/dev/null | grep -qx 'C.UTF-8'; then
+        export LC_CTYPE=C.UTF-8
+    else
+        export LC_CTYPE=en_US.UTF-8
+    fi
+}
+decisions_ensure_utf8_locale
 
 usage() {
     cat <<'EOF'
-usage: hq-decisions            run the viewer in this terminal
-       hq-decisions --dump     print the cards once and exit (no cursor)
+usage: hq-decisions                     run the viewer in this terminal
+       hq-decisions --dump [--answered] print the LIST once and exit
+       hq-decisions --dump --detail ID  print one decision's DETAIL once
 
-One card per OPEN decision (bin/hq-decision), expanded by default; answered
-decisions fold below, one line each, in the order the "Answered order"
-paragraph below gives. Read-only over $HQ_DECISIONS_DIR's records; its one
-write is the seen stamp described below, and it never runs tmux.
+LIST (default): one line per decision, sections in order OPEN (needs you),
+AUTO-TAKEN (taken for you, say so to reverse), ANSWERED (hidden unless `a`
+is pressed or --answered is given); a section with no rows is omitted.
 
-Header: `DECISIONS  N open · M answered`.
+Header: `DECISIONS  N open · M auto-taken · P answered`, then
+`  ● K auto-taken since you last looked` when K > 0, then `updated <age> ago`
+right-aligned when the header fits the terminal width.
 
-An open card:
-  line 1   repo #pr (or repo branch) · title · age · session
-  context  word-wrapped, indented (collapsed cards omit everything below
-           line 1)
-  options  one per line, `id  label — description`; the recommended
-           option is marked with a star and "(recommended)"
+Row: AGE (right-aligned) · WHERE (`repo #pr` or `repo branch`) · TITLE
+(takes all slack, clipped with … when the terminal is too narrow) ·
+ASKED BY (session) · last column: open -> `★ id · label`, auto -> `● id ·
+auto`, answered -> `✓ id · you`. Column widths are recomputed every repaint
+from the terminal width.
 
-An answered row (folded): `repo ref · title · → <chosen label> · age` for an
-owner answer, `... · → <chosen label> (auto) · age` for an auto-taken one.
-Expanding one (Enter/space) shows its note and its options.
+DETAIL (⏎ on a row, esc/backspace back to the list): state (OPEN / ●
+AUTO-TAKEN / ✓ ANSWERED) · repo · pr-or-branch · asked/taken/answered <age>
+ago by <session> · id, then the title, CONTEXT, and OPTIONS (the
+recommended option starred, with its `why` if the record has one; an
+answered record also marks the chosen option and shows its note). The
+bottom bar gives the exact `hq-decision answer` command: TO ANSWER for an
+open decision, TO REVERSE for an auto-taken one, or `answered by you <age>
+ago` once the owner has answered. J/K step to the next/prev decision in the
+same section; j/k scroll the body when it doesn't fit.
 
-Answered order: auto answers from after the cutoff below come first, newest
-first; then every other answered record, newest first. An unseen auto row
-renders at full brightness; every other answered row (including a seen auto
-one) is dimmed. The header gains ` · K auto since you last looked` when
-K > 0.
+Keys, both views:
+  g    jump the other tmux client to the asking session
+  o    open the decision's PR (needs a PR number and a resolvable origin)
+  q    quit
+LIST only:   j/k move · ⏎ open DETAIL · a show/hide ANSWERED
+DETAIL only: j/k scroll · J/K next/prev decision · esc/backspace back
 
 "Since you last looked" cutoff: $HQ_DECISIONS_DIR/_state/seen, one ISO
-timestamp, absent meaning every auto answer is unseen. The interactive
-viewer writes it, now, right after its first paint; `--dump` only reads it.
+timestamp, absent meaning every auto-taken decision is unseen. The
+interactive viewer writes it, now, right after its first paint; `--dump`
+only reads it.
 
-Keys:
-  j / k   move          ⏎ / space   expand or collapse the selected card
-  a       show/hide the answered section (shown by default)
-  q       quit
-
-Zero decisions still prints the header (`DECISIONS  0 open · 0 answered`),
-with `no decisions recorded` in place of any cards.
+Zero decisions still prints the header, with `no decisions recorded` in
+place of any rows.
 EOF
 }
 
 # ── paint ───────────────────────────────────────────────
 
-RST=""; BOLD=""; DIM=""; SEL=""; C_REC=""
+RST=""; BOLD=""; DIM=""; SEL=""; C_AMBER=""; C_TEAL=""; C_GREEN=""
 if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; then
     RST=$'\033[0m'; BOLD=$'\033[1m'; DIM=$'\033[2m'; SEL=$'\033[48;5;236m'
-    C_REC=$'\033[33m'
+    C_AMBER=$'\033[33m'; C_TEAL=$'\033[36m'; C_GREEN=$'\033[32m'
 fi
 
 # term_size — sets term_w and term_h with no tmux call, ever: $COLUMNS/
-# $LINES, then tput, then a default. Called bare (never inside $( )) so the
-# globals survive.
+# $LINES, then stty on the controlling tty, then tput, then a default.
+# Called bare (never inside $( )) so the globals survive.
 term_size() {
     local w="${COLUMNS:-}" h="${LINES:-}" sz
-    # An explicit non-zero COLUMNS/LINES wins. Then stty on the controlling
-    # tty, the only answer that ignores how stdio is wired; tput reads stdout
-    # and reports 80x24 when it cannot.
     if ! [[ "$w" =~ ^[1-9][0-9]*$ && "$h" =~ ^[1-9][0-9]*$ ]] \
        && sz=$( { stty size </dev/tty; } 2>/dev/null ) \
        && [[ "$sz" =~ ^[1-9][0-9]*\ [1-9][0-9]*$ ]]; then
@@ -101,6 +127,27 @@ clip() {
     local t="$1" w="$2"
     (( w < 1 )) && { printf ''; return 0; }
     if (( ${#t} > w )); then printf '%s…' "${t:0:w-1}"; else printf '%s' "$t"; fi
+}
+
+# pad <text> <width> [right] — space-pads PLAIN text to <width> by character
+# count (never `printf '%-Ns'`, which pads by bytes). Never call this on
+# text that already carries color escapes — splice color in after padding.
+pad() {
+    local t="$1" w="$2" align="${3:-left}" n
+    n=$(( w - ${#t} ))
+    (( n < 0 )) && n=0
+    if [[ "$align" == right ]]; then printf '%*s%s' "$n" '' "$t"
+    else printf '%s%*s' "$t" "$n" ''
+    fi
+}
+
+# count_lines <text> — number of newlines in <text>, pure bash (no fork).
+# frame_head/frame_tail/frame_foot each end every line, including the last,
+# in a literal newline, so this is exactly how many screen lines they take.
+count_lines() {
+    local s="$1" nl
+    nl="${s//[^$'\n']/}"
+    printf '%s' "${#nl}"
 }
 
 # wrap_text <text> <width> — pure bash word wrap, no fork: honors embedded
@@ -138,13 +185,20 @@ wrap_text() {
     printf '%s' "$out"
 }
 
-# card_age <ISO> — age formatted like bin/hq-decision's own table; "-" for a
+# age_of <ISO> — age formatted like bin/hq-decision's own table; "-" for a
 # timestamp that does not parse.
-card_age() {
+age_of() {
     local epoch
     epoch=$(decision_epoch "$1")
     [[ -n "$epoch" ]] || { printf '-'; return 0; }
     decision_fmt_secs $(( $(date +%s) - epoch ))
+}
+
+# session_text <session> — "-"/empty (no session on the record) renders as
+# "the hub" everywhere a session name is shown.
+session_text() {
+    local s="$1"
+    [[ -z "$s" || "$s" == "-" ]] && printf 'the hub' || printf '%s' "$s"
 }
 
 # ── seen cutoff ─────────────────────────────────────────
@@ -178,118 +232,196 @@ decisions_write_seen() {
     mv -f "$tmp" "$f"
 }
 
+# ── PR / hub lookups (read-only) ───────────────────────
+
+# decisions_repo_dir <repo> — the first project_dirs() entry whose basename
+# is <repo> and whose .git is a directory (the repo's main checkout, never a
+# linked worktree). Empty/failure when none matches.
+decisions_repo_dir() {
+    local repo="$1" d base
+    project_dirs
+    for d in ${project_dirs_out[@]+"${project_dirs_out[@]}"}; do
+        base="${d##*/}"
+        [[ "$base" == "$repo" ]] || continue
+        [[ -d "$d/.git" ]] || continue
+        printf '%s' "$d"
+        return 0
+    done
+    return 1
+}
+
+# decisions_pr_url <origin> <pr> — pure: maps a github.com origin (ssh,
+# ssh://, or https, .git optional) to its PR URL; empty for anything else.
+decisions_pr_url() {
+    local origin="$1" pr="$2" rest
+    case "$origin" in
+        git@github.com:*) rest="${origin#git@github.com:}" ;;
+        ssh://git@github.com/*) rest="${origin#ssh://git@github.com/}" ;;
+        https://github.com/*) rest="${origin#https://github.com/}" ;;
+        *) return 1 ;;
+    esac
+    rest="${rest%.git}"
+    [[ "$rest" == */* ]] || return 1
+    printf 'https://github.com/%s/pull/%s' "$rest" "$pr"
+}
+
+decisions_open_pr() {
+    local idx="$1" repo pr dir origin url
+    repo="${d_repo[$idx]}"; pr="${d_pr[$idx]}"
+    if [[ -z "$pr" || "$pr" == "-" ]]; then STATUS_NOTE="no PR"; return 0; fi
+    dir=$(decisions_repo_dir "$repo") || { STATUS_NOTE="no PR"; return 0; }
+    origin=$(git -C "$dir" remote get-url origin 2>/dev/null) || { STATUS_NOTE="no PR"; return 0; }
+    url=$(decisions_pr_url "$origin" "$pr") || { STATUS_NOTE="no PR"; return 0; }
+    open "$url" >/dev/null 2>&1 &
+    STATUS_NOTE="opened PR #$pr"
+}
+
+# other_client — the tty of the most recently active attached client that is
+# not this one; empty when the inbox is the only client. Copied from
+# bin/hq-inbox's function of the same name.
+other_client() {
+    local mine act tty best="" bestact=-1
+    mine=$(tmux display -p '#{client_tty}' 2>/dev/null)
+    while read -r act tty; do
+        [[ -n "$tty" && "$tty" != "$mine" ]] || continue
+        [[ "$act" =~ ^[0-9]+$ ]] || continue
+        if (( act > bestact )); then bestact="$act"; best="$tty"; fi
+    done < <(tmux list-clients -F '#{client_activity} #{client_tty}' 2>/dev/null)
+    printf '%s' "$best"
+}
+
+go_to_hub() {
+    local session="$1" tty
+    if [[ -z "$session" || "$session" == "-" ]]; then
+        STATUS_NOTE="no hub session"
+        return 0
+    fi
+    if ! tmux has-session -t "=$session" 2>/dev/null; then
+        STATUS_NOTE="$session is not running"
+        return 0
+    fi
+    tty=$(other_client)
+    if [[ -z "$tty" ]]; then
+        STATUS_NOTE="no other client — the hub is $session"
+        return 0
+    fi
+    tmux switch-client -c "$tty" -t "=$session" 2>/dev/null
+    STATUS_NOTE="sent $tty to $session"
+}
+
 # ── data ────────────────────────────────────────────────
 
 d_id=(); d_repo=(); d_pr=(); d_branch=(); d_title=(); d_context=()
-d_recommend=(); d_session=(); d_created=(); d_state=()
-d_aopt=(); d_anote=(); d_aat=(); d_aby=(); d_aunseen=(); d_opts_b64=()
-open_order=(); answered_order=()
-n_open=0; n_answered=0; n_unseen_auto=0
-total_count=0
+d_recommend=(); d_rec_label=(); d_session=(); d_created=(); d_updated=()
+d_state=(); d_aopt=(); d_anote=(); d_aat=(); d_aby=(); d_ans_label=()
+d_why=(); d_opts_b64=()
+open_order=(); auto_order=(); ans_order=()
+n_open=0; n_auto=0; n_answered=0; n_unseen_auto=0; total_count=0
+store_newest_updated_iso=""
 
-# collapsed_open / expanded_answered — ids that differ from their card's
-# default (open starts expanded, answered starts collapsed), keyed by id so
-# a toggle survives a reload even if the record order shifts. No
-# associative arrays (bash 3.2): a space-padded id list, substring-matched.
-collapsed_open=" "
-expanded_answered=" "
-
-card_is_expanded() {
-    local kind="$1" id="$2"
-    if [[ "$kind" == open ]]; then
-        case "$collapsed_open" in *" $id "*) return 1 ;; *) return 0 ;; esac
-    else
-        case "$expanded_answered" in *" $id "*) return 0 ;; *) return 1 ;; esac
-    fi
-}
-
-card_toggle() {
-    local kind="$1" id="$2"
-    if [[ "$kind" == open ]]; then
-        if card_is_expanded open "$id"; then
-            collapsed_open+="$id "
-        else
-            collapsed_open="${collapsed_open/ $id / }"
-        fi
-    else
-        if card_is_expanded answered "$id"; then
-            expanded_answered="${expanded_answered/ $id / }"
-        else
-            expanded_answered+="$id "
-        fi
-    fi
-}
-
+# load_data — one decision_records call, one jq pass to TSV (recommend and
+# answer labels resolved here so no per-row jq at LIST paint time), then
+# three ordered index arrays: open_order (open, newest created first),
+# auto_order (answer.by=auto, unseen before seen, newest answer.at first
+# within each group), ans_order (answer.by=owner, newest answer.at first).
 load_data() {
     local recs tsv i
-    local f_id f_repo f_pr f_branch f_title f_context f_recommend f_session
-    local f_created f_state f_aopt f_anote f_aat f_aby f_opts
-    local sortable_open="" sortable_ans=""
+    local f_id f_repo f_pr f_branch f_title f_context f_recommend f_rec_label
+    local f_session f_created f_updated f_state f_aopt f_anote f_aat f_aby
+    local f_ans_label f_why f_opts
+    local sortable_open="" sortable_auto="" sortable_ans=""
+    local newest_epoch=-1 newest_iso=""
 
     d_id=(); d_repo=(); d_pr=(); d_branch=(); d_title=(); d_context=()
-    d_recommend=(); d_session=(); d_created=(); d_state=()
-    d_aopt=(); d_anote=(); d_aat=(); d_aby=(); d_aunseen=(); d_opts_b64=()
-    open_order=(); answered_order=()
-    n_open=0; n_answered=0; n_unseen_auto=0; total_count=0
+    d_recommend=(); d_rec_label=(); d_session=(); d_created=(); d_updated=()
+    d_state=(); d_aopt=(); d_anote=(); d_aat=(); d_aby=(); d_ans_label=()
+    d_why=(); d_opts_b64=()
+    open_order=(); auto_order=(); ans_order=()
+    n_open=0; n_auto=0; n_answered=0; n_unseen_auto=0; total_count=0
+    store_newest_updated_iso=""
 
     recs=$(decision_records)
     [[ -n "$recs" ]] || return 0
 
     tsv=$(printf '%s\n' "$recs" | jq -r '
         def esc: if . == null then "" else (gsub("\t"; " ") | gsub("\n"; "\\n")) end;
-        [
+        . as $r
+        | ($r.options // []) as $opts
+        | ($opts | map(select(.id == $r.recommend)) | (.[0].label // $r.recommend)) as $rlabel
+        | ($r.answer.option // "-") as $aopt
+        | (if $aopt == "-" then "-"
+           else ($opts | map(select(.id == $aopt)) | (.[0].label // $aopt)) end) as $alabel
+        | [
             .id, .repo,
             (if .pr != null then (.pr | tostring) else "-" end),
             (if .branch != null then .branch else "-" end),
             (.title | esc), (.context | esc),
-            .recommend, .session, .created, .state,
-            (if .answer != null then .answer.option else "-" end),
+            .recommend, ($rlabel | esc), .session, .created, .updated, .state,
+            $aopt,
             (if .answer != null then (.answer.note | esc) else "-" end),
             (if .answer != null then .answer.at else "-" end),
             (if .answer != null then .answer.by else "-" end),
+            ($alabel | esc),
+            ((.why // "") | esc),
             (.options | tostring | @base64)
         ] | map(if . == "" then "-" else . end) | join("\t")
     ')
 
     i=0
     while IFS=$'\t' read -r f_id f_repo f_pr f_branch f_title f_context \
-        f_recommend f_session f_created f_state f_aopt f_anote f_aat f_aby f_opts; do
+        f_recommend f_rec_label f_session f_created f_updated f_state \
+        f_aopt f_anote f_aat f_aby f_ans_label f_why f_opts; do
         [[ -n "$f_id" ]] || continue
         [[ "$f_context" == "-" ]] && f_context=""
         f_context="${f_context//\\n/$'\n'}"
         [[ "$f_anote" == "-" ]] && f_anote=""
         f_anote="${f_anote//\\n/$'\n'}"
+        [[ "$f_why" == "-" ]] && f_why=""
+        f_why="${f_why//\\n/$'\n'}"
         d_id+=("$f_id"); d_repo+=("$f_repo"); d_pr+=("$f_pr"); d_branch+=("$f_branch")
         d_title+=("$f_title"); d_context+=("$f_context")
-        d_recommend+=("$f_recommend"); d_session+=("$f_session")
-        d_created+=("$f_created"); d_state+=("$f_state")
+        d_recommend+=("$f_recommend"); d_rec_label+=("$f_rec_label")
+        d_session+=("$f_session"); d_created+=("$f_created"); d_updated+=("$f_updated")
+        d_state+=("$f_state")
         d_aopt+=("$f_aopt"); d_anote+=("$f_anote"); d_aat+=("$f_aat"); d_aby+=("$f_aby")
-        d_opts_b64+=("$f_opts")
+        d_ans_label+=("$f_ans_label"); d_why+=("$f_why"); d_opts_b64+=("$f_opts")
+
+        local upd_epoch
+        upd_epoch=$(decision_epoch "$f_updated")
+        if [[ -n "$upd_epoch" ]] && (( upd_epoch > newest_epoch )); then
+            newest_epoch="$upd_epoch"; newest_iso="$f_updated"
+        fi
+
         if [[ "$f_state" == open ]]; then
             sortable_open+="${f_created}"$'\t'"${i}"$'\n'
             n_open=$(( n_open + 1 ))
-            d_aunseen+=("false")
-        else
-            local at_epoch tier="1" unseen="false"
+        elif [[ "$f_aby" == auto ]]; then
+            local at_epoch tier="1"
             at_epoch=$(decision_epoch "$f_aat")
-            if [[ "$f_aby" == auto && -n "$at_epoch" ]] && (( at_epoch > SEEN_CUTOFF_EPOCH )); then
-                tier="0"; unseen="true"
+            if [[ -n "$at_epoch" ]] && (( at_epoch > SEEN_CUTOFF_EPOCH )); then
+                tier="0"
                 n_unseen_auto=$(( n_unseen_auto + 1 ))
             fi
-            d_aunseen+=("$unseen")
-            sortable_ans+="${tier}"$'\t'"${f_aat}"$'\t'"${i}"$'\n'
+            sortable_auto+="${tier}"$'\t'"${f_aat}"$'\t'"${i}"$'\n'
+            n_auto=$(( n_auto + 1 ))
+        else
+            sortable_ans+="${f_aat}"$'\t'"${i}"$'\n'
             n_answered=$(( n_answered + 1 ))
         fi
         i=$(( i + 1 ))
     done <<< "$tsv"
     total_count="$i"
+    store_newest_updated_iso="$newest_iso"
 
     while IFS=$'\t' read -r _ i; do
         [[ -n "$i" ]] && open_order+=("$i")
     done < <(printf '%s' "$sortable_open" | sort -t$'\t' -k1,1r)
     while IFS=$'\t' read -r _ _ i; do
-        [[ -n "$i" ]] && answered_order+=("$i")
-    done < <(printf '%s' "$sortable_ans" | sort -t$'\t' -k1,1n -k2,2r)
+        [[ -n "$i" ]] && auto_order+=("$i")
+    done < <(printf '%s' "$sortable_auto" | sort -t$'\t' -k1,1n -k2,2r)
+    while IFS=$'\t' read -r _ i; do
+        [[ -n "$i" ]] && ans_order+=("$i")
+    done < <(printf '%s' "$sortable_ans" | sort -t$'\t' -k1,1r)
 }
 
 # decisions_signature — one `ls` fork over every record file's mtime, the
@@ -298,162 +430,423 @@ decisions_signature() {
     ls -lnT "$DECISIONS_DIR"/*/*.json 2>/dev/null
 }
 
-# ── frame ───────────────────────────────────────────────
+# decisions_locate_id <id> — sets LOCATE_IDX/LOCATE_SECTION/LOCATE_POS for
+# the record with this id; fails when no such record is loaded.
+decisions_locate_id() {
+    local id="$1" i j
+    for i in "${!d_id[@]}"; do
+        [[ "${d_id[$i]}" == "$id" ]] || continue
+        LOCATE_IDX="$i"
+        if [[ "${d_state[$i]}" == open ]]; then LOCATE_SECTION=open
+        elif [[ "${d_aby[$i]}" == auto ]]; then LOCATE_SECTION=auto
+        else LOCATE_SECTION=answered
+        fi
+        local -a oa=()
+        case "$LOCATE_SECTION" in
+            open) oa=(${open_order[@]+"${open_order[@]}"}) ;;
+            auto) oa=(${auto_order[@]+"${auto_order[@]}"}) ;;
+            answered) oa=(${ans_order[@]+"${ans_order[@]}"}) ;;
+        esac
+        LOCATE_POS=0
+        for j in "${!oa[@]}"; do
+            [[ "${oa[$j]}" == "$i" ]] && { LOCATE_POS="$j"; break; }
+        done
+        return 0
+    done
+    return 1
+}
 
-frame_rows=()
-frame_row_line=()
-frame_head=""
-frame_foot=""
-frame_cols=0
-frame_at=0
-selected=0
-frame_top=0
-cursor_map=()
-show_answered=true
+# decisions_other_option <idx> <chosen-id> — the first option id of record
+# <idx> that is not <chosen-id>, for the TO REVERSE bar.
+decisions_other_option() {
+    local idx="$1" chosen="$2"
+    jq -nr --arg b64 "${d_opts_b64[$idx]}" --arg c "$chosen" \
+        '$b64 | @base64d | fromjson | map(select(.id != $c)) | (.[0].id // empty)'
+}
 
-append_option_lines() {
-    local b64="$1" rec_id="$2" cols="$3" indent="$4" o_id o_label o_desc
-    local optline is_rec color wline first wrapped opts
+# ── LIST frame ──────────────────────────────────────────
 
-    # Observed under this machine's bash 3.2.57: nesting a process
-    # substitution inside a loop that is itself reading one makes the
-    # inner loop's body run zero times (the inner read sees EOF at once,
-    # though the command it reads from does run and produce output) — so
-    # both loops below read from a captured string (command substitution +
-    # here-string) instead of nesting `< <(...)`.
-    opts=$(jq -nr --arg b64 "$b64" '
+# list_where <idx> — "<repo> #<pr>" or "<repo> <branch>", plain text.
+list_where() {
+    local idx="$1" s="${d_repo[$idx]}"
+    if [[ "${d_pr[$idx]}" != "-" ]]; then s+=" #${d_pr[$idx]}"
+    elif [[ "${d_branch[$idx]}" != "-" ]]; then s+=" ${d_branch[$idx]}"
+    fi
+    printf '%s' "$s"
+}
+
+# render_list_row — one row's display string. Widths are pre-computed by
+# build_list_frame; every field is clipped (plain) and padded (plain)
+# before any color is spliced in, so color escapes never skew a width.
+render_list_row() {
+    local idx="$1" kind="$2" where="$3" asked="$4" last="$5" age="$6"
+    local where_w="$7" title_w="$8" asked_w="$9" last_w="${10}" narrow="${11}"
+    local title="${d_title[$idx]}"
+    if [[ "$narrow" == true ]]; then
+        clip "  ${age}  ${where}  ${title}  ${asked}  ${last}" "$term_w"
+        return 0
+    fi
+    local age_c last_c title_style
+    case "$kind" in
+        open)     age_c="$C_AMBER"; last_c="$C_AMBER"; title_style="$BOLD" ;;
+        auto)     age_c="$C_TEAL";  last_c="$C_TEAL";  title_style=""     ;;
+        *)        age_c="$DIM";     last_c="$C_GREEN"; title_style="$DIM" ;;
+    esac
+    local where_clip title_clip asked_clip last_clip repo_len
+    where_clip=$(clip "$where" "$where_w")
+    title_clip=$(clip "$title" "$title_w")
+    asked_clip=$(clip "$asked" "$asked_w")
+    last_clip=$(clip "$last" "$last_w")
+    repo_len=${#d_repo[$idx]}
+    (( repo_len > ${#where_clip} )) && repo_len=${#where_clip}
+
+    local where_padded title_padded asked_padded where_rep where_rest line
+    where_padded=$(pad "$where_clip" "$where_w")
+    title_padded=$(pad "$title_clip" "$title_w")
+    asked_padded=$(pad "$asked_clip" "$asked_w")
+    where_rep="${where_padded:0:repo_len}"
+    where_rest="${where_padded:repo_len}"
+
+    line="  ${age_c}$(pad "$age" 4 right)${RST}  "
+    line+="${BOLD}${where_rep}${RST}${where_rest}  "
+    line+="${title_style}${title_padded}${RST}  "
+    line+="${DIM}${asked_padded}${RST}  "
+    line+="${last_c}${last_clip}${RST}"
+    printf '%s' "$line"
+}
+
+build_list_frame() {
+    local -a row_idx=() row_kind=() row_where=() row_asked=() row_last=() row_age=()
+    local i
+
+    for i in ${open_order[@]+"${open_order[@]}"}; do
+        row_idx+=("$i"); row_kind+=("open")
+        row_where+=("$(list_where "$i")"); row_asked+=("${d_session[$i]}")
+        row_last+=("★ ${d_recommend[$i]} · ${d_rec_label[$i]}")
+        row_age+=("$(age_of "${d_created[$i]}")")
+    done
+    for i in ${auto_order[@]+"${auto_order[@]}"}; do
+        row_idx+=("$i"); row_kind+=("auto")
+        row_where+=("$(list_where "$i")"); row_asked+=("${d_session[$i]}")
+        row_last+=("● ${d_aopt[$i]} · auto")
+        row_age+=("$(age_of "${d_aat[$i]}")")
+    done
+    if [[ "$show_answered" == true ]]; then
+        for i in ${ans_order[@]+"${ans_order[@]}"}; do
+            row_idx+=("$i"); row_kind+=("answered")
+            row_where+=("$(list_where "$i")"); row_asked+=("${d_session[$i]}")
+            row_last+=("✓ ${d_aopt[$i]} · you")
+            row_age+=("$(age_of "${d_aat[$i]}")")
+        done
+    fi
+
+    local n=${#row_idx[@]}
+    local where_max=5 asked_max=8 last_max=10
+    for (( i = 0; i < n; i++ )); do
+        (( ${#row_where[i]} > where_max )) && where_max=${#row_where[i]}
+        (( ${#row_asked[i]} > asked_max )) && asked_max=${#row_asked[i]}
+        (( ${#row_last[i]} > last_max )) && last_max=${#row_last[i]}
+    done
+    local where_w=$(( where_max < 28 ? where_max : 28 ))
+    local asked_w=$(( asked_max < 18 ? asked_max : 18 ))
+    local last_w=$(( last_max < 32 ? last_max : 32 ))
+    local title_w=$(( term_w - 14 - where_w - asked_w - last_w ))
+    local narrow=false
+    if (( term_w < 40 )); then
+        narrow=true
+    else
+        while (( title_w < 12 )); do
+            if (( last_w > 6 )); then last_w=$(( last_w - 1 ))
+            elif (( asked_w > 6 )); then asked_w=$(( asked_w - 1 ))
+            elif (( where_w > 6 )); then where_w=$(( where_w - 1 ))
+            else break
+            fi
+            title_w=$(( term_w - 14 - where_w - asked_w - last_w ))
+        done
+        (( title_w < 1 )) && title_w=1
+    fi
+
+    local plain_left="DECISIONS  ${n_open} open · ${n_auto} auto-taken · ${n_answered} answered"
+    local plain_extra="" colored_extra=""
+    if (( n_unseen_auto > 0 )); then
+        plain_extra="  ● ${n_unseen_auto} auto-taken since you last looked"
+        colored_extra="  ${C_TEAL}● ${n_unseen_auto} auto-taken since you last looked${RST}"
+    fi
+    local plain_full="${plain_left}${plain_extra}"
+    local colored_left="${BOLD}DECISIONS${RST}  ${n_open} open · ${n_auto} auto-taken · ${n_answered} answered"
+    local age_part="" header_line
+    [[ -n "$store_newest_updated_iso" ]] && age_part="updated $(age_of "$store_newest_updated_iso") ago"
+    local pad_n=$(( term_w - ${#plain_full} - ${#age_part} ))
+    if (( ${#plain_full} > term_w )); then
+        header_line="$(clip "$plain_full" "$term_w")"
+    elif [[ -n "$age_part" ]] && (( pad_n >= 1 )); then
+        header_line="${colored_left}${colored_extra}$(printf '%*s' "$pad_n" '')${age_part}"
+    else
+        header_line="${colored_left}${colored_extra}"
+    fi
+
+    local label_line
+    if [[ "$narrow" == true ]]; then
+        label_line=""
+    else
+        label_line="  $(pad AGE 4 right)  $(pad WHERE "$where_w")  $(pad DECISION "$title_w")  $(pad 'ASKED BY' "$asked_w")  RECOMMENDS"
+    fi
+    frame_head="${header_line}"$'\n\n'
+    [[ -n "$label_line" ]] && frame_head+="${DIM}${label_line}${RST}"$'\n'
+
+    frame_rows=(); cursor_map=(); frame_row_line=()
+    local cur_kind="" section_label
+    for (( i = 0; i < n; i++ )); do
+        if [[ "${row_kind[i]}" != "$cur_kind" ]]; then
+            (( ${#frame_rows[@]} > 0 )) && frame_rows+=("")
+            case "${row_kind[i]}" in
+                open) section_label="OPEN · needs you" ;;
+                auto) section_label="AUTO-TAKEN · taken for you, say so to reverse" ;;
+                *)    section_label="ANSWERED" ;;
+            esac
+            frame_rows+=("${DIM}${section_label}${RST}")
+            cur_kind="${row_kind[i]}"
+        fi
+        cursor_map+=("${row_kind[i]}:${row_idx[i]}")
+        frame_row_line+=("${#frame_rows[@]}")
+        frame_rows+=("$(render_list_row "${row_idx[i]}" "${row_kind[i]}" "${row_where[i]}" \
+            "${row_asked[i]}" "${row_last[i]}" "${row_age[i]}" \
+            "$where_w" "$title_w" "$asked_w" "$last_w" "$narrow")")
+    done
+    (( n == 0 )) && frame_rows+=("  ${DIM}no decisions recorded${RST}")
+
+    local k ent eidx
+    for k in "${!cursor_map[@]}"; do
+        ent="${cursor_map[$k]}"; eidx="${ent#*:}"
+        if [[ "${d_id[$eidx]}" == "$selected_id" ]]; then selected="$k"; break; fi
+    done
+    (( selected >= ${#cursor_map[@]} )) && selected=$(( ${#cursor_map[@]} - 1 ))
+    (( selected < 0 )) && selected=0
+    frame_cursor_line=-1
+    if (( ${#cursor_map[@]} > 0 )); then
+        ent="${cursor_map[$selected]}"; eidx="${ent#*:}"
+        selected_id="${d_id[$eidx]}"
+        frame_cursor_line="${frame_row_line[$selected]}"
+    fi
+
+    frame_tail=""
+    frame_foot="${DIM}j/k move · ⏎ open · a show/hide answered · g jump to hub · q quit${RST}"$'\n'
+}
+
+# ── DETAIL frame ────────────────────────────────────────
+
+# append_detail_option <idx> <o_id> <o_label> <o_desc> <width> — one
+# OPTIONS block: head line(s), wrapped description, `why` on the
+# recommended option, and (for an answered record) the chosen option's note
+# and answer age.
+append_detail_option() {
+    local idx="$1" o_id="$2" o_label="$3" o_desc="$4" dw="$5"
+    local is_rec=false is_chosen=false
+    [[ "$o_id" == "${d_recommend[$idx]}" ]] && is_rec=true
+    [[ "${d_aopt[$idx]}" != "-" && "$o_id" == "${d_aopt[$idx]}" ]] && is_chosen=true
+
+    local mark=" " suffix="" head_color=""
+    if [[ "$detail_section" == open ]]; then
+        if [[ "$is_rec" == true ]]; then
+            mark="★"; suffix=" · recommended"; head_color="${C_AMBER}${BOLD}"
+        fi
+    elif [[ "$is_chosen" == true ]]; then
+        if [[ "$detail_section" == auto ]]; then mark="●"; head_color="$C_TEAL"
+        else mark="✓"; head_color="$C_GREEN"
+        fi
+        if [[ "$o_id" == "${d_recommend[$idx]}" ]]; then suffix=" · was the recommendation"
+        else suffix=" · owner chose"
+        fi
+    elif [[ "$is_rec" == true ]]; then
+        mark="★"; suffix=" · recommended"; head_color="${C_AMBER}${BOLD}"
+    fi
+
+    local head="${mark} ${o_id}  ${o_label}${suffix}" wline first=true
+    while IFS= read -r wline || [[ -n "$wline" ]]; do
+        if [[ "$first" == true ]]; then
+            frame_rows+=("${head_color}${wline}${RST}"); first=false
+        else
+            frame_rows+=("  ${head_color}${wline}${RST}")
+        fi
+    done <<< "$(wrap_text "$head" "$dw")"
+
+    if [[ -n "$o_desc" && "$o_desc" != "-" ]]; then
+        while IFS= read -r wline || [[ -n "$wline" ]]; do
+            frame_rows+=("    $wline")
+        done <<< "$(wrap_text "$o_desc" $(( dw - 4 )))"
+    fi
+    if [[ "$is_rec" == true && -n "${d_why[$idx]}" ]]; then
+        while IFS= read -r wline || [[ -n "$wline" ]]; do
+            frame_rows+=("    $wline")
+        done <<< "$(wrap_text "why: ${d_why[$idx]}" $(( dw - 4 )))"
+    fi
+    if [[ "$is_chosen" == true ]]; then
+        if [[ -n "${d_anote[$idx]}" ]]; then
+            while IFS= read -r wline || [[ -n "$wline" ]]; do
+                frame_rows+=("    $wline")
+            done <<< "$(wrap_text "note: ${d_anote[$idx]}" $(( dw - 4 )))"
+        fi
+        local verb="answered"; [[ "$detail_section" == auto ]] && verb="taken"
+        frame_rows+=("    ${verb} $(age_of "${d_aat[$idx]}") ago")
+    fi
+}
+
+# build_detail_bar <idx> — the fixed TO ANSWER / TO REVERSE / answered-by
+# bar, wrapped as plain text with the label colored in afterward so the
+# wrap width is never skewed by escape codes.
+build_detail_bar() {
+    local idx="$1" label="" message wrapped first=true wline
+    case "$detail_section" in
+        open)
+            label="TO ANSWER"
+            message="tell $(session_text "${d_session[$idx]}") \"go with ${d_recommend[$idx]}\" — it records: hq-decision answer ${d_id[$idx]} ${d_recommend[$idx]}"
+            ;;
+        auto)
+            local other
+            other=$(decisions_other_option "$idx" "${d_aopt[$idx]}")
+            label="TO REVERSE"
+            message="tell $(session_text "${d_session[$idx]}") \"reverse ${d_id[$idx]}, ${other} instead\" — it re-records as yours: hq-decision answer ${d_id[$idx]} ${other}"
+            ;;
+        *)
+            message="answered by you $(age_of "${d_aat[$idx]}") ago"
+            ;;
+    esac
+    local plain_bar="$message"
+    [[ -n "$label" ]] && plain_bar="${label}  ${message}"
+    wrapped=$(wrap_text "$plain_bar" "$term_w")
+    frame_tail=""
+    while IFS= read -r wline || [[ -n "$wline" ]]; do
+        if [[ "$first" == true && -n "$label" ]]; then
+            frame_tail+="${DIM}${label}${RST}${wline:${#label}}"$'\n'
+        else
+            frame_tail+="${wline}"$'\n'
+        fi
+        first=false
+    done <<< "$wrapped"
+}
+
+build_detail_frame() {
+    local idx="$LOCATE_IDX" dw
+    decisions_locate_id "$detail_id" && idx="$LOCATE_IDX"
+    dw=$term_w; (( dw > 100 )) && dw=100
+
+    local section_word="$detail_section"
+    [[ "$section_word" == auto ]] && section_word="auto-taken"
+    local section_len=0
+    case "$detail_section" in
+        open) section_len=${#open_order[@]} ;;
+        auto) section_len=${#auto_order[@]} ;;
+        *)    section_len=${#ans_order[@]} ;;
+    esac
+    local left1="‹ esc  back to list"
+    local right1="decision $(( detail_pos + 1 )) of ${section_len} ${section_word}"
+    local pad1=$(( term_w - ${#left1} - ${#right1} ))
+    local line1
+    if (( pad1 >= 1 )); then
+        line1="${left1}$(printf '%*s' "$pad1" '')${right1}"
+    else
+        line1="${left1} ${right1}"
+    fi
+
+    local state_word verb
+    case "$detail_section" in
+        open)     state_word="${C_AMBER}OPEN${RST}"; verb="asked" ;;
+        auto)     state_word="${C_TEAL}● AUTO-TAKEN${RST}"; verb="taken" ;;
+        *)        state_word="${C_GREEN}✓ ANSWERED${RST}"; verb="answered" ;;
+    esac
+    local ref="${d_pr[$idx]}"
+    [[ "$ref" != "-" ]] && ref="#${d_pr[$idx]}" || ref="${d_branch[$idx]}"
+    local when_iso="${d_created[$idx]}"
+    [[ "$detail_section" != open ]] && when_iso="${d_aat[$idx]}"
+    local line2="${state_word} · ${BOLD}${d_repo[$idx]}${RST} · ${ref} · ${verb} $(age_of "$when_iso") ago by $(session_text "${d_session[$idx]}") · ${d_id[$idx]}"
+
+    frame_head="${line1}"$'\n'"${line2}"$'\n'
+
+    frame_rows=()
+    frame_rows+=("")
+    local wline
+    while IFS= read -r wline || [[ -n "$wline" ]]; do
+        frame_rows+=("${BOLD}${wline}${RST}")
+    done <<< "$(wrap_text "${d_title[$idx]}" "$term_w")"
+
+    if [[ -n "${d_context[$idx]}" ]]; then
+        frame_rows+=("")
+        frame_rows+=("${DIM}CONTEXT${RST}")
+        while IFS= read -r wline || [[ -n "$wline" ]]; do
+            frame_rows+=("$wline")
+        done <<< "$(wrap_text "${d_context[$idx]}" "$dw")"
+    fi
+
+    frame_rows+=("")
+    frame_rows+=("${DIM}OPTIONS${RST}")
+    local opts o_id o_label o_desc first_block=true
+    opts=$(jq -nr --arg b64 "${d_opts_b64[$idx]}" '
         def flat: gsub("[\t\n]"; " ");
         $b64 | @base64d | fromjson | .[]
         | [(.id | flat), (.label | flat), (.description | flat)] | join("\t")
     ')
     while IFS=$'\t' read -r o_id o_label o_desc || [[ -n "$o_id" ]]; do
         [[ -n "$o_id" ]] || continue
-        is_rec=false
-        [[ "$o_id" == "$rec_id" ]] && is_rec=true
-        if [[ "$is_rec" == true ]]; then
-            optline="★ ${o_id}  ${o_label}"
-        else
-            optline="  ${o_id}  ${o_label}"
-        fi
-        [[ -n "$o_desc" && "$o_desc" != "-" ]] && optline+=" — ${o_desc}"
-        [[ "$is_rec" == true ]] && optline+=" (recommended)"
-        # Wrap the plain text first, color the finished lines after, so the
-        # color escapes (zero display width) never skew the wrap width.
-        wrapped=$(wrap_text "$optline" $(( cols - ${#indent} )))
-        color=""
-        [[ "$is_rec" == true ]] && color="${C_REC}${BOLD}"
-        first=true
-        while IFS= read -r wline || [[ -n "$wline" ]]; do
-            if [[ "$first" == true ]]; then
-                frame_rows+=("${indent}${color}${wline}${RST}")
-                first=false
-            else
-                frame_rows+=("${indent}  ${color}${wline}${RST}")
-            fi
-        done <<< "$wrapped"
+        if [[ "$first_block" == true ]]; then first_block=false; else frame_rows+=(""); fi
+        append_detail_option "$idx" "$o_id" "$o_label" "$o_desc" "$dw"
     done <<< "$opts"
+
+    build_detail_bar "$idx"
+    frame_cursor_line=-1
+    frame_foot="${DIM}J/K next/prev decision · o open PR · g jump to $(session_text "${d_session[$idx]}") · q quit${RST}"$'\n'
 }
 
-append_context_lines() {
-    local text="$1" cols="$2" indent="$3" wline
-    [[ -n "$text" ]] || return 0
-    while IFS= read -r wline || [[ -n "$wline" ]]; do
-        frame_rows+=("${indent}${wline}")
-    done < <(wrap_text "$text" $(( cols - ${#indent} )))
-}
+# ── loop-shared frame/paint ─────────────────────────────
 
-render_open_card() {
-    local idx="$1" cols="$2" ref age head
-    ref="${d_repo[$idx]}"
-    if [[ "${d_pr[$idx]}" != "-" ]]; then
-        ref+=" #${d_pr[$idx]}"
-    elif [[ "${d_branch[$idx]}" != "-" ]]; then
-        ref+=" ${d_branch[$idx]}"
-    fi
-    age=$(card_age "${d_created[$idx]}")
-    head="${ref}  ·  ${d_title[$idx]}  ·  ${age}  ·  ${d_session[$idx]}"
-    frame_rows+=("${BOLD}$(clip "$head" "$cols")${RST}")
-    card_is_expanded open "${d_id[$idx]}" || return 0
-    append_context_lines "${d_context[$idx]}" "$cols" "    "
-    append_option_lines "${d_opts_b64[$idx]}" "${d_recommend[$idx]}" "$cols" "  "
-}
-
-render_answered_row() {
-    local idx="$1" cols="$2" ref label line suffix style
-    ref="${d_repo[$idx]}"
-    if [[ "${d_pr[$idx]}" != "-" ]]; then
-        ref+=" #${d_pr[$idx]}"
-    elif [[ "${d_branch[$idx]}" != "-" ]]; then
-        ref+=" ${d_branch[$idx]}"
-    fi
-    label=$(jq -nr --arg b64 "${d_opts_b64[$idx]}" --arg o "${d_aopt[$idx]}" \
-        '$b64 | @base64d | fromjson | map(select(.id == $o)) | .[0].label // $o')
-    suffix=""
-    [[ "${d_aby[$idx]}" == auto ]] && suffix=" (auto)"
-    line="${ref}  ·  ${d_title[$idx]}  ·  → ${label}${suffix}  ·  $(card_age "${d_aat[$idx]}")"
-    style="$DIM"
-    [[ "${d_aunseen[$idx]}" == true ]] && style=""
-    frame_rows+=("${style}$(clip "$line" "$cols")${RST}")
-    card_is_expanded answered "${d_id[$idx]}" || return 0
-    if [[ -n "${d_anote[$idx]}" ]]; then
-        append_context_lines "${d_anote[$idx]}" "$cols" "    "
-    fi
-    append_option_lines "${d_opts_b64[$idx]}" "${d_recommend[$idx]}" "$cols" "  "
-}
+frame_rows=()
+frame_row_line=()
+frame_head=""
+frame_tail=""
+frame_foot=""
+frame_cols=0
+frame_at=0
+selected=0
+selected_id=""
+frame_top=0
+cursor_map=()
+show_answered=false
+view_mode=list
+detail_id=""
+detail_section=""
+detail_pos=0
+STATUS_NOTE=""
 
 build_frame() {
-    local cols i idx
     term_size
-    cols="$term_w"
-    frame_cols="$cols"
+    frame_cols="$term_w"
     frame_at=$(date +%s)
     frame_rows=()
-    frame_row_line=()
-    cursor_map=()
-
-    local head_extra=""
-    (( n_unseen_auto > 0 )) && head_extra="  ·  ${n_unseen_auto} auto since you last looked"
-    frame_head="${BOLD}DECISIONS${RST}  ${n_open} open · ${n_answered} answered${head_extra}"$'\n\n'
-
-    if (( total_count == 0 )); then
-        frame_rows+=("  ${DIM}no decisions recorded${RST}")
+    frame_tail=""
+    if [[ "$view_mode" == detail ]]; then
+        build_detail_frame
+    else
+        build_list_frame
     fi
-
-    for i in ${open_order[@]+"${open_order[@]}"}; do
-        idx="$i"
-        cursor_map+=("open:$idx")
-        frame_row_line+=("${#frame_rows[@]}")
-        render_open_card "$idx" "$cols"
-    done
-
-    if [[ "$show_answered" == true && "$n_answered" -gt 0 ]]; then
-        (( ${#frame_rows[@]} > 0 )) && frame_rows+=("")
-        frame_rows+=("${DIM}ANSWERED${RST}")
-        for i in ${answered_order[@]+"${answered_order[@]}"}; do
-            idx="$i"
-            cursor_map+=("answered:$idx")
-            frame_row_line+=("${#frame_rows[@]}")
-            render_answered_row "$idx" "$cols"
-        done
-    fi
-
-    (( selected >= ${#cursor_map[@]} )) && selected=$(( ${#cursor_map[@]} - 1 ))
-    (( selected < 0 )) && selected=0
-
-    frame_foot=$'\n'"${DIM}j/k move · ⏎/space expand-collapse · a toggle answered · q quit${RST}"$'\n'
 }
 
+# paint — composes the screen into `screen_out` and prints it with the
+# clear prefix, so a test can source the script and inspect `screen_out`
+# with no terminal. frame_head/frame_tail/frame_foot are fixed; frame_rows
+# is the only part that scrolls, and the one line between frame_tail and
+# frame_foot is either STATUS_NOTE or an "N more" scroll indicator.
 paint() {
-    local cols now sel=-1 body first last total out i
     term_size
-    cols="$term_w"
-    (( selected < ${#frame_row_line[@]} )) && sel="${frame_row_line[$selected]}"
+    local head_lines tail_lines foot_lines body total sel last i out
+    head_lines=$(count_lines "$frame_head")
+    tail_lines=$(count_lines "$frame_tail")
+    foot_lines=$(count_lines "$frame_foot")
     total=${#frame_rows[@]}
-    body=$(( term_h - 7 ))
+    body=$(( term_h - head_lines - tail_lines - foot_lines - 1 ))
     (( body < 1 )) && body=1
-    if (( sel >= 0 )); then
-        first="$sel"
-        (( first < frame_top )) && frame_top="$first"
+    sel=-1
+    if (( frame_cursor_line >= 0 )); then
+        sel="$frame_cursor_line"
+        (( sel < frame_top )) && frame_top="$sel"
         (( sel >= frame_top + body )) && frame_top=$(( sel - body + 1 ))
     fi
     (( frame_top > total - body )) && frame_top=$(( total - body ))
@@ -464,18 +857,22 @@ paint() {
     out="$frame_head"
     for (( i = frame_top; i <= last; i++ )); do
         if (( i == sel )); then
-            out+="${SEL}${frame_rows[$i]}${RST}"$'\n'
+            local l="${frame_rows[$i]}"
+            [[ "$view_mode" == list ]] && l="›${l:1}"
+            out+="${SEL}${l}${RST}"$'\n'
         else
             out+="${frame_rows[$i]}"$'\n'
         fi
     done
-    if (( frame_top > 0 || last < total - 1 )); then
+    out+="$frame_tail"
+    if (( frame_top > 0 || last < total - 1 )) && [[ -z "$STATUS_NOTE" ]]; then
         out+="${DIM}  ↑ ${frame_top} more · ↓ $(( total - 1 - last )) more${RST}"$'\n'
     else
-        out+=$'\n'
+        out+="${STATUS_NOTE}"$'\n'
     fi
     out+="$frame_foot"
-    printf '\033[H\033[2J%s' "$out"
+    screen_out="$out"
+    printf '\033[H\033[2J%s' "$screen_out"
 }
 
 render() {
@@ -491,7 +888,51 @@ dump() {
     build_frame
     printf '%s' "$frame_head"
     for i in "${!frame_rows[@]}"; do printf '%s\n' "${frame_rows[$i]}"; done
+    printf '%s' "$frame_tail"
     printf '%s' "$frame_foot"
+}
+
+# ── cursor / navigation ─────────────────────────────────
+
+list_move() {
+    local dir="$1" entry idx
+    (( selected += dir ))
+    (( selected >= ${#cursor_map[@]} )) && selected=$(( ${#cursor_map[@]} - 1 ))
+    (( selected < 0 )) && selected=0
+    if (( ${#cursor_map[@]} > 0 )); then
+        entry="${cursor_map[$selected]}"
+        idx="${entry#*:}"
+        selected_id="${d_id[$idx]}"
+    fi
+}
+
+decisions_enter_detail() {
+    local idx="$1"
+    detail_id="${d_id[$idx]}"
+    if decisions_locate_id "$detail_id"; then
+        detail_section="$LOCATE_SECTION"; detail_pos="$LOCATE_POS"
+    fi
+    view_mode=detail
+    frame_top=0
+    build_frame
+}
+
+decisions_detail_step() {
+    local delta="$1" len idx
+    local -a oa=()
+    case "$detail_section" in
+        open) oa=(${open_order[@]+"${open_order[@]}"}) ;;
+        auto) oa=(${auto_order[@]+"${auto_order[@]}"}) ;;
+        *)    oa=(${ans_order[@]+"${ans_order[@]}"}) ;;
+    esac
+    len=${#oa[@]}
+    (( len == 0 )) && return 0
+    detail_pos=$(( detail_pos + delta ))
+    (( detail_pos < 0 )) && detail_pos=0
+    (( detail_pos >= len )) && detail_pos=$(( len - 1 ))
+    idx="${oa[$detail_pos]}"
+    detail_id="${d_id[$idx]}"
+    frame_top=0
 }
 
 # ── entry ───────────────────────────────────────────────
@@ -529,33 +970,48 @@ view() {
         elif (( rc != 0 )); then
             exit 0
         fi
-        entry=""
-        (( ${#cursor_map[@]} > 0 && selected < ${#cursor_map[@]} )) && entry="${cursor_map[$selected]}"
-        kind="${entry%%:*}"
-        idx="${entry#*:}"
-        case "$key" in
-            j)
-                (( selected++ ))
-                (( selected >= ${#cursor_map[@]} )) && selected=$(( ${#cursor_map[@]} - 1 ))
-                (( selected < 0 )) && selected=0
-                render ;;
-            k)
-                (( selected-- ))
-                (( selected < 0 )) && selected=0
-                render ;;
-            " "|"")
-                if [[ -n "$entry" ]]; then
-                    card_toggle "$kind" "${d_id[$idx]}"
+        STATUS_NOTE=""
+        if [[ "$view_mode" == list ]]; then
+            entry=""
+            (( ${#cursor_map[@]} > 0 && selected < ${#cursor_map[@]} )) && entry="${cursor_map[$selected]}"
+            kind="${entry%%:*}"; idx="${entry#*:}"
+            case "$key" in
+                j) list_move 1; render ;;
+                k) list_move -1; render ;;
+                "")
+                    [[ -n "$entry" ]] && decisions_enter_detail "$idx"
+                    paint ;;
+                a)
+                    if [[ "$show_answered" == true ]]; then show_answered=false; else show_answered=true; fi
                     build_frame
-                fi
-                paint ;;
-            a)
-                if [[ "$show_answered" == true ]]; then show_answered=false; else show_answered=true; fi
-                build_frame
-                paint ;;
-            q)
-                exit 0 ;;
-        esac
+                    paint ;;
+                o)
+                    [[ -n "$entry" ]] && decisions_open_pr "$idx"
+                    paint ;;
+                g)
+                    [[ -n "$entry" ]] && go_to_hub "${d_session[$idx]}"
+                    paint ;;
+                q) exit 0 ;;
+            esac
+        else
+            idx="$LOCATE_IDX"
+            decisions_locate_id "$detail_id" && idx="$LOCATE_IDX"
+            case "$key" in
+                $'\e'|$'\x7f'|$'\b')
+                    selected_id="$detail_id"
+                    view_mode=list
+                    frame_top=0
+                    build_frame
+                    paint ;;
+                J) decisions_detail_step 1; build_frame; paint ;;
+                K) decisions_detail_step -1; build_frame; paint ;;
+                j) frame_top=$(( frame_top + 1 )); paint ;;
+                k) frame_top=$(( frame_top - 1 )); paint ;;
+                o) decisions_open_pr "$idx"; paint ;;
+                g) go_to_hub "${d_session[$idx]}"; paint ;;
+                q) exit 0 ;;
+            esac
+        fi
     done
 }
 
@@ -568,12 +1024,34 @@ fi
 case "${1:-}" in
     -h|--help) usage; exit 0 ;;
     --dump)
+        shift
+        show_answered=false
+        if [[ "${1:-}" == --answered ]]; then show_answered=true; shift; fi
+        if [[ "${1:-}" == --detail ]]; then
+            shift
+            id_arg="${1:-}"
+            decisions_read_seen_cutoff
+            load_data
+            if ! decisions_locate_id "$id_arg"; then
+                echo "hq-decisions: no such decision '$id_arg'" >&2
+                exit 1
+            fi
+            detail_id="$id_arg"
+            detail_section="$LOCATE_SECTION"
+            detail_pos="$LOCATE_POS"
+            view_mode=detail
+            dump
+            exit 0
+        fi
+        [[ -z "${1:-}" ]] || { echo "hq-decisions: unknown argument: $1" >&2; usage >&2; exit 2; }
         decisions_read_seen_cutoff
         load_data
+        view_mode=list
         dump
         exit 0
         ;;
     "")
+        view_mode=list
         view
         ;;
     *)
