@@ -69,14 +69,14 @@ WT=$(git -C <repo> worktree list --porcelain | awk -v b="refs/heads/<branch>" '/
 **6. Task session.** Write the Run invocation to a scratch file, then hand it to the launcher:
 
 ```
-cat > /tmp/feature-launch-<SLUG>.md <<'LAUNCH_EOF'
+LAUNCH_FILE=$(mktemp) && cat > "$LAUNCH_FILE" <<'LAUNCH_EOF'
 /feature --run --requester=<REQUESTER> <PASSTHROUGH FLAGS>
 
 Plan: <ABSOLUTE plan path>
 
 <FEATURE / the brief, verbatim>
 LAUNCH_EOF
-~/dotfiles/bin/tmux-task-session --model <ORCH_MODEL> --effort <ORCH_EFFORT> "$WT" "$(cat /tmp/feature-launch-<SLUG>.md)"
+~/dotfiles/bin/tmux-task-session --model <ORCH_MODEL> --effort <ORCH_EFFORT> "$WT" "$(cat "$LAUNCH_FILE")"
 ```
 
 The quoted heredoc delimiter and the `"$(cat ...)"` are what make this exact: the task, the flags and the requester reach Run through a file, never through a string a model retyped. `<PASSTHROUGH FLAGS>` is every flag this Launch received except `--repo=` and `--orchestrator=`, whose seat is already on the claude command line above, and `--requester=`, filled in below. `<REQUESTER>` is that flag's value when Launch received one, else this session's own tmux session name whenever it answers in `ListAgents` — hub or hq alike. Drop `--requester=` entirely only when neither is available, and drop the `Plan:` line when no workplan was given.
@@ -109,7 +109,7 @@ Feature, flags and requester come from the invocation you were started with, whi
 - `mkdir -p .feature` at the worktree root, and ensure it is ignored: append `.feature/` to `$(git rev-parse --git-common-dir)/info/exclude` if not already present. NEVER commit anything under `.feature/`.
 - `.feature/launch-prompt.md` — what Launch asked for, written before this session started. It is the brief of record; re-read it after a `/clear`.
 - `.feature/NOTES.md` — running log. You and every subagent MUST append to it before finishing a step: decisions made and why, dead ends hit, gotchas, flaky tests. Write for a reader with zero memory of this session.
-- `.feature/findings-round-<N>.md` — reviewer output per round.
+- `.feature/findings-round-<N>.md` — reviewer output per round, written by you (the orchestrator) from the reviewer subagent's returned report.
 - `.feature/status.jsonl` — the pipeline status contract, what a coordinator (hq) and `bin/worktrees` read to see where the pipeline is without a transcript. APPEND one JSON line per phase change and whenever the active seat or task changes; never rewrite or delete a line, so the file is also the run's history. The LAST line is the current state: `{"repo","branch","pr" (URL or null),"phase" (plan|gate|implement|review|review-fix|ship|done|stalled),"round","seat" (orchestrator|implementer|reviewer),"task" (one line),"last_commit","pushed" (bool),"updated" (the OUTPUT of `date -u +%Y-%m-%dT%H:%M:%SZ`, never typed from memory — screens publish it as the run's age),"started_by" ("user:/feature" or "hq:<session>" — whoever invoked the pipeline)}`. Tell every subagent to append a line with its `seat`/`task` when it starts and another with `last_commit` when it commits. Append `phase: done` in step 6, `phase: stalled` with the blockers in `task` when the loop stops without shipping.
 
 ### Quick mode (--quick)
@@ -180,7 +180,7 @@ Spawn a FRESH reviewer subagent (`subagent_type: "<REVIEWER_EFFORT>"`). Model: `
 - The implementer's report is unverified claims. Confirm it names the tests covering the change and shows their output, and verify its claims against the diff. Do not re-run the suite. Run one focused test only when reading the code raises a specific doubt no existing run answers.
 - Do not crawl the codebase beyond DELTA and what it directly touches unless checking a named risk.
 - Blast radius, only when DELTA adds or changes something destructive, network-facing or credential-adjacent (round 1), or touches such code (later rounds): name the ONE fact the change is safe because of and prove it by reading and by printing the path or target the code WOULD act on. Never execute a deletion as a probe, whatever the target is redirected to — the global deletion rule applies; a deletion that cannot be proven safe by reading is a finding that asks for a redesign. Unproven is reported as unproven, not as safe.
-- Output: no preamble, no narration of what was checked. Every line is a verdict, a finding with file:line, or a check that was run.
+- Output: no preamble, no narration of what was checked. Return the findings as the text of your final report, in the findings-file format below — the Write tool refuses subagent file writes, so you cannot Write `.feature/findings-round-<N>.md` yourself; the orchestrator writes that file from your report. Every line is a verdict, a finding with file:line, or a check that was run.
 
 Round 1 (FULL pass over the whole PR), two dimensions:
 - Spec compliance against the workplan: Missing (a plan item skipped or half-done), Extra (unrequested features, over-engineering, scope creep), Misunderstood (the right item built wrong). Check `.feature/NOTES.md` before calling a deviation unintentional; a recorded, reasoned deviation is a note, not a blocker.
@@ -193,7 +193,7 @@ Round N>1 (SCOPED re-review): scope is the previous findings list and the fix di
 
 Prose-only round (any N): no code review. Check contradictions between the changed files and the files they describe, stale file/flag/path references, public-repo leaks, comments-rule violations, and flag lists that match the flags the skill defines. Blocking only for a leak or a contradiction.
 
-Findings file `.feature/findings-round-<N>.md`: line 1 the verdict, `CLEAN` or `FINDINGS`; line 2 the pass, `full`, `scoped`, `scoped→widened: <path>` or `prose`; then blocking findings (file:line, what is wrong, concrete failure scenario), then non-blocking notes (in a re-review: the per-finding verdicts, then new breakage, then out-of-scope observations), then the blast-radius line when one was required.
+Findings-file format (what you write to `.feature/findings-round-<N>.md` from the reviewer's report): line 1 the verdict, `CLEAN` or `FINDINGS`; line 2 the pass, `full`, `scoped`, `scoped→widened: <path>` or `prose`; then blocking findings (file:line, what is wrong, concrete failure scenario), then non-blocking notes (in a re-review: the per-finding verdicts, then new breakage, then out-of-scope observations), then the blast-radius line when one was required.
 
 **4. Loop**
 - `FINDINGS` → back to step 2 with the new findings file. A fix round is ALWAYS followed by another review round — never ship code the reviewer hasn't seen; the newest fix must not be the only unreviewed code.
