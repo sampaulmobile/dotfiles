@@ -6,8 +6,7 @@
 #
 # Fixtures are written by `hq-decision add`/`answer` into a throwaway
 # mktemp -d tree (HQ_DECISIONS_DIR); --dump renders them with no terminal.
-# Offline: no tmux server, no network. TZ=UTC so the fixtures' ages are
-# predictable to the second they were just created.
+# Offline: no tmux server, no network.
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo=$(dirname "$here")
@@ -24,7 +23,6 @@ check() {
     if [[ "$got" == "$want" ]]; then ok "$label [$got]"; else bad "$label" "got [$got] want [$want]"; fi
 }
 
-export TZ=UTC
 unset TMUX
 export HQ_DECISIONS_DIR="$work/decisions"
 HQD="$repo/bin/hq-decision"
@@ -87,6 +85,12 @@ check "hard-splits a word longer than the width" "$long" "$(printf 'abcd\nefgh\n
 twopara=$(wrap_text $'first paragraph\nsecond paragraph' 100)
 check "preserves an embedded newline as a paragraph break" "$twopara" "$(printf 'first paragraph\nsecond paragraph')"
 check "empty text wraps to nothing" "$(wrap_text '' 20)" ""
+oldpwd=$(pwd)
+cd "$work"
+touch alpha.json beta.json
+noglob_out=$(wrap_text 'see *.json for details' 60)
+cd "$oldpwd"
+check "wrap_text does not glob a '*' word" "$noglob_out" "see *.json for details"
 
 # ── fixtures ──
 
@@ -96,6 +100,12 @@ check "empty text wraps to nothing" "$(wrap_text '' 20)" ""
     --recommend long --session proj-hub \
     --context "A longer context paragraph written to force word wrapping across more than one line when the terminal column count is narrow." \
     >/dev/null
+"$HQD" add --repo proj --pr 9 --title "Pick a batch size" \
+    --option 'small|10 items|conservative' \
+    --option 'large|100 items|faster throughput' \
+    --recommend small --session ctx-hub \
+    --context "keep batches under the memory ceiling" \
+    >/dev/null
 answered_id=$("$HQD" add --repo proj --branch feat/y --title "Pick a log level" \
     --option 'debug|Debug' --option 'info|Info' --recommend info --session proj-hub)
 "$HQD" answer "$answered_id" info "went with info" >/dev/null
@@ -103,16 +113,20 @@ answered_id=$("$HQD" add --repo proj --branch feat/y --title "Pick a log level" 
 echo "── --dump over the fixtures"
 dump=$(NO_COLOR=1 COLUMNS=60 "$HQDS" --dump 2>"$work/dump.err")
 if [[ -s "$work/dump.err" ]]; then bad "--dump wrote to stderr" "$(cat "$work/dump.err")"; fi
-check "the header counts one open and one answered" \
-    "$(printf '%s\n' "$dump" | head -1)" "DECISIONS  1 open · 1 answered"
+check "the header counts two open and one answered" \
+    "$(printf '%s\n' "$dump" | head -1)" "DECISIONS  2 open · 1 answered"
 check "the open card names its repo/pr and title" \
     "$(printf '%s\n' "$dump" | grep -c 'proj #7.*Pick a retry budget')" "1"
 check "the open card shows its session" \
     "$(printf '%s\n' "$dump" | grep -c 'proj-hub')" "1"
+check "a one-line context's words appear" \
+    "$(printf '%s\n' "$dump" | grep -c 'memory ceiling')" "1"
+check "the final words of a wrapped multi-line context appear" \
+    "$(printf '%s\n' "$dump" | grep -c 'is narrow')" "1"
 check "the recommended option is starred" \
     "$(printf '%s\n' "$dump" | grep -c '★ long')" "1"
 check "the recommended option is noted as such" \
-    "$(printf '%s\n' "$dump" | grep -c '(recommended)')" "1"
+    "$(printf '%s\n' "$dump" | grep -c '(recommended)')" "2"
 check "the non-recommended option has no star" \
     "$(printf '%s\n' "$dump" | grep -cE '^ *short +2 attempts')" "1"
 maxlen=0
