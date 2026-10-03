@@ -34,7 +34,7 @@
   thread files under `~/.local/state/hq/inbox/` before `state/backlog.md`").
   With the append rule gone nothing new lands there, so I will replace it with
   "`hq-decision list --open` and `pipelines.tsv` before `state/backlog.md`".
-  Say if you would rather leave that line untouched.
+  ANSWERED at the gate: yes, replace it.
 
 Reading the code changed: the inbox view loop blocks on `read -rsn1` with no
 timeout, so "repaint on data change" needs an integer `read -t` idle tick
