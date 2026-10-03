@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# hq-decisions — the read-only screen over bin/hq-decision's records: every
-# OPEN decision as a card (repo/ref, title, age, session, context, options
-# with the recommendation marked), answered ones folded below. Columns, keys
-# and formats are usage() below, the reference a user reads; CLAUDE.md
-# points here rather than restating it.
+# hq-decisions — read-only over bin/hq-decision's records; its one write is
+# _state/seen, interactive viewer only (see below). Every OPEN decision
+# renders as a card (repo/ref, title, age, session, context, options with
+# the recommendation marked), answered ones folded below. Columns, keys and
+# formats are usage() below, the reference a user reads; CLAUDE.md points
+# here rather than restating it.
 #
 # tmux-free: no tmux subcommand anywhere in this file, not even for terminal
 # size (bin/hq-decision may call `tmux display -p` for a session name; this
@@ -11,10 +12,8 @@
 # then a default — see term_size.
 #
 # The screen's ONE write: the interactive viewer stamps
-# $HQ_DECISIONS_DIR/_state/seen (an ISO time, tmp+mv) once, right after its
-# first paint, so the next run's "since you last looked" cutoff is what the
-# file held before this run started. `--dump` only reads that file and never
-# writes it.
+# $HQ_DECISIONS_DIR/_state/seen (tmp+mv); `--dump` never writes it. Cutoff
+# semantics and format: usage() below.
 #
 # Loop shape matches bin/hq-inbox: load_data -> cached build_frame -> paint,
 # so a cursor move alone forks nothing. Unlike hq-inbox's blocking read,
@@ -32,8 +31,9 @@ usage: hq-decisions            run the viewer in this terminal
        hq-decisions --dump     print the cards once and exit (no cursor)
 
 One card per OPEN decision (bin/hq-decision), expanded by default; answered
-decisions fold below, newest first, one line each. This screen only reads
-$HQ_DECISIONS_DIR — it never writes a file and never runs tmux.
+decisions fold below, one line each, in the order the "Answered order"
+paragraph below gives. Read-only over $HQ_DECISIONS_DIR's records; its one
+write is the seen stamp described below, and it never runs tmux.
 
 Header: `DECISIONS  N open · M answered`.
 
@@ -238,7 +238,7 @@ load_data() {
             (if .answer != null then .answer.option else "-" end),
             (if .answer != null then (.answer.note | esc) else "-" end),
             (if .answer != null then .answer.at else "-" end),
-            (if .answer != null then (.answer.by // "owner") else "-" end),
+            (if .answer != null then .answer.by else "-" end),
             (.options | tostring | @base64)
         ] | map(if . == "" then "-" else . end) | join("\t")
     ')

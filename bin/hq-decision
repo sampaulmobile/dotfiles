@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # hq-decision — records an owner decision (title, context, options,
 # recommendation) as one JSON file, so a hub never puts a decision only in
-# chat. `bin/hq-decisions` is the read-only screen over the same files.
+# chat. `bin/hq-decisions` is read-only over the same files, apart from its
+# own interactive-viewer seen stamp.
 # Subcommands, storage layout, the dedupe key and record fields are usage()
 # below (`--help`), the reference a user reads — not restated here.
 #
@@ -53,8 +54,7 @@ Record fields:
   state     "open" or "answered"
   answer    null, or {option, note, at, by} once answered. by is "owner" or
             "auto"; a record answered before this field existed has none and
-            reads as "owner" (decision_records normalises it on every read —
-            the file itself is never rewritten for this alone).
+            reads as "owner" (decision_records normalises it on every read).
 
 DEDUPE: `add` with a key that already has an OPEN record prints that
 record's id and a stderr note instead of writing a new file — a hub
@@ -70,9 +70,10 @@ exclusive. --context-file - reads context from stdin.
 answer's --auto marks the answer as the hub's own take rather than the
 owner's (answer.by: "auto" vs "owner"); it is also accepted right after
 OPTION-ID. --auto refuses an option that is not the record's `recommend` —
-exit 2, nothing written — since an auto-take needs a clear recommendation to
-take. Answering again without --auto re-stamps the record as an owner
-answer, which is how an owner reverses an auto-taken one.
+exit 2, nothing written. --auto on an already-answered record also refuses
+— exit 1, nothing written. Answering again without --auto re-stamps the
+record as an owner answer, which is how an owner reverses an auto-taken
+one.
 
 list prints a table: ID STATE BY REPO PR/BRANCH AGE TITLE, open records
 first, newest first within each state; BY is "owner"/"auto" once answered,
@@ -413,6 +414,8 @@ cmd_answer() {
         echo "hq-decision: '$option' does not name one of '$id''s options" >&2
         return 2
     fi
+    local restamped=false
+    [[ "$(jq -r '.state' "$file")" == answered ]] && restamped=true
     if [[ "$auto" == true ]]; then
         local recommend
         recommend=$(jq -r '.recommend' "$file")
@@ -420,9 +423,11 @@ cmd_answer() {
             echo "hq-decision: --auto refuses '$option' — '$id''s recommended option is '$recommend'" >&2
             return 2
         fi
+        if [[ "$restamped" == true ]]; then
+            echo "hq-decision: '$id' is already answered — answer --auto refuses to re-stamp it; a plain answer re-stamps" >&2
+            return 1
+        fi
     fi
-    local restamped=false
-    [[ "$(jq -r '.state' "$file")" == answered ]] && restamped=true
 
     local at updated record by
     at=$(now_iso)
@@ -466,7 +471,7 @@ cmd_list() {
     printf '%-6s  %-8s  %-6s  %-10s  %-20s  %6s  %s\n' ID STATE BY REPO 'PR/BRANCH' AGE TITLE
     printf '%s\n' "$recs" \
         | jq -r '[(if .state == "open" then 0 else 1 end), .created, .state,
-                  (if .state == "open" then "-" else (.answer.by // "owner") end),
+                  (if .state == "open" then "-" else .answer.by end),
                   .created, .id, .repo,
                   (if .pr != null then (.pr | tostring) elif .branch != null then .branch else "-" end),
                   .title] | @tsv' \
