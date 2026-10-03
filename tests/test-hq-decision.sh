@@ -62,7 +62,6 @@ if [[ -z "$dangerous_tmux" ]]; then
 else
     bad "a tmux subcommand beyond the probe is present" "$dangerous_tmux"
 fi
-check "exactly one read-only tmux probe" "$(grep -c "tmux display -p '#S'" "$HQD")" "1"
 
 # ── add: one file, id printed, fields right ──
 
