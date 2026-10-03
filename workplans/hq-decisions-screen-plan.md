@@ -335,3 +335,10 @@ rules or templates; any new record field but `why`.
   (`bin/hq-inbox:495-527`), and that its file is not co-sourceable (it
   defines `load_data`, `build_frame`, `term_size`, `clip` and `usage`).
 - ASSUMED: choices 1–7 in the digest, verified by the requester's go.
+
+## Gate
+
+Go from the requester: all seven choices accepted as stated. Ship step: no
+separate PR — once the review loop is CLEAN, push `feat/hq-decisions-screen`
+and report branch, head sha, summary, rounds and the VERIFY outputs; the
+requester fast-forwards `feat/hq-decisions` onto it and updates PR #47.
