@@ -184,3 +184,146 @@ here (bash 3.2 rejects fractional timeouts).
 - hq-inbox, Ctrl+G, Ctrl+Y, keybindings, tmux.conf, hooks, snapshot sources.
 - Answering from the screen; it only displays.
 - Pruning or archiving decision files.
+
+# AUTO-TAKE
+
+## Restatement
+
+- Task: let a hub take the recommended option itself, recorded, whenever a
+  decision passes a defined auto-take test — including its own adjustments
+  to a `/feature` plan digest — so the owner is asked only the rest.
+- Done means: the decision rule has one home with the auto-take test, the
+  other skill and the hq template point at it; the requester-side digest
+  flow lets the hub send the go itself; a record carries who answered (a
+  field), `list` shows it, `hq-decisions` renders auto answers distinctly
+  with the unseen ones first; old records read as owner answers; help,
+  CLAUDE.md and tests cover it; `tests/run.sh` green.
+- Assuming: "since the owner last looked" needs some remembered moment;
+  nothing else reads the record shape but `decision_records`.
+
+## Digest
+
+- Task: auto-take rule (one home, feature SKILL requester side) + digest
+  self-go flow + `answer --auto` writing `answer.by` + `list` BY column +
+  `hq-decisions` auto rendering with "since you last looked" ordering.
+- Done means: the seven ACCEPTANCE lines of the AUTO-TAKE brief;
+  `tests/run.sh` green; `--dump` over owner/auto/open fixtures in the PR.
+- Not doing: the `/feature` gate itself (no `--go` change), rules under
+  `dots/claude/rules/`, hq-inbox, answering from the screen, a migration of
+  existing record files (old records are normalised on read, never
+  rewritten).
+- Assuming: hubs that launch `/feature` load the feature skill, and hq loads
+  it too when it Launches — so the feature skill is the home every requester
+  reads; hq's skill and template carry a pointer with the file path.
+- Surface: `tests/run.sh` (bash 3.2 here, one pass); `hq-decision
+  add/answer --auto/list` and `hq-decisions --dump` against a `mktemp -d`
+  `HQ_DECISIONS_DIR`.
+- Touches: 8 files — `bin/hq-decision`, `bin/hq-decisions`, both test
+  suites, `dots/claude/skills/{feature,hq}/SKILL.md`,
+  `templates/hq/CLAUDE.md`, `CLAUDE.md`.
+- Question: "auto-taken since the owner last looked" needs a remembered
+  moment, and `hq-decisions` today writes nothing. Recommend: the
+  interactive viewer writes ONE file, `$HQ_DECISIONS_DIR/_state/seen` (an
+  ISO time, tmp+mv, never removed), at the moment it first paints, and the
+  cutoff is the value that file held before; `--dump` reads it and never
+  writes. The alternative, no write: use the newest OWNER answer's time as
+  the cutoff — a proxy for "looked", wrong whenever the owner looks without
+  answering.
+
+Reading the code changed: the rule is in THREE places, not two —
+`templates/hq/CLAUDE.md` restates it too; and hq SKILL's gate bullet also
+describes relaying a digest, so it has to point at the new flow rather than
+contradict it.
+
+## Approach
+
+### The rule (home: feature SKILL, "After a Launch, on the requester's side")
+
+Replace the current decision paragraph with:
+
+- The auto-take test, all five conditions as the brief states them, and the
+  owner-reserved list (prod, deploys, commits/pushes to a default branch,
+  merges, deletions, external-service writes, dotfiles edits) as always
+  asked.
+- Asked: today's text (add first, quote the id, update/answer never a second
+  add, never modal).
+- Auto-taken: `add`, then `answer --auto <id> <recommended-option>`; one line
+  naming it and its id in the hub's next report to the owner; the owner
+  reverses one by saying so and the hub records the new answer with a plain
+  `answer`.
+- Digest paragraph rewritten: the hub reviews the digest (corrections and
+  adjustments wanted; the gate stays). Its Question, if any, counts as a
+  decision. Every adjustment passes → send the go with them, record each
+  adjustment that had alternatives as an auto-taken decision, and report the
+  go (with those ids) to the user and onward to the dispatching session.
+  Any fails → relay the digest plus all adjustments, passing ones marked as
+  already decided (with ids), and wait only on the failing ones.
+- `dots/claude/skills/hq/SKILL.md` §3: the decision bullet becomes a pointer
+  to that section with the path; the gate bullet says to review the digest
+  and give or relay the go per the same section.
+- `templates/hq/CLAUDE.md`: the decision bullet becomes the same pointer.
+
+### `bin/hq-decision`
+
+- `answer [--auto] ID OPTION-ID [NOTE ...]` (`--auto` also accepted right
+  after OPTION-ID): writes `answer.by` = `"auto"` or `"owner"`. `--auto` with
+  an option other than the record's `recommend` → exit 2, nothing written
+  (the test requires a clear recommendation). Re-answering without `--auto`
+  records `by: "owner"` — that is the reversal.
+- `decision_records` normalises `answer.by` to `"owner"` when an answer has
+  none, so every consumer (list, `--json`, the screen) sees old records as
+  owner answers without the files being rewritten.
+- `list`: a BY column (`owner`/`auto`/`-`) after STATE.
+- usage(): the flag, the field, the BY column.
+
+### `bin/hq-decisions`
+
+- `load_data` carries `answer.by`; answered order = auto answers with
+  `answer.at` newer than the seen cutoff first (newest first), then every
+  other answered record newest first.
+- Answered row: owner `→ <label>`; auto `→ <label> (auto)`, not dimmed while
+  unseen. Header gains `· K auto since you last looked` when K > 0 (so the
+  existing header assertions still hold).
+- Seen stamp per the Question: `seen_cutoff` read once at load; `view()`
+  writes `_state/seen` (tmp+mv) after its first paint. `--dump` never writes.
+  The file has no `.json` suffix, so `decision_records`' `*.json` find and
+  the `*/*.json` signature glob never see it.
+- Header comment, usage() and the read-only test updated to the one write.
+
+### Tests
+
+- `test-hq-decision.sh`: `answer --auto` writes `by: auto`; plain answer
+  writes `by: owner`; `--auto` on a non-recommended option exits 2 and
+  leaves the file unchanged; a hand-written old record (no `by`) reads as
+  `owner` via `list --json` and shows `owner` in the table; BY column shows
+  `auto`.
+- `test-hq-decisions.sh`: fixtures gain an auto-answered record and an old
+  no-`by` record; `--dump` marks the auto row `(auto)` and not the owner
+  rows, lists the unseen auto row first under ANSWERED, header counts it; a
+  seen stamp newer than the auto answer moves it back into date order and
+  drops the header count; `--dump` writes no `_state/seen`.
+
+### CLAUDE.md
+
+- Both entries: `answer.by` / `--auto` / the BY column / the screen's one
+  write and the cutoff — flags and formats stay in `--help`. The
+  `hq-decisions` entry's "writes nothing anywhere" becomes the one write.
+
+## Assumptions (AUTO-TAKE)
+
+- VERIFIED: the decision rule text appears in feature SKILL (requester
+  side), hq SKILL §3 and `templates/hq/CLAUDE.md` (grep `owner's call`).
+- VERIFIED: `~/.claude/skills/{feature,hq}` link to this repo's
+  `dots/claude/skills/`, so the edit is what every session loads.
+- VERIFIED: `decision_records` finds `-name '*.json'` and the screen's
+  signature globs `*/*.json`; a suffix-less `_state/seen` is invisible to
+  both.
+- ASSUMED: a hub that never launches `/feature` and never runs `/hq` does
+  not load the rule; reaching it would need a global rule, which this brief
+  forbids.
+
+## Out of scope (AUTO-TAKE)
+
+- Any change to the `/feature` gate mechanics or `--go`.
+- Answering or reversing from the screen.
+- Rewriting existing record files.
