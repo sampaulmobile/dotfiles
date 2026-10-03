@@ -182,6 +182,8 @@ check "ANSWERED section header appears" "$(printf '%s\n' "$dumpa" | grep -c '^AN
 check "the owner-answered row is in it" "$(printf '%s\n' "$dumpa" | grep -c 'Pick a log level')" "1"
 check "the old no-by record is in it, rendered as owner" \
     "$(printf '%s\n' "$dumpa" | grep -c 'An old decision.*✓ a · you')" "1"
+check "a >=1000-day-old age clips to the 5-char AGE column rather than shifting the row" \
+    "$(printf '%s\n' "$dumpa" | grep 'An old decision' | cut -c3-7)" "1013…"
 
 # ── LIST: row content per kind, at two widths ──
 
@@ -198,6 +200,21 @@ for cols in 80 160; do
         "$(printf '%s\n' "$d" | grep -c '✓ debug · you')" "1"
     check "[$cols] the 200-char title's row is clipped with …" \
         "$(printf '%s\n' "$d" | grep -c 'XXXX.*….*proj-hub')" "1"
+    maxlen=0
+    while IFS= read -r l; do
+        n=$(printf '%s' "$l" | wc -m)
+        (( n > maxlen )) && maxlen=$n
+    done <<< "$d"
+    if (( maxlen <= cols )); then
+        ok "[$cols] no line exceeds the terminal width [$maxlen]"
+    else
+        bad "[$cols] a line exceeds the terminal width" "$maxlen > $cols"
+    fi
+done
+
+for cols in 40 50; do
+    echo "── --dump --answered at COLUMNS=$cols: no line exceeds the width"
+    d=$(NO_COLOR=1 COLUMNS=$cols "$HQDS" --dump --answered)
     maxlen=0
     while IFS= read -r l; do
         n=$(printf '%s' "$l" | wc -m)
@@ -239,6 +256,12 @@ check "the why text follows the recommendation" \
     "$(printf '%s\n' "$d" | grep -c 'why: fewer retries waste less time')" "1"
 check "the TO ANSWER bar names the recommended option and the answer command" \
     "$(printf '%s' "$d" | tr '\n' ' ' | grep -c 'TO ANSWER.*go with long.*hq-decision answer '"$open_why_id"' long')" "1"
+check "the recommended option's head: 2-wide mark, id, two spaces, label, suffix" \
+    "$(printf '%s\n' "$d" | grep -c '^★ long  5 attempts · recommended$')" "1"
+check "an unmarked option's head: blank mark column, id, two spaces, label" \
+    "$(printf '%s\n' "$d" | grep -c '^  short  2 attempts$')" "1"
+check "the TO ANSWER bar keeps two spaces after the label" \
+    "$(printf '%s\n' "$d" | grep -c '^TO ANSWER  tell')" "1"
 
 echo "── --dump --detail: open without why"
 d=$(NO_COLOR=1 COLUMNS=80 "$HQDS" --dump --detail "$open_nowhy_id")
@@ -251,6 +274,8 @@ check "the chosen option is marked as the recommendation" \
     "$(printf '%s\n' "$d" | grep -c '● long.*was the recommendation')" "1"
 check "TO REVERSE names the other option" \
     "$(printf '%s' "$d" | tr '\n' ' ' | grep -c 'TO REVERSE.*reverse '"$auto_id"', short instead.*hq-decision answer '"$auto_id"' short')" "1"
+check "the TO REVERSE bar keeps two spaces after the label" \
+    "$(printf '%s\n' "$d" | grep -c '^TO REVERSE  tell')" "1"
 
 echo "── --dump --detail: owner-answered on a non-recommended option"
 d=$(NO_COLOR=1 COLUMNS=80 "$HQDS" --dump --detail "$owner_id")
@@ -272,10 +297,46 @@ echo "── --dump --detail: an unknown id exits 1"
 check "exit 1" "$?" "1"
 check "stderr names the id" "$(grep -c "no such decision 'zzzzzz'" "$work/e_unknown")" "1"
 
+echo "── --dump --detail: a branch+long-session record never exceeds the terminal width"
+longsession_id=$("$HQD" add --repo proj \
+    --branch feat/a-really-long-branch-name-for-width-testing-purposes \
+    --title "Pick a session naming policy" \
+    --option 'a|A' --option 'b|B' --recommend a \
+    --session a-very-long-session-name-used-to-force-line-wrapping-in-detail-view)
+d=$(NO_COLOR=1 COLUMNS=80 "$HQDS" --dump --detail "$longsession_id")
+maxlen=0
+while IFS= read -r l; do
+    n=$(printf '%s' "$l" | wc -m)
+    (( n > maxlen )) && maxlen=$n
+done <<< "$d"
+if (( maxlen <= 80 )); then
+    ok "[detail] no line exceeds the terminal width [$maxlen]"
+else
+    bad "[detail] a line exceeds the terminal width" "$maxlen > 80"
+fi
+
+echo "── DETAIL reload: an answered record follows its id out of OPEN into ANSWERED"
+reload_id=$("$HQD" add --repo proj --pr 55 --title "Pick a reload target" \
+    --option 'a|A' --option 'b|B' --recommend a --session proj-hub)
+decisions_read_seen_cutoff
+load_data
+show_answered=false
+view_mode=list
+decisions_locate_id "$reload_id"
+decisions_enter_detail "$LOCATE_IDX"
+"$HQD" answer "$reload_id" b "owner note" >/dev/null
+load_data
+build_frame
+paint >/dev/null
+check "the repaint shows ANSWERED" "$(printf '%s' "$screen_out" | grep -c '✓ ANSWERED')" "1"
+check "the repaint's bar says answered by you" "$(printf '%s' "$screen_out" | grep -c 'answered by you')" "1"
+check "the chosen option is marked owner chose" "$(printf '%s' "$screen_out" | grep -c '· owner chose')" "1"
+check "no stale TO ANSWER bar remains" "$(printf '%s' "$screen_out" | grep -c 'TO ANSWER')" "0"
+
 # ── scrolling (screen_out, no terminal) ──
 
 echo "── scrolling: a store with 30 open records under LINES=20"
-work2=$(mktemp -d "${TMPDIR:-/tmp}/hq-decisions-scroll.XXXXXX")
+work2=$(mktemp -d "$work/hq-decisions-scroll.XXXXXX")
 export HQ_DECISIONS_DIR="$work2/decisions"
 # DECISIONS_DIR (bin/hq-decision's global) was fixed at the `source "$HQDS"`
 # above; the sourced functions below need it repointed explicitly.
@@ -295,6 +356,7 @@ build_frame
 check "cursor_map has one entry per record" "${#cursor_map[@]}" "30"
 selected=$(( ${#cursor_map[@]} - 1 ))
 entry="${cursor_map[$selected]}"; idx="${entry#*:}"; selected_id="${d_id[$idx]}"
+last_title="${d_title[$idx]}"
 build_frame
 paint >/dev/null
 nlines=$(printf '%s' "$screen_out" | grep -c '')
@@ -305,21 +367,18 @@ check "the last line is the footer" \
     "$(printf '%s' "$screen_out" | sed -n "${nlines}p")" \
     "$(printf '%s' "$frame_foot" | sed -n '1p')"
 cursor_line=$(printf '%s' "$screen_out" | grep '›')
-case "$cursor_line" in
-    *"proj #"*) ok "the cursor row at the last entry is rendered [$cursor_line]" ;;
-    *) bad "no cursor row rendered" "$cursor_line" ;;
-esac
+check "the › line is the LAST record's row (cursor_map's last entry)" \
+    "$(printf '%s' "$cursor_line" | grep -Fc -- "$last_title")" "1"
 
 echo "── scrolling: moving the cursor to row 0 repaints with row 0 visible"
 selected=0
 entry="${cursor_map[$selected]}"; idx="${entry#*:}"; selected_id="${d_id[$idx]}"
+first_title="${d_title[$idx]}"
 build_frame
 paint >/dev/null
 first_cursor_line=$(printf '%s' "$screen_out" | grep '›')
-case "$first_cursor_line" in
-    *"proj #"*) ok "a cursor row is rendered after moving to row 0 [$first_cursor_line]" ;;
-    *) bad "no cursor row rendered" "$first_cursor_line" ;;
-esac
+check "the › line is the FIRST record's row (cursor_map's first entry)" \
+    "$(printf '%s' "$first_cursor_line" | grep -Fc -- "$first_title")" "1"
 if [[ "$cursor_line" != "$first_cursor_line" ]]; then
     ok "the cursor row changed after moving to row 0"
 else
