@@ -223,6 +223,24 @@ f8=$(find "$HQ_DECISIONS_DIR" -type f -name "*-$id8.json")
 "$HQD" answer "$id8" b --auto "auto note after the option" >/dev/null 2>"$work/e_autoafter"
 check "--auto right after OPTION-ID also writes by=auto" "$(jq -r '.answer.by' "$f8")" "auto"
 
+# ── --why ──────────────────────────────────────────────
+
+echo "── add --why stores the rationale; without it, no why key"
+id_why=$("$HQD" add --repo proj --pr 40 --title "Pick a queue depth" \
+    --option 'a|10' --option 'b|100' --recommend b --why "100 amortizes better under bursty load" 2>"$work/e_why")
+f_why=$(find "$HQ_DECISIONS_DIR" -type f -name "*-$id_why.json")
+check "why field is stored" "$(jq -r '.why' "$f_why")" "100 amortizes better under bursty load"
+
+id_nowhy=$("$HQD" add --repo proj --pr 41 --title "Pick a thread count" \
+    --option 'a|2' --option 'b|4' --recommend a 2>"$work/e_nowhy")
+f_nowhy=$(find "$HQ_DECISIONS_DIR" -type f -name "*-$id_nowhy.json")
+check "no --why means no why key" "$(jq 'has("why")' "$f_nowhy")" "false"
+
+echo "── update --why sets it on an existing record"
+"$HQD" update "$id_nowhy" --why "2 keeps contention low" >/dev/null 2>"$work/e_updwhy"
+check "update --why exits 0" "$?" "0"
+check "update --why sets the field" "$(jq -r '.why' "$f_nowhy")" "2 keeps contention low"
+
 echo "── an old record with no answer.by field reads as owner"
 old_file="$HQ_DECISIONS_DIR/proj/19990101T000000Z-oldabc.json"
 mkdir -p "$(dirname "$old_file")"
@@ -234,6 +252,8 @@ cat > "$old_file" <<'EOF'
 EOF
 check "list --json normalises the missing by to owner" \
     "$("$HQD" list --json | jq -r '.[] | select(.id == "oldabc") | .answer.by')" "owner"
+check "a record with no why key passes through with has(why) false" \
+    "$("$HQD" list --json | jq -r '.[] | select(.id == "oldabc") | has("why")')" "false"
 check "the BY column shows owner for the old record" \
     "$("$HQD" list | grep oldabc | awk '{print $3}')" "owner"
 check "the BY column shows auto for an auto-answered record" \

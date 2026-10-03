@@ -25,10 +25,11 @@ usage: hq-decision add --repo R [--pr N | --branch B] --title T
                         --option 'id|label|description' (2+, repeatable)
                         --recommend ID
                         [--context TEXT | --context-file F] [--key K]
-                        [--session NAME]
+                        [--session NAME] [--why TEXT]
        hq-decision update ID [--title T] [--recommend ID]
                         [--context TEXT | --context-file F]
                         [--option 'id|label|description' (2+, repeatable)]
+                        [--why TEXT]
        hq-decision answer [--auto] ID OPTION-ID [NOTE ...]
        hq-decision list [--open] [--repo R] [--json]
        hq-decision --help
@@ -48,6 +49,8 @@ Record fields:
   repo, pr, branch, title, context
   options   [{id, label, description}]
   recommend the id of the recommended option
+  why       optional: the recommendation's rationale. Absent unless set by
+            `--why`; a record written before this field existed has none.
   session   --session, else the caller's tmux session when $TMUX is set,
             else "-".
   created, updated   date -u +%Y-%m-%dT%H:%M:%SZ
@@ -216,7 +219,7 @@ decision_parse_option() {
 
 cmd_add() {
     local repo="" pr="" branch="" title="" context="" context_file="" key=""
-    local session="" recommend="" opts_json="[]"
+    local session="" recommend="" opts_json="[]" why=""
     while (( $# )); do
         case "$1" in
             --repo) repo="$2"; shift 2 ;;
@@ -232,6 +235,7 @@ cmd_add() {
             --context-file) context_file="$2"; shift 2 ;;
             --key) key="$2"; shift 2 ;;
             --session) session="$2"; shift 2 ;;
+            --why) why="$2"; shift 2 ;;
             *) echo "hq-decision: add: unknown argument '$1'" >&2; return 2 ;;
         esac
     done
@@ -304,14 +308,14 @@ cmd_add() {
         --argjson pr "$pr_json" --argjson branch "$branch_json" \
         --arg title "$title" --arg context "$context" \
         --argjson options "$opts_json" --arg recommend "$recommend" \
-        --arg session "$session" --arg created "$created" \
+        --arg session "$session" --arg created "$created" --arg why "$why" \
         '{
             id: $id, key: $key, repo: $repo, pr: $pr, branch: $branch,
             title: $title, context: $context, options: $options,
             recommend: $recommend, session: $session,
             created: $created, updated: $created,
             state: "open", answer: null
-        }')
+        } + (if $why != "" then {why: $why} else {} end)')
 
     local stamp file
     stamp=$(printf '%s' "$created" | tr -d ':-')
@@ -338,7 +342,7 @@ cmd_update() {
     state=$(jq -r '.state' "$file")
     [[ "$state" == open ]] || { echo "hq-decision: '$id' is answered — update refuses to touch it" >&2; return 1; }
 
-    local title="" context="" context_file="" recommend=""
+    local title="" context="" context_file="" recommend="" why=""
     local opts_json="" have_opts=false
     while (( $# )); do
         case "$1" in
@@ -346,6 +350,7 @@ cmd_update() {
             --recommend) recommend="$2"; shift 2 ;;
             --context) context="$2"; shift 2 ;;
             --context-file) context_file="$2"; shift 2 ;;
+            --why) why="$2"; shift 2 ;;
             --option)
                 have_opts=true
                 [[ -n "$opts_json" ]] || opts_json="[]"
@@ -379,11 +384,13 @@ cmd_update() {
         --arg context "$context" --arg has_context "$([[ -n "$context" || -n "$context_file" ]] && echo true || echo false)" \
         --arg recommend "$recommend" --arg has_recommend "$([[ -n "$recommend" ]] && echo true || echo false)" \
         --argjson options "${opts_json:-null}" --arg has_options "$have_opts" \
+        --arg why "$why" --arg has_why "$([[ -n "$why" ]] && echo true || echo false)" \
         --arg updated "$updated" '
         (if $has_title == "true" then .title = $title else . end)
         | (if $has_context == "true" then .context = $context else . end)
         | (if $has_options == "true" then .options = $options else . end)
         | (if $has_recommend == "true" then .recommend = $recommend else . end)
+        | (if $has_why == "true" then .why = $why else . end)
         | .updated = $updated
     ' "$file")
 
