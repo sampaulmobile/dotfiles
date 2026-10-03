@@ -229,6 +229,8 @@ here (bash 3.2 rejects fractional timeouts).
   writes. The alternative, no write: use the newest OWNER answer's time as
   the cutoff — a proxy for "looked", wrong whenever the owner looks without
   answering.
+  ANSWERED at the gate: the recommendation — the viewer writes
+  `_state/seen`, `--dump` only reads it.
 
 Reading the code changed: the rule is in THREE places, not two —
 `templates/hq/CLAUDE.md` restates it too; and hq SKILL's gate bullet also
