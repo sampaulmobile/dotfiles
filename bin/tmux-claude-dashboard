@@ -23,10 +23,11 @@
 #            for a row sitting in a /feature or /address-review worktree,
 #            from the snapshot's pipelines source. Dropped, like any column,
 #            before the session name truncates.
-# Keys: j/k navigate · ⏎ switch to the row's exact pane · x kill row (the
-# session when it is that session's only agent row, else just the pane) ·
-# X prune gone rows · a toggle agent trees · r refresh · R hard refresh
-# (clears the token cache) · q quit.
+# Keys: j/k navigate · ⏎ switch to the row's exact pane · space mark/unmark
+# the row (✓) and move down · u clear marks · x kill the marked rows, or the
+# cursor row when none is marked (a session goes whole when every agent row
+# of it is in the kill, else just those panes) · X prune gone rows · a toggle
+# agent trees · r refresh · R hard refresh (clears the token cache) · q quit.
 # Agent trees: a session row expands into its live subagents, indented by
 # spawn depth, parents first, on the same grid. STATUS is `working 12m`
 # (since spawn) or `idle 3m` (since last write); MODEL is agentType·model
@@ -99,6 +100,7 @@ BOLD_RED=$'\033[1;31m'
 GREEN=$'\033[32m'
 DIM_GREEN=$'\033[2;32m'
 DIM_RED=$'\033[2;31m'
+MAGENTA=$'\033[35m'
 # cursor-row background, re-armed after every field's own reset; a fixed
 # dark grey (256-color) rather than ANSI bright-black, whose palette
 # mapping is too light under the dim fields. Assumes a dark theme.
@@ -145,46 +147,97 @@ reload_sessions() {
     fi
     (( selected >= session_count )) && selected=$(( session_count - 1 ))
     (( selected < 0 )) && selected=0
+    prune_marks
 }
 
-# session_row_count <tmux-session-name>
-#   How many rows (claude panes) the current row list has for a session —
-#   decides whether killing a row means the pane or the whole session.
-session_row_count() {
-    local sess="$1" n=0 j
-    for j in "${!sessions[@]}"; do
-        [[ "${sessions[$j]}" == "$sess" ]] && (( n++ ))
+# Marks are a space-padded list of pane ids, not row indices: rows re-sort
+# by activity on every reload, a pane id does not move.
+marked=" "
+is_marked() { [[ "$marked" == *" $1 "* ]]; }
+toggle_mark() {
+    if is_marked "$1"; then marked="${marked/ $1 / }"; else marked+="$1 "; fi
+}
+# prune_marks — drops marks whose pane no longer has a row.
+prune_marks() {
+    local kept=" " p
+    for p in "${panes[@]}"; do
+        is_marked "$p" && kept+="$p "
     done
-    echo "$n"
+    marked="$kept"
 }
 
-# kill_selected_row
-#   Kills the row at the current selection: the whole tmux session when this
-#   is its only agent row, otherwise just this pane — killing a secondary
-#   agent must never take down the session's primary one. No silent failure
-#   paths: every refusal is reported via kill_error for the caller to show.
-#   Killing the dashboard's own host session is ALLOWED (the x handler warns
-#   first); with detach-on-destroy off the client just moves to the last
-#   session, and this window dies with its host.
+# plan_kill <row-index>...
+#   Splits a batch of rows into kill_sessions and kill_panes: a session goes
+#   whole only when EVERY agent row of it is in the batch, else just the
+#   batch's panes in it — killing a secondary agent must never take down the
+#   session's primary one. Returns 1 (with kill_error) on an empty target.
 kill_error=""
-kill_selected_row() {
+plan_kill() {
+    kill_sessions=()
+    kill_panes=()
     kill_error=""
-    (( session_count == 0 )) && { kill_error="no sessions"; return 1; }
-    local sess="${sessions[$selected]}" pane="${panes[$selected]}"
-    [[ -z "$sess" || -z "$pane" ]] && { kill_error="empty target (row/session index mismatch?)"; return 1; }
-    local err
-    if (( $(session_row_count "$sess") > 1 )); then
-        if ! err=$(tmux kill-pane -t "$pane" 2>&1); then
-            kill_error="tmux: ${err:-kill-pane failed}"
+    local batch=" " i j s whole k dup
+    for i in "$@"; do batch+="$i "; done
+    for i in "$@"; do
+        s="${sessions[$i]}"
+        if [[ -z "$s" || -z "${panes[$i]}" ]]; then
+            kill_error="empty target (row/session index mismatch?)"
             return 1
         fi
-    else
+        whole=1
+        for j in "${!sessions[@]}"; do
+            if [[ "${sessions[$j]}" == "$s" && "$batch" != *" $j "* ]]; then
+                whole=0
+                break
+            fi
+        done
+        if (( whole )); then
+            dup=0
+            for k in "${kill_sessions[@]}"; do
+                [[ "$k" == "$s" ]] && { dup=1; break; }
+            done
+            (( dup )) || kill_sessions+=("$s")
+        else
+            kill_panes+=("${panes[$i]}")
+        fi
+    done
+}
+
+# run_kill <dashboard-host-session>
+#   Executes plan_kill's lists. The dashboard's own host session goes last:
+#   with detach-on-destroy off the client moves to the last session, and
+#   this window dies with its host. No silent failure: every tmux refusal is
+#   collected into kill_error, and any one makes it return 1.
+run_kill() {
+    local myself="$1" s p err self=""
+    kill_error=""
+    for p in "${kill_panes[@]}"; do
+        err=$(tmux kill-pane -t "$p" 2>&1) \
+            || kill_error+="${kill_error:+; }tmux: ${err:-kill-pane $p failed}"
+    done
+    for s in "${kill_sessions[@]}"; do
+        [[ "$s" == "$myself" ]] && { self="$s"; continue; }
         # exact name match (= prefix prevents tmux prefix-matching)
-        if ! err=$(tmux kill-session -t "=${sess}" 2>&1); then
-            kill_error="tmux: ${err:-kill-session failed}"
-            return 1
-        fi
+        err=$(tmux kill-session -t "=${s}" 2>&1) \
+            || kill_error+="${kill_error:+; }tmux: ${err:-kill-session $s failed}"
+    done
+    if [[ -n "$self" ]]; then
+        err=$(tmux kill-session -t "=${self}" 2>&1) \
+            || kill_error+="${kill_error:+; }tmux: ${err:-kill-session $self failed}"
     fi
+    [[ -z "$kill_error" ]]
+}
+
+# reload_after_kill — re-collects rows, exiting when none are left.
+reload_after_kill() {
+    reload_sessions
+    if (( session_count == 0 )); then
+        printf '\033[H\033[2J'
+        printf "${DIM}  No agent sessions running.${RST}\n"
+        read -rsn1
+        exit 0
+    fi
+    load_data
 }
 
 # get_row_stats <row-name> <jsonl-path> [agent]
@@ -386,8 +439,9 @@ build_frame() {
 
     local out=""
 
-    local rhs="[⏎ · x · X · a · r · q]"
+    local rhs="[⏎ · ␣ · x · X · a · r · q]"
     (( cols >= 80 )) && rhs="[⏎ switch · x kill · X prune · a agents · r refresh · q quit]"
+    (( cols >= 90 )) && rhs="[⏎ switch · ␣ mark · x kill · X prune · a agents · r refresh · q quit]"
     local title="  Agent Sessions"
     local pad=$(( cols - ${#title} - ${#rhs} ))
     (( pad < 1 )) && pad=1
@@ -695,8 +749,9 @@ build_frame() {
     # Responsive like the header rhs above: the full key list is 85 chars,
     # which wraps and garbles the display on an 80-column terminal. Drop
     # text at narrow widths instead of letting the line wrap.
-    local footer="  j/k navigate · ⏎ switch · x kill · X prune · r refresh · R hard · q quit"
-    (( cols >= 85 )) && footer="  j/k navigate · ⏎ switch · x kill · X prune · a agents · r refresh · R hard · q quit"
+    local footer="  j/k · ⏎ · ␣ mark · x kill · X prune · r · q"
+    (( cols >= 80 )) && footer="  j/k navigate · ⏎ switch · ␣ mark · x kill · X prune · r refresh · q quit"
+    (( cols >= 95 )) && footer="  j/k navigate · ⏎ switch · ␣ mark · x kill · X prune · a agents · r refresh · R hard · q quit"
     out+="${DIM}${footer}${RST}"
     frame_foot="$out"
 }
@@ -712,21 +767,29 @@ render() {
     now=$(date +%s)
     (( cols != frame_cols || now - frame_at >= 30 )) && build_frame
 
-    local out="$frame_head" i row
+    local out="$frame_head" i row c0 c1 name_on nmarked=0
     for i in "${!frame_rows[@]}"; do
         row="${frame_rows[$i]}"
+        c0=" " c1=" " name_on=""
+        if is_marked "${panes[$i]}"; then
+            c1="${MAGENTA}✓${RST}"
+            name_on="$MAGENTA"
+            (( nmarked++ ))
+        fi
         if (( i == selected )); then
-            row="${CYAN}▸ ${RST}${row:2}"
-            row="${row//$'\x01'/$BOLD}"
+            row="${CYAN}▸${RST}${c1}${row:2}"
+            row="${row//$'\x01'/$BOLD$name_on}"
             row="${row//$'\x02'/$RST}"
             row="${SEL}${row//"$RST"/${RST}${SEL}}${RST}"
         else
-            row="${row//$'\x01'/}"
-            row="${row//$'\x02'/}"
+            row="${c0}${c1}${row:2}"
+            row="${row//$'\x01'/$name_on}"
+            row="${row//$'\x02'/${name_on:+$RST}}"
         fi
         out+="${row}"$'\n'"${frame_trees[$i]}"
     done
     out+="$frame_foot"
+    (( nmarked > 0 )) && out+=$'\n'"  ${MAGENTA}${nmarked} marked${RST}${DIM} · x kills them · u clears${RST}"
 
     printf '\033[H\033[2J%s' "$out"
 }
@@ -897,7 +960,7 @@ load_data
 # input loop — no auto-refresh, just respond to keys
 while true; do
     key=""
-    read -rsn1 key || true
+    IFS= read -rsn1 key || true
 
     if [[ "$key" == $'\x1b' ]]; then
         read -rsn2 -t 0.1 seq || true
@@ -931,77 +994,83 @@ while true; do
             reload_sessions
             load_data
             ;;
-        x)
-            # kill selected row (confirm if live) — see kill_selected_row
+        " ")
             if (( session_count > 0 )); then
-                _do_kill=0
-                _kill_what="session"
-                (( $(session_row_count "${sessions[$selected]}") > 1 )) && _kill_what="pane"
+                toggle_mark "${panes[$selected]}"
+                (( selected < session_count - 1 )) && (( selected++ ))
+                render
+            fi
+            ;;
+        u)
+            marked=" "
+            render
+            ;;
+        x)
+            # kill the marked rows, else the cursor row (confirm unless every
+            # target is gone) — see plan_kill / run_kill
+            if (( session_count > 0 )); then
+                _rows=()
+                for i in "${!panes[@]}"; do
+                    is_marked "${panes[$i]}" && _rows+=("$i")
+                done
+                (( ${#_rows[@]} > 0 )) || _rows=("$selected")
                 _myself=$(tmux display-message -p '#S' 2>/dev/null)
-                _selfwarn=""
-                [[ "$_kill_what" == "session" && "${sessions[$selected]}" == "$_myself" ]] && _selfwarn=" ${RED}— hosts THIS dashboard, it will close too${RST}${YELLOW}"
-                if [[ "${statuses[$selected]}" == "gone" && -z "$_selfwarn" ]]; then
-                    _do_kill=1
-                else
-                    # confirm before killing a live (or self-hosting) target
-                    tput cnorm 2>/dev/null
-                    printf '\033[%d;3H' $(( session_count + 6 ))
-                    printf "${YELLOW}Kill ${_kill_what} ${names[$selected]}${_selfwarn}? [y/N]${RST} "
-                    _confirm=""
-                    read -rsn1 _confirm
-                    tput civis 2>/dev/null
-                    [[ "$_confirm" == "y" || "$_confirm" == "Y" ]] && _do_kill=1
-                fi
-                if (( _do_kill )); then
-                    if kill_selected_row; then
-                        reload_sessions
-                        if (( session_count == 0 )); then
-                            printf '\033[H\033[2J'
-                            printf "${DIM}  No agent sessions running.${RST}\n"
-                            read -rsn1
-                            exit 0
-                        fi
-                        load_data
+                _do_kill=0
+                if plan_kill "${_rows[@]}"; then
+                    _selfwarn=""
+                    for _s in "${kill_sessions[@]}"; do
+                        [[ "$_s" == "$_myself" ]] && _selfwarn=" ${RED}— hosts THIS dashboard, it will close too${RST}${YELLOW}"
+                    done
+                    _all_gone=1
+                    for i in "${_rows[@]}"; do
+                        [[ "${statuses[$i]}" == "gone" ]] || { _all_gone=0; break; }
+                    done
+                    if (( ${#_rows[@]} == 1 )); then
+                        _what="session"
+                        (( ${#kill_panes[@]} > 0 )) && _what="pane"
+                        _what+=" ${names[${_rows[0]}]}"
                     else
-                        # no silent failures: show why, wait for ack
-                        printf '\033[%d;3H' $(( session_count + 6 ))
-                        printf "${RED}kill failed: %s${RST} (any key) " "$kill_error"
-                        read -rsn1
-                        render
+                        _what="${#_rows[@]} rows (${#kill_sessions[@]} sessions, ${#kill_panes[@]} panes)"
                     fi
+                    if (( _all_gone )) && [[ -z "$_selfwarn" ]]; then
+                        _do_kill=1
+                    else
+                        tput cnorm 2>/dev/null
+                        printf '\033[%d;3H' $(( session_count + 6 ))
+                        printf "${YELLOW}Kill ${_what}${_selfwarn}? [y/N]${RST} "
+                        _confirm=""
+                        read -rsn1 _confirm
+                        tput civis 2>/dev/null
+                        [[ "$_confirm" == "y" || "$_confirm" == "Y" ]] && _do_kill=1
+                    fi
+                fi
+                if (( _do_kill )) && run_kill "$_myself"; then
+                    reload_after_kill
+                elif [[ -n "$kill_error" ]]; then
+                    # no silent failures: show why, wait for ack; a batch may
+                    # have half-succeeded, so re-collect either way
+                    printf '\033[%d;3H' $(( session_count + 6 ))
+                    printf "${RED}kill failed: %s${RST} (any key) " "$kill_error"
+                    read -rsn1
+                    (( _do_kill )) && reload_after_kill || render
                 else
                     render
                 fi
             fi
             ;;
         X)
-            # Prune gone rows: kill the session only when EVERY row of it is
-            # gone, else just the gone panes — never take a live one down.
-            _killed=0
+            # prune gone rows — same session-vs-pane rule as x
+            _rows=()
             for i in "${!sessions[@]}"; do
-                [[ "${statuses[$i]}" == "gone" ]] || continue
-                _all_gone=1
-                for j in "${!sessions[@]}"; do
-                    if [[ "${sessions[$j]}" == "${sessions[$i]}" && "${statuses[$j]}" != "gone" ]]; then
-                        _all_gone=0
-                        break
-                    fi
-                done
-                if (( _all_gone )); then
-                    tmux kill-session -t "=${sessions[$i]}" 2>/dev/null && (( _killed++ ))
-                else
-                    tmux kill-pane -t "${panes[$i]}" 2>/dev/null && (( _killed++ ))
-                fi
+                [[ "${statuses[$i]}" == "gone" ]] && _rows+=("$i")
             done
-            if (( _killed > 0 )); then
-                reload_sessions
-                if (( session_count == 0 )); then
-                    printf '\033[H\033[2J'
-                    printf "${DIM}  No agent sessions running.${RST}\n"
+            if (( ${#_rows[@]} > 0 )) && plan_kill "${_rows[@]}"; then
+                if ! run_kill "$(tmux display-message -p '#S' 2>/dev/null)"; then
+                    printf '\033[%d;3H' $(( session_count + 6 ))
+                    printf "${RED}prune failed: %s${RST} (any key) " "$kill_error"
                     read -rsn1
-                    exit 0
                 fi
-                load_data
+                reload_after_kill
             fi
             ;;
         R)
