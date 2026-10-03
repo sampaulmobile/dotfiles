@@ -103,18 +103,18 @@ ask the user, before dispatching.
   <seat>` · PR · updated. A worktree with no run in flight has no row.
   `bin/worktrees` shows the same state as its PIPELINE column.
   A `phase: gate` line means that run is waiting on the requester, not
-  working: relay its digest to the user, and on a go send that go by message
-  to the task session itself, which resumes at its implement step. The file
+  working: review and give or relay the go per
+  `~/.claude/skills/feature/SKILL.md`'s "After a Launch, on the requester's
+  side" (same section this session loaded for `--requester=`). The file
   yields the phase, never the digest itself: for a run this session launched
   it arrived here as a message, and otherwise it is at the top of that
   worktree's `workplans/<slug>-plan.md`, or of `.feature/plan.md` when
   workplans are off.
-- A decision that is the owner's call never goes into chat without a record:
-  run `~/dotfiles/bin/hq-decision add` first (flags in its `--help`), with
-  the options and your recommendation, then tell the user and quote the id.
-  Revisiting it means `update <id>` or `answer <id>`, never a second `add`;
-  when the owner answers in chat, run `hq-decision answer <id> <option>`.
-  Never ask it modally — the record and the chat line are the whole ask.
+- A decision that is the owner's call never goes into chat without a
+  record — the auto-take test, the asked/auto-taken split and the
+  `hq-decision` calls are all in that same section of
+  `~/.claude/skills/feature/SKILL.md`; this session follows it rather than
+  its own copy.
 - Relay results to the user as they land — PR URLs and summaries, or the
   findings when a `--quick` run produced no commits, not implementation detail.
 - Multi-repo: report per-piece status; the feature is done only when every

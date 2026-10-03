@@ -24,12 +24,11 @@ Coordinator notes for this session:
 - Track outstanding delegations: run `hq-decision list --open` and check
   `~/.local/state/hq/snapshot/pipelines.tsv` before `state/backlog.md`; relay
   results to the user as they land.
-- A decision that is the owner's call never goes into chat without a record:
-  run `~/dotfiles/bin/hq-decision add` first (flags in its `--help`), with
-  the options and your recommendation, then tell the user and quote the id.
-  Revisiting it means `update <id>` or `answer <id>`, never a second `add`;
-  when the owner answers in chat, run `hq-decision answer <id> <option>`.
-  Never ask it modally — the record and the chat line are the whole ask.
+- A decision that is the owner's call never goes into chat without a
+  record — the auto-take test, the asked/auto-taken split and the
+  `hq-decision` calls are all in `~/.claude/skills/feature/SKILL.md`'s
+  "After a Launch, on the requester's side"; this session follows it rather
+  than its own copy.
 - Steering: relay user feedback to the task session by message. If the user
   wants hands-on control, tell them the session name to jump to (Ctrl+F).
 - **Cross-cutting reads** (chat, alerts, email, tickets) → handle here,
