@@ -222,7 +222,8 @@ usage: hq-snapshot <source>...      collect those sources now
        hq-snapshot all              collect every source
        hq-snapshot tick             the statusbar's entry (see below)
        hq-snapshot age [<source>]   seconds since each source was written
-       hq-snapshot --check          doctor mode: every source present, fresh
+       hq-snapshot --check          doctor mode: every source present and fresh
+                                    (inbox: present)
 
 Sources and their cadence, one TSV each under ~/.local/state/hq/snapshot/
 (override the directory with HQ_SNAPSHOT_DIR):
@@ -238,10 +239,12 @@ Every file starts with a `# generated <ISO time>` line. A reader treats a
 snapshot older than three times its cadence as unusable and computes live.
 
 tick is called by bin/tmux-claude-statusbar every ~5s: it collects pipelines
-then inbox inline and spawns the slower sources when they are due and not
-already running. sessions is written by the statusbar itself, which has just
-run the scan — `hq-snapshot sessions` is the standalone path, for a machine
-whose status bar is not ticking.
+inline and spawns the slower sources when they are due and not already
+running; a tick that finds another one running exits at once. inbox is not
+ticked: bin/hq-inbox recollects it when it is stale, so --check flags it only
+when missing. sessions is written by the statusbar itself, which has just run
+the scan — `hq-snapshot sessions` is the standalone path, for a machine whose
+status bar is not ticking.
 
 Nothing under ~/.local/state/hq is ever removed, by this script or any other.
 A failed write leaves <file>.tmp.<pid> behind on purpose; to clear them, run
@@ -457,6 +460,7 @@ case "${1:-}" in
         for s in $SNAPSHOT_SOURCES; do
             name="${s%%:*}"
             v=$(snapshot_verdict "$(snapshot_age "$name")" "${s#*:}")
+            [[ "$name" == inbox && "$v" == stale ]] && continue
             [[ "$v" == fresh ]] || miss+="  $name: $v"$'\n'
         done
         if [[ -n "$miss" ]]; then
@@ -489,8 +493,14 @@ case "${1:-}" in
         exit "$rc"
         ;;
     tick)
+        # One tick at a time: a tick that finds the lock held exits at once.
+        # lockf's lock dies with its process, and -k keeps the file, so
+        # nothing is ever removed to release it.
+        if [[ -z "${HQ_SNAPSHOT_TICK_LOCKED:-}" ]]; then
+            HQ_SNAPSHOT_TICK_LOCKED=1 exec lockf -k -s -t 0 \
+                "${TMPDIR:-/tmp}/hq-snapshot-tick.lock" "$0" tick
+        fi
         collect_one pipelines || rc=1
-        collect_one inbox || rc=1
         for s in worktrees prs; do
             declare -f "collect_$s" >/dev/null 2>&1 || continue
             due "$s" || continue
