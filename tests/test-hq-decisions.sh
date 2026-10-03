@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # bin/hq-decisions: read-only over bin/hq-decision's records; its one write
-# is _state/seen, interactive viewer only.
+# is _state/seen, interactive viewer only. Two views: LIST (one line per
+# decision) and DETAIL (⏎ on a row).
 #
 #   tests/test-hq-decisions.sh
 #
@@ -29,14 +30,15 @@ export HQ_DECISIONS_DIR="$work/decisions"
 HQD="$repo/bin/hq-decision"
 HQDS="$repo/bin/hq-decisions"
 
-# ── sourcing hands back wrap_text and starts no loop ──
+# ── sourcing hands back the pure functions and starts no loop ──
 
 # shellcheck source=/dev/null
 source "$HQDS"
 
 echo "── sourcing hands back the pure functions and starts no loop"
 missing=""
-for fn in wrap_text clip term_size card_age load_data build_frame; do
+for fn in wrap_text clip pad term_size age_of load_data build_frame \
+          decisions_pr_url decisions_locate_id; do
     declare -f "$fn" >/dev/null || missing+="$fn "
 done
 if [[ -z "$missing" ]]; then
@@ -50,21 +52,29 @@ else
     bad "sourcing created the decisions directory" "$HQ_DECISIONS_DIR exists"
 fi
 
-echo "── the screen is read-only over the records and tmux-free"
+echo "── the screen is read-only over the records, and its only tmux calls are g's"
 if ! grep -qwE '\brm\b|rmdir|unlink|-delete' "$HQDS"; then
     ok "the screen contains no deletion"
 else
     bad "the screen contains a deletion" "$(grep -nwE '\brm\b|rmdir|unlink|-delete' "$HQDS")"
 fi
 # Strip the usage() heredoc (prose, not code) and comment lines before
-# looking for an actual invocation — "tmux" otherwise only appears in text
-# describing its own absence.
+# looking for an actual invocation — "tmux" otherwise also appears in text
+# describing the feature.
 code_only=$(awk '/<<.?EOF.?$/{skip=1; next} skip && /^EOF$/{skip=0; next} skip{next} {print}' "$HQDS")
-tmux_calls=$(printf '%s\n' "$code_only" | grep -v '^[[:space:]]*#' | grep 'tmux')
-if [[ -z "$tmux_calls" ]]; then
-    ok "no tmux call anywhere in the screen"
+tmux_calls=$(printf '%s\n' "$code_only" | grep -v '^[[:space:]]*#' | grep -oE 'tmux [a-z-]+')
+bad_tmux=$(printf '%s\n' "$tmux_calls" | grep -vE '^tmux (display|list-clients|has-session|switch-client)$')
+if [[ -z "$bad_tmux" ]]; then
+    ok "every tmux call is in {display, list-clients, has-session, switch-client}"
 else
-    bad "a tmux call is present" "$tmux_calls"
+    bad "a tmux call outside that set is present" "$bad_tmux"
+fi
+switch_calls=$(printf '%s\n' "$code_only" | grep 'tmux switch-client')
+no_c_flag=$(printf '%s\n' "$switch_calls" | grep -v -- '-c ')
+if [[ -z "$switch_calls" || -z "$no_c_flag" ]]; then
+    ok "every switch-client carries -c"
+else
+    bad "a switch-client without -c is present" "$no_c_flag"
 fi
 if ! grep -qE 'read .*-t *[0-9]*\.[0-9]' "$HQDS"; then
     ok "the key loop has no fractional read -t"
@@ -83,7 +93,7 @@ check "SEEN_CUTOFF_EPOCH is set from it" "$([[ "$SEEN_CUTOFF_EPOCH" -gt 0 ]] && 
 check "no .tmp. file is left behind" "$(find "$HQ_DECISIONS_DIR/_state" -type f -name '*.tmp.*' | wc -l | tr -d ' ')" "0"
 rm -f "$seen_file"
 
-# ── wrap_text unit cases ──
+# ── wrap_text / pad / decisions_pr_url unit cases ──
 
 echo "── wrap_text"
 check "a short line is not wrapped" "$(wrap_text 'hello world' 20)" "hello world"
@@ -104,74 +114,37 @@ noglob_out=$(wrap_text 'see *.json for details' 60)
 cd "$oldpwd"
 check "wrap_text does not glob a '*' word" "$noglob_out" "see *.json for details"
 
+echo "── pad"
+check "pad left-pads by character count" "$(pad ab 5)" "ab   "
+check "pad right-aligns" "$(pad ab 5 right)" "   ab"
+check "pad never truncates" "$(pad abcdef 3)" "abcdef"
+
+echo "── decisions_pr_url"
+check "ssh form" "$(decisions_pr_url 'git@github.com:foo/bar.git' 5)" "https://github.com/foo/bar/pull/5"
+check "ssh form, no .git" "$(decisions_pr_url 'git@github.com:foo/bar' 5)" "https://github.com/foo/bar/pull/5"
+check "ssh:// form" "$(decisions_pr_url 'ssh://git@github.com/foo/bar.git' 5)" "https://github.com/foo/bar/pull/5"
+check "https form" "$(decisions_pr_url 'https://github.com/foo/bar.git' 5)" "https://github.com/foo/bar/pull/5"
+check "a non-github origin yields nothing" "$(decisions_pr_url 'https://gitlab.com/foo/bar' 5; echo rc=$?)" "rc=1"
+
 # ── fixtures ──
 
-"$HQD" add --repo proj --pr 7 --title "Pick a retry budget" \
+open_why_id=$("$HQD" add --repo proj --pr 7 --title "Pick a retry budget" \
     --option 'short|2 attempts|fails fast' \
     --option 'long|5 attempts|more resilient, slower to fail' \
     --recommend long --session proj-hub \
-    --context "A longer context paragraph written to force word wrapping across more than one line when the terminal column count is narrow." \
-    >/dev/null
-"$HQD" add --repo proj --pr 9 --title "Pick a batch size" \
+    --why "fewer retries waste less time on a dead dependency" \
+    --context "A longer context paragraph written to force word wrapping across more than one line when the terminal column count is narrow.")
+open_nowhy_id=$("$HQD" add --repo proj --pr 9 --title "Pick a batch size" \
     --option 'small|10 items|conservative' \
     --option 'large|100 items|faster throughput' \
     --recommend small --session ctx-hub \
-    --context "keep batches under the memory ceiling" \
-    >/dev/null
-answered_id=$("$HQD" add --repo proj --branch feat/y --title "Pick a log level" \
-    --option 'debug|Debug' --option 'info|Info' --recommend info --session proj-hub)
-"$HQD" answer "$answered_id" info "went with info" >/dev/null
-
-echo "── --dump over the fixtures"
-dump=$(NO_COLOR=1 COLUMNS=60 "$HQDS" --dump 2>"$work/dump.err")
-if [[ -s "$work/dump.err" ]]; then bad "--dump wrote to stderr" "$(cat "$work/dump.err")"; fi
-check "the header counts two open and one answered" \
-    "$(printf '%s\n' "$dump" | head -1)" "DECISIONS  2 open · 1 answered"
-check "the open card names its repo/pr and title" \
-    "$(printf '%s\n' "$dump" | grep -c 'proj #7.*Pick a retry budget')" "1"
-check "the open card shows its session" \
-    "$(printf '%s\n' "$dump" | grep -c 'proj-hub')" "1"
-check "a one-line context's words appear" \
-    "$(printf '%s\n' "$dump" | grep -c 'memory ceiling')" "1"
-check "the final words of a wrapped multi-line context appear" \
-    "$(printf '%s\n' "$dump" | grep -c 'is narrow')" "1"
-check "the recommended option is starred" \
-    "$(printf '%s\n' "$dump" | grep -c '★ long')" "1"
-check "the recommended option is noted as such" \
-    "$(printf '%s\n' "$dump" | grep -c '(recommended)')" "2"
-check "the non-recommended option has no star" \
-    "$(printf '%s\n' "$dump" | grep -cE '^ *short +2 attempts')" "1"
-maxlen=0
-while IFS= read -r l; do
-    # The static key-hint footer is not wrapped to the terminal width, only
-    # the cards above it; the footer's own line is exempt.
-    [[ "$l" == *'q quit'* ]] && continue
-    n=$(printf '%s' "$l" | wc -m)
-    (( n > maxlen )) && maxlen=$n
-done <<< "$dump"
-if (( maxlen <= 60 )); then
-    ok "no card line exceeds 60 columns [$maxlen]"
-else
-    bad "a card line exceeds 60 columns" "$maxlen"
-fi
-check "the answered section header appears" "$(printf '%s\n' "$dump" | grep -c '^ANSWERED$')" "1"
-check "the answered row is folded to one line with the chosen label" \
-    "$(printf '%s\n' "$dump" | grep -c 'proj feat/y.*Pick a log level.*→ Info')" "1"
-check "the answered row does not show its note by default (collapsed)" \
-    "$(printf '%s\n' "$dump" | grep -c 'went with info')" "0"
-
-echo "── an empty decisions dir prints the empty message"
-empty_dir="$work/empty"
-dump_empty=$(HQ_DECISIONS_DIR="$empty_dir" NO_COLOR=1 COLUMNS=60 "$HQDS" --dump)
-check "zero decisions" "$(printf '%s\n' "$dump_empty" | grep -c 'no decisions recorded')" "1"
-check "the header still counts zero and zero" \
-    "$(printf '%s\n' "$dump_empty" | head -1)" "DECISIONS  0 open · 0 answered"
-
-# ── auto-take rendering ──
-
+    --context "keep batches under the memory ceiling")
 auto_id=$("$HQD" add --repo proj --pr 30 --title "Pick a cache ttl" \
     --option 'short|5m' --option 'long|1h' --recommend long --session proj-hub)
 "$HQD" answer --auto "$auto_id" long >/dev/null
+owner_id=$("$HQD" add --repo proj --branch feat/y --title "Pick a log level" \
+    --option 'debug|Debug' --option 'info|Info' --recommend info --session proj-hub)
+"$HQD" answer "$owner_id" debug "went with debug despite the rec" >/dev/null
 
 old_file="$HQ_DECISIONS_DIR/proj/19990101T000000Z-oldabc.json"
 mkdir -p "$(dirname "$old_file")"
@@ -182,40 +155,176 @@ cat > "$old_file" <<'EOF'
  "state":"answered","answer":{"option":"a","note":"","at":"1999-01-01T00:00:00Z"}}
 EOF
 
-sleep 1
-fresh_id=$("$HQD" add --repo proj --pr 31 --title "Pick a worker pool" \
-    --option 'a|2' --option 'b|4' --recommend b --session proj-hub)
-"$HQD" answer "$fresh_id" b "owner picked 4, newer than the auto answer" >/dev/null
+longtitle=$(printf 'X%.0s' $(seq 1 200))
+long_id=$("$HQD" add --repo proj --pr 99 --title "$longtitle" \
+    --option 'a|A' --option 'b|B' --recommend a --session proj-hub)
 
-echo "── --dump marks the auto row and leaves owner rows unmarked, with no seen stamp written"
-dump2=$(NO_COLOR=1 COLUMNS=70 "$HQDS" --dump 2>"$work/dump2.err")
-if [[ -s "$work/dump2.err" ]]; then bad "--dump wrote to stderr" "$(cat "$work/dump2.err")"; fi
-check "the auto row is marked (auto)" \
-    "$(printf '%s\n' "$dump2" | grep -c 'Pick a cache ttl.*→ 1h (auto)')" "1"
-check "the owner-answered row carries no (auto) marker" \
-    "$(printf '%s\n' "$dump2" | grep -c 'Pick a log level.*→ Info (auto)')" "0"
-check "the old no-by record renders as a plain owner row with no (auto) marker" \
-    "$(printf '%s\n' "$dump2" | grep -c 'An old decision.*→ A  ·')" "1"
-check "the unseen auto row is first under ANSWERED, ahead of the newer owner answer" \
-    "$(printf '%s\n' "$dump2" | awk '/^ANSWERED$/{f=1;next} f && NF {print; exit}')" \
-    "$(printf '%s\n' "$dump2" | grep 'Pick a cache ttl')"
-check "the header counts the one unseen auto answer" \
-    "$(printf '%s\n' "$dump2" | head -1)" "DECISIONS  2 open · 4 answered  ·  1 auto since you last looked"
-check "--dump creates no _state/seen file" "$([[ -e "$HQ_DECISIONS_DIR/_state/seen" ]] && echo yes || echo no)" "no"
+# ── LIST: header, sections, counts ──
 
-echo "── a seen stamp newer than the auto answer returns it to date order and drops the header count"
-mkdir -p "$HQ_DECISIONS_DIR/_state"
-date -u +%Y-%m-%dT%H:%M:%SZ > "$HQ_DECISIONS_DIR/_state/seen"
-dump3=$(NO_COLOR=1 COLUMNS=70 "$HQDS" --dump)
-check "the header no longer counts any unseen auto answer" \
-    "$(printf '%s\n' "$dump3" | head -1)" "DECISIONS  2 open · 4 answered"
-check "the auto row still carries its (auto) marker once seen" \
-    "$(printf '%s\n' "$dump3" | grep -c 'Pick a cache ttl.*→ 1h (auto)')" "1"
-check "the auto row falls back behind the newer owner answer once seen" \
-    "$(printf '%s\n' "$dump3" | awk '/^ANSWERED$/{f=1;next} f && NF {print; exit}')" \
-    "$(printf '%s\n' "$dump3" | grep 'Pick a worker pool')"
-check "--dump still creates no _state/seen file beyond the one this test wrote" \
-    "$(find "$HQ_DECISIONS_DIR/_state" -type f | wc -l | tr -d ' ')" "1"
+echo "── --dump: header counts and section order"
+dump=$(NO_COLOR=1 COLUMNS=100 "$HQDS" --dump 2>"$work/dump.err")
+if [[ -s "$work/dump.err" ]]; then bad "--dump wrote to stderr" "$(cat "$work/dump.err")"; fi
+check "the header counts 3 open, 1 auto-taken, 2 answered" \
+    "$(printf '%s\n' "$dump" | head -1 | grep -oE '^DECISIONS  [0-9]+ open · [0-9]+ auto-taken · [0-9]+ answered')" \
+    "DECISIONS  3 open · 1 auto-taken · 2 answered"
+check "the unseen-auto marker shows 1" \
+    "$(printf '%s\n' "$dump" | head -1 | grep -c '● 1 auto-taken since you last looked')" "1"
+check "ANSWERED is hidden by default" "$(printf '%s\n' "$dump" | grep -c '^ANSWERED$')" "0"
+check "OPEN precedes AUTO-TAKEN" \
+    "$(printf '%s\n' "$dump" | grep -nE '^(OPEN|AUTO-TAKEN)' | head -2 | cut -d: -f2 | tr '\n' ',')" \
+    "OPEN · needs you,AUTO-TAKEN · taken for you, say so to reverse,"
+check "each open decision appears exactly once" \
+    "$(printf '%s\n' "$dump" | grep -c 'Pick a retry budget')" "1"
+
+echo "── --dump --answered shows the ANSWERED section"
+dumpa=$(NO_COLOR=1 COLUMNS=80 "$HQDS" --dump --answered)
+check "ANSWERED section header appears" "$(printf '%s\n' "$dumpa" | grep -c '^ANSWERED$')" "1"
+check "the owner-answered row is in it" "$(printf '%s\n' "$dumpa" | grep -c 'Pick a log level')" "1"
+check "the old no-by record is in it, rendered as owner" \
+    "$(printf '%s\n' "$dumpa" | grep -c 'An old decision.*✓ a · you')" "1"
+
+# ── LIST: row content per kind, at two widths ──
+
+for cols in 80 160; do
+    echo "── --dump at COLUMNS=$cols: row content and width"
+    d=$(NO_COLOR=1 COLUMNS=$cols "$HQDS" --dump --answered)
+    check "[$cols] open row: where + title + session" \
+        "$(printf '%s\n' "$d" | grep -c 'proj #7.*Pick a retry budget.*proj-hub')" "1"
+    check "[$cols] open row LAST column: star + rec id + label" \
+        "$(printf '%s\n' "$d" | grep -c '★ long · 5 attempts')" "1"
+    check "[$cols] auto row LAST column" \
+        "$(printf '%s\n' "$d" | grep -c '● long · auto')" "1"
+    check "[$cols] answered row LAST column" \
+        "$(printf '%s\n' "$d" | grep -c '✓ debug · you')" "1"
+    check "[$cols] the 200-char title's row is clipped with …" \
+        "$(printf '%s\n' "$d" | grep -c 'XXXX.*….*proj-hub')" "1"
+    maxlen=0
+    while IFS= read -r l; do
+        n=$(printf '%s' "$l" | wc -m)
+        (( n > maxlen )) && maxlen=$n
+    done <<< "$d"
+    if (( maxlen <= cols )); then
+        ok "[$cols] no line exceeds the terminal width [$maxlen]"
+    else
+        bad "[$cols] a line exceeds the terminal width" "$maxlen > $cols"
+    fi
+done
+
+title_w_80=$(printf '%s\n' "$(NO_COLOR=1 COLUMNS=80 "$HQDS" --dump --answered)" | grep -oE 'X+' | awk '{print length}')
+title_w_160=$(printf '%s\n' "$(NO_COLOR=1 COLUMNS=160 "$HQDS" --dump --answered)" | grep -oE 'X+' | awk '{print length}')
+if (( title_w_160 > title_w_80 )); then
+    ok "the title column is wider at 160 than at 80 [$title_w_80 -> $title_w_160]"
+else
+    bad "the title column did not widen" "80:$title_w_80 160:$title_w_160"
+fi
+
+echo "── --dump still creates no _state/seen file"
+check "no seen file after --dump" "$([[ -e "$HQ_DECISIONS_DIR/_state/seen" ]] && echo yes || echo no)" "no"
+
+echo "── an empty decisions dir prints the empty message"
+empty_dir="$work/empty"
+dump_empty=$(HQ_DECISIONS_DIR="$empty_dir" NO_COLOR=1 COLUMNS=60 "$HQDS" --dump)
+check "zero decisions" "$(printf '%s\n' "$dump_empty" | grep -c 'no decisions recorded')" "1"
+check "the header still counts all zero" \
+    "$(printf '%s\n' "$dump_empty" | head -1)" "DECISIONS  0 open · 0 auto-taken · 0 answered"
+
+# ── DETAIL ──
+
+echo "── --dump --detail: open with why"
+d=$(NO_COLOR=1 COLUMNS=80 "$HQDS" --dump --detail "$open_why_id")
+check "state line shows OPEN" "$(printf '%s\n' "$d" | grep -c '^OPEN ·')" "1"
+check "the recommended option is starred and marked recommended" \
+    "$(printf '%s\n' "$d" | grep -c '★ long.*· recommended')" "1"
+check "the why text follows the recommendation" \
+    "$(printf '%s\n' "$d" | grep -c 'why: fewer retries waste less time')" "1"
+check "the TO ANSWER bar names the recommended option and the answer command" \
+    "$(printf '%s' "$d" | tr '\n' ' ' | grep -c 'TO ANSWER.*go with long.*hq-decision answer '"$open_why_id"' long')" "1"
+
+echo "── --dump --detail: open without why"
+d=$(NO_COLOR=1 COLUMNS=80 "$HQDS" --dump --detail "$open_nowhy_id")
+check "no why: line appears" "$(printf '%s\n' "$d" | grep -c '^    why:')" "0"
+
+echo "── --dump --detail: auto-taken"
+d=$(NO_COLOR=1 COLUMNS=80 "$HQDS" --dump --detail "$auto_id")
+check "state line shows AUTO-TAKEN" "$(printf '%s\n' "$d" | grep -c '● AUTO-TAKEN')" "1"
+check "the chosen option is marked as the recommendation" \
+    "$(printf '%s\n' "$d" | grep -c '● long.*was the recommendation')" "1"
+check "TO REVERSE names the other option" \
+    "$(printf '%s' "$d" | tr '\n' ' ' | grep -c 'TO REVERSE.*reverse '"$auto_id"', short instead.*hq-decision answer '"$auto_id"' short')" "1"
+
+echo "── --dump --detail: owner-answered on a non-recommended option"
+d=$(NO_COLOR=1 COLUMNS=80 "$HQDS" --dump --detail "$owner_id")
+check "state line shows ANSWERED" "$(printf '%s\n' "$d" | grep -c '✓ ANSWERED')" "1"
+check "the chosen option is marked owner chose" \
+    "$(printf '%s\n' "$d" | grep -c '✓ debug.*owner chose')" "1"
+check "the note is shown" "$(printf '%s\n' "$d" | grep -c 'went with debug despite the rec')" "1"
+check "the recommended option still shows its star" \
+    "$(printf '%s\n' "$d" | grep -c '★ info.*recommended')" "1"
+check "the bottom bar says answered by you" "$(printf '%s\n' "$d" | grep -c '^answered by you')" "1"
+
+echo "── --dump --detail: an old record with neither why nor answer.by renders as owner"
+d=$(NO_COLOR=1 COLUMNS=80 "$HQDS" --dump --detail oldabc)
+check "state line shows ANSWERED (owner)" "$(printf '%s\n' "$d" | grep -c '✓ ANSWERED')" "1"
+check "no why: line appears" "$(printf '%s\n' "$d" | grep -c '^    why:')" "0"
+
+echo "── --dump --detail: an unknown id exits 1"
+"$HQDS" --dump --detail zzzzzz >/dev/null 2>"$work/e_unknown"
+check "exit 1" "$?" "1"
+check "stderr names the id" "$(grep -c "no such decision 'zzzzzz'" "$work/e_unknown")" "1"
+
+# ── scrolling (screen_out, no terminal) ──
+
+echo "── scrolling: a store with 30 open records under LINES=20"
+work2=$(mktemp -d "${TMPDIR:-/tmp}/hq-decisions-scroll.XXXXXX")
+export HQ_DECISIONS_DIR="$work2/decisions"
+# DECISIONS_DIR (bin/hq-decision's global) was fixed at the `source "$HQDS"`
+# above; the sourced functions below need it repointed explicitly.
+DECISIONS_DIR="$HQ_DECISIONS_DIR"
+for i in $(seq 1 30); do
+    "$HQD" add --repo proj --pr "$i" --title "Decision number $i" \
+        --option 'a|A' --option 'b|B' --recommend a --session hub >/dev/null
+done
+decisions_read_seen_cutoff
+load_data
+check "30 open records loaded" "$n_open" "30"
+COLUMNS=100
+LINES=20
+view_mode=list
+selected_id=""
+build_frame
+check "cursor_map has one entry per record" "${#cursor_map[@]}" "30"
+selected=$(( ${#cursor_map[@]} - 1 ))
+entry="${cursor_map[$selected]}"; idx="${entry#*:}"; selected_id="${d_id[$idx]}"
+build_frame
+paint >/dev/null
+nlines=$(printf '%s' "$screen_out" | grep -c '')
+if (( nlines <= 20 )); then ok "screen_out has <= 20 lines [$nlines]"; else bad "screen_out exceeds LINES" "$nlines"; fi
+check "the first line is the header" \
+    "$(printf '%s' "$screen_out" | sed -n '1p' | grep -oE '^DECISIONS')" "DECISIONS"
+check "the last line is the footer" \
+    "$(printf '%s' "$screen_out" | sed -n "${nlines}p")" \
+    "$(printf '%s' "$frame_foot" | sed -n '1p')"
+cursor_line=$(printf '%s' "$screen_out" | grep '›')
+case "$cursor_line" in
+    *"proj #"*) ok "the cursor row at the last entry is rendered [$cursor_line]" ;;
+    *) bad "no cursor row rendered" "$cursor_line" ;;
+esac
+
+echo "── scrolling: moving the cursor to row 0 repaints with row 0 visible"
+selected=0
+entry="${cursor_map[$selected]}"; idx="${entry#*:}"; selected_id="${d_id[$idx]}"
+build_frame
+paint >/dev/null
+first_cursor_line=$(printf '%s' "$screen_out" | grep '›')
+case "$first_cursor_line" in
+    *"proj #"*) ok "a cursor row is rendered after moving to row 0 [$first_cursor_line]" ;;
+    *) bad "no cursor row rendered" "$first_cursor_line" ;;
+esac
+if [[ "$cursor_line" != "$first_cursor_line" ]]; then
+    ok "the cursor row changed after moving to row 0"
+else
+    bad "the cursor row did not change" "$cursor_line"
+fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))
