@@ -21,9 +21,15 @@ don't re-derive them here.
 
 Coordinator notes for this session:
 
-- Track outstanding delegations: read the inbox thread files under
-  `~/.local/state/hq/inbox/` before `state/backlog.md`; relay results to the
-  user as they land.
+- Track outstanding delegations: run `hq-decision list --open` and check
+  `~/.local/state/hq/snapshot/pipelines.tsv` before `state/backlog.md`; relay
+  results to the user as they land.
+- A decision that is the owner's call never goes into chat without a record:
+  run `~/dotfiles/bin/hq-decision add` first (flags in its `--help`), with
+  the options and your recommendation, then tell the user and quote the id.
+  Revisiting it means `update <id>` or `answer <id>`, never a second `add`;
+  when the owner answers in chat, run `hq-decision answer <id> <option>`.
+  Never ask it modally — the record and the chat line are the whole ask.
 - Steering: relay user feedback to the task session by message. If the user
   wants hands-on control, tell them the session name to jump to (Ctrl+F).
 - **Cross-cutting reads** (chat, alerts, email, tickets) → handle here,
