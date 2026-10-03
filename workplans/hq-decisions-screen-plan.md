@@ -342,3 +342,26 @@ Go from the requester: all seven choices accepted as stated. Ship step: no
 separate PR — once the review loop is CLEAN, push `feat/hq-decisions-screen`
 and report branch, head sha, summary, rounds and the VERIFY outputs; the
 requester fast-forwards `feat/hq-decisions` onto it and updates PR #47.
+
+## Amendment: fd hardening
+
+Requirement added by the requester: the viewer must survive being left open
+indefinitely without exhausting file descriptors.
+
+1. No `< <(…)` process substitution on any path that runs per tick, per
+   `load_data`, per `build_frame` or per `paint`; `<<<` here-strings avoided
+   there too (bash 3.2 backs them with temp files). Capture with `$(…)` and
+   split into arrays or walk the string with parameter expansion.
+2. Every `while read` loop clears its variables before each read, so a failed
+   read ends the loop instead of satisfying `|| [[ -n "$var" ]]`.
+3. The view loop exits with a stderr message after three consecutive `read`
+   failures that are not timeouts. bash 3.2 returns 1 for both, so a non-zero
+   return in under one elapsed second counts as a failure; any key or timeout
+   resets the count.
+4. Regression test: under `ulimit -n 32`, 200 cycles of load_data +
+   build_frame (LIST and DETAIL) + paint leave the process's fd count
+   unchanged and print no "Too many open files".
+5. VERIFY: a 90-second `script -q` run at 160x50 under `ulimit -n 32`, j/k
+   every few seconds, `hq-decision update` against the scratch store every
+   ~10s, the viewer's `lsof -p` count sampled every ~15s and recorded; the
+   series stays flat and the typescript has no "Too many open files".
