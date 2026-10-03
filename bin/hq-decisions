@@ -1,0 +1,505 @@
+#!/usr/bin/env bash
+# hq-decisions — the read-only screen over bin/hq-decision's records: every
+# OPEN decision as a card (repo/ref, title, age, session, context, options
+# with the recommendation marked), answered ones folded below. Columns, keys
+# and formats are usage() below, the reference a user reads; CLAUDE.md
+# points here rather than restating it.
+#
+# READ-ONLY and tmux-free: no tmux subcommand anywhere in this file, not
+# even for terminal size (bin/hq-decision may call `tmux display -p` for a
+# session name; this screen never does). Terminal size comes from
+# $COLUMNS/$LINES, then `tput`, then a default — see term_size.
+#
+# Loop shape matches bin/hq-inbox: load_data -> cached build_frame -> paint,
+# so a cursor move alone forks nothing. Unlike hq-inbox's blocking read,
+# this loop ticks on `read -rsn1 -t 2` to notice new decisions without a
+# manual recollect key — bash 3.2 rejects a fractional -t, so the tick is a
+# whole 2 seconds, and a timeout is told apart from Enter (both read as an
+# empty key) by read's own exit status: > 128 means the time ran out, 0
+# means a key (Enter included) actually arrived.
+
+DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+# shellcheck source=/dev/null
+source "$DOTFILES/bin/hq-decision"
+
+usage() {
+    cat <<'EOF'
+usage: hq-decisions            run the viewer in this terminal
+       hq-decisions --dump     print the cards once and exit (no cursor)
+
+One card per OPEN decision (bin/hq-decision), expanded by default; answered
+decisions fold below, newest first, one line each. This screen only reads
+$HQ_DECISIONS_DIR — it never writes a file and never runs tmux.
+
+Header: `DECISIONS  N open · M answered`.
+
+An open card:
+  line 1   repo #pr (or repo branch) · title · age · session
+  context  word-wrapped, indented (collapsed cards omit everything below
+           line 1)
+  options  one per line, `id  label — description`; the recommended
+           option is marked with a star and "(recommended)"
+
+An answered row (folded): `repo ref · title · → <chosen label> · age`.
+Expanding one (Enter/space) shows its note and its options.
+
+Keys:
+  j / k   move          ⏎ / space   expand or collapse the selected card
+  a       show/hide the answered section (shown by default)
+  q       quit
+
+Zero decisions recorded prints `no decisions recorded` and nothing else.
+EOF
+}
+
+# ── paint ───────────────────────────────────────────────
+
+RST=""; BOLD=""; DIM=""; SEL=""; C_REC=""
+if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; then
+    RST=$'\033[0m'; BOLD=$'\033[1m'; DIM=$'\033[2m'; SEL=$'\033[48;5;236m'
+    C_REC=$'\033[33m'
+fi
+
+# term_size — sets term_w and term_h with no tmux call, ever: $COLUMNS/
+# $LINES, then tput, then a default. Called bare (never inside $( )) so the
+# globals survive.
+term_size() {
+    local w="${COLUMNS:-}" h="${LINES:-}"
+    [[ "$w" =~ ^[0-9]+$ ]] || w=$(tput cols 2>/dev/null)
+    [[ "$h" =~ ^[0-9]+$ ]] || h=$(tput lines 2>/dev/null)
+    [[ "$w" =~ ^[0-9]+$ ]] || w=100
+    [[ "$h" =~ ^[0-9]+$ ]] || h=40
+    term_w="$w"
+    term_h="$h"
+}
+
+clip() {
+    local t="$1" w="$2"
+    (( w < 1 )) && { printf ''; return 0; }
+    if (( ${#t} > w )); then printf '%s…' "${t:0:w-1}"; else printf '%s' "$t"; fi
+}
+
+# wrap_text <text> <width> — pure bash word wrap, no fork: honors embedded
+# newlines as paragraph breaks and hard-splits a word longer than width.
+# Prints the wrapped lines, one per line, to stdout.
+wrap_text() {
+    local text="$1" width="$2" para line word out="" first_para=true
+    (( width < 1 )) && width=1
+    while IFS= read -r para || [[ -n "$para" ]]; do
+        if [[ "$first_para" == true ]]; then first_para=false; else out+=$'\n'; fi
+        line=""
+        for word in $para; do
+            while (( ${#word} > width )); do
+                if [[ -n "$line" ]]; then
+                    out+="$line"$'\n'
+                    line=""
+                fi
+                out+="${word:0:width}"$'\n'
+                word="${word:width}"
+            done
+            if [[ -z "$line" ]]; then
+                line="$word"
+            elif (( ${#line} + 1 + ${#word} <= width )); then
+                line+=" $word"
+            else
+                out+="$line"$'\n'
+                line="$word"
+            fi
+        done
+        out+="$line"
+    done < <(printf '%s' "$text")
+    printf '%s' "$out"
+}
+
+# card_age <ISO> — age formatted like bin/hq-decision's own table; "-" for a
+# timestamp that does not parse.
+card_age() {
+    local epoch
+    epoch=$(decision_epoch "$1")
+    [[ -n "$epoch" ]] || { printf '-'; return 0; }
+    decision_fmt_secs $(( $(date +%s) - epoch ))
+}
+
+# ── data ────────────────────────────────────────────────
+
+d_id=(); d_repo=(); d_pr=(); d_branch=(); d_title=(); d_context=()
+d_recommend=(); d_session=(); d_created=(); d_state=()
+d_aopt=(); d_anote=(); d_aat=(); d_opts_b64=()
+open_order=(); answered_order=()
+n_open=0; n_answered=0
+total_count=0
+
+# collapsed_open / expanded_answered — ids that differ from their card's
+# default (open starts expanded, answered starts collapsed), keyed by id so
+# a toggle survives a reload even if the record order shifts. No
+# associative arrays (bash 3.2): a space-padded id list, substring-matched.
+collapsed_open=" "
+expanded_answered=" "
+
+card_is_expanded() {
+    local kind="$1" id="$2"
+    if [[ "$kind" == open ]]; then
+        case "$collapsed_open" in *" $id "*) return 1 ;; *) return 0 ;; esac
+    else
+        case "$expanded_answered" in *" $id "*) return 0 ;; *) return 1 ;; esac
+    fi
+}
+
+card_toggle() {
+    local kind="$1" id="$2"
+    if [[ "$kind" == open ]]; then
+        if card_is_expanded open "$id"; then
+            collapsed_open+="$id "
+        else
+            collapsed_open="${collapsed_open/ $id / }"
+        fi
+    else
+        if card_is_expanded answered "$id"; then
+            expanded_answered="${expanded_answered/ $id / }"
+        else
+            expanded_answered+="$id "
+        fi
+    fi
+}
+
+load_data() {
+    local recs tsv i
+    local f_id f_repo f_pr f_branch f_title f_context f_recommend f_session
+    local f_created f_state f_aopt f_anote f_aat f_opts
+    local sortable_open="" sortable_ans=""
+
+    d_id=(); d_repo=(); d_pr=(); d_branch=(); d_title=(); d_context=()
+    d_recommend=(); d_session=(); d_created=(); d_state=()
+    d_aopt=(); d_anote=(); d_aat=(); d_opts_b64=()
+    open_order=(); answered_order=()
+    n_open=0; n_answered=0; total_count=0
+
+    recs=$(decision_records)
+    [[ -n "$recs" ]] || return 0
+
+    tsv=$(printf '%s\n' "$recs" | jq -r '
+        def esc: if . == null then "" else (gsub("\t"; " ") | gsub("\n"; "\\n")) end;
+        [
+            .id, .repo,
+            (if .pr != null then (.pr | tostring) else "-" end),
+            (if .branch != null then .branch else "-" end),
+            (.title | esc), (.context | esc),
+            .recommend, .session, .created, .state,
+            (if .answer != null then .answer.option else "-" end),
+            (if .answer != null then (.answer.note | esc) else "-" end),
+            (if .answer != null then .answer.at else "-" end),
+            (.options | tostring | @base64)
+        ] | map(if . == "" then "-" else . end) | join("\t")
+    ')
+
+    i=0
+    while IFS=$'\t' read -r f_id f_repo f_pr f_branch f_title f_context \
+        f_recommend f_session f_created f_state f_aopt f_anote f_aat f_opts; do
+        [[ -n "$f_id" ]] || continue
+        [[ "$f_context" == "-" ]] && f_context=""
+        f_context="${f_context//\\n/$'\n'}"
+        [[ "$f_anote" == "-" ]] && f_anote=""
+        f_anote="${f_anote//\\n/$'\n'}"
+        d_id+=("$f_id"); d_repo+=("$f_repo"); d_pr+=("$f_pr"); d_branch+=("$f_branch")
+        d_title+=("$f_title"); d_context+=("$f_context")
+        d_recommend+=("$f_recommend"); d_session+=("$f_session")
+        d_created+=("$f_created"); d_state+=("$f_state")
+        d_aopt+=("$f_aopt"); d_anote+=("$f_anote"); d_aat+=("$f_aat")
+        d_opts_b64+=("$f_opts")
+        if [[ "$f_state" == open ]]; then
+            sortable_open+="${f_created}"$'\t'"${i}"$'\n'
+            n_open=$(( n_open + 1 ))
+        else
+            sortable_ans+="${f_aat}"$'\t'"${i}"$'\n'
+            n_answered=$(( n_answered + 1 ))
+        fi
+        i=$(( i + 1 ))
+    done <<< "$tsv"
+    total_count="$i"
+
+    while IFS=$'\t' read -r _ i; do
+        [[ -n "$i" ]] && open_order+=("$i")
+    done < <(printf '%s' "$sortable_open" | sort -t$'\t' -k1,1r)
+    while IFS=$'\t' read -r _ i; do
+        [[ -n "$i" ]] && answered_order+=("$i")
+    done < <(printf '%s' "$sortable_ans" | sort -t$'\t' -k1,1r)
+}
+
+# decisions_signature — one `ls` fork over every record file's mtime, the
+# cheap check the view loop uses to notice a write between ticks.
+decisions_signature() {
+    ls -lnT "$DECISIONS_DIR"/*/*.json 2>/dev/null
+}
+
+# ── frame ───────────────────────────────────────────────
+
+frame_rows=()
+frame_row_line=()
+frame_head=""
+frame_foot=""
+frame_cols=0
+frame_at=0
+selected=0
+frame_top=0
+cursor_map=()
+show_answered=true
+
+append_option_lines() {
+    local b64="$1" rec_id="$2" cols="$3" indent="$4" o_id o_label o_desc
+    local optline is_rec color wline first wrapped opts
+
+    # Bash 3.2 miscounts the /dev/fd/* slot it hands out when a process
+    # substitution is opened while another is still being read in the same
+    # function, so both loops below read from a captured string (command
+    # substitution + here-string) instead of nesting `< <(...)`.
+    opts=$(jq -nr --arg b64 "$b64" '
+        def flat: gsub("[\t\n]"; " ");
+        $b64 | @base64d | fromjson | .[]
+        | [(.id | flat), (.label | flat), (.description | flat)] | join("\t")
+    ')
+    while IFS=$'\t' read -r o_id o_label o_desc || [[ -n "$o_id" ]]; do
+        [[ -n "$o_id" ]] || continue
+        is_rec=false
+        [[ "$o_id" == "$rec_id" ]] && is_rec=true
+        if [[ "$is_rec" == true ]]; then
+            optline="★ ${o_id}  ${o_label}"
+        else
+            optline="  ${o_id}  ${o_label}"
+        fi
+        [[ -n "$o_desc" && "$o_desc" != "-" ]] && optline+=" — ${o_desc}"
+        [[ "$is_rec" == true ]] && optline+=" (recommended)"
+        # Wrap the plain text first, color the finished lines after, so the
+        # color escapes (zero display width) never skew the wrap width.
+        wrapped=$(wrap_text "$optline" $(( cols - ${#indent} )))
+        color=""
+        [[ "$is_rec" == true ]] && color="${C_REC}${BOLD}"
+        first=true
+        while IFS= read -r wline || [[ -n "$wline" ]]; do
+            if [[ "$first" == true ]]; then
+                frame_rows+=("${indent}${color}${wline}${RST}")
+                first=false
+            else
+                frame_rows+=("${indent}  ${color}${wline}${RST}")
+            fi
+        done <<< "$wrapped"
+    done <<< "$opts"
+}
+
+append_context_lines() {
+    local text="$1" cols="$2" indent="$3" wline
+    [[ -n "$text" ]] || return 0
+    while IFS= read -r wline; do
+        frame_rows+=("${indent}${wline}")
+    done < <(wrap_text "$text" $(( cols - ${#indent} )))
+}
+
+render_open_card() {
+    local idx="$1" cols="$2" ref age head
+    ref="${d_repo[$idx]}"
+    if [[ "${d_pr[$idx]}" != "-" ]]; then
+        ref+=" #${d_pr[$idx]}"
+    elif [[ "${d_branch[$idx]}" != "-" ]]; then
+        ref+=" ${d_branch[$idx]}"
+    fi
+    age=$(card_age "${d_created[$idx]}")
+    head="${ref}  ·  ${d_title[$idx]}  ·  ${age}  ·  ${d_session[$idx]}"
+    frame_rows+=("${BOLD}$(clip "$head" "$cols")${RST}")
+    card_is_expanded open "${d_id[$idx]}" || return 0
+    append_context_lines "${d_context[$idx]}" "$cols" "    "
+    append_option_lines "${d_opts_b64[$idx]}" "${d_recommend[$idx]}" "$cols" "  "
+}
+
+render_answered_row() {
+    local idx="$1" cols="$2" ref label line
+    ref="${d_repo[$idx]}"
+    if [[ "${d_pr[$idx]}" != "-" ]]; then
+        ref+=" #${d_pr[$idx]}"
+    elif [[ "${d_branch[$idx]}" != "-" ]]; then
+        ref+=" ${d_branch[$idx]}"
+    fi
+    label=$(jq -nr --arg b64 "${d_opts_b64[$idx]}" --arg o "${d_aopt[$idx]}" \
+        '$b64 | @base64d | fromjson | map(select(.id == $o)) | .[0].label // $o')
+    line="${ref}  ·  ${d_title[$idx]}  ·  → ${label}  ·  $(card_age "${d_aat[$idx]}")"
+    frame_rows+=("${DIM}$(clip "$line" "$cols")${RST}")
+    card_is_expanded answered "${d_id[$idx]}" || return 0
+    if [[ -n "${d_anote[$idx]}" ]]; then
+        append_context_lines "${d_anote[$idx]}" "$cols" "    "
+    fi
+    append_option_lines "${d_opts_b64[$idx]}" "${d_recommend[$idx]}" "$cols" "  "
+}
+
+build_frame() {
+    local cols i idx
+    term_size
+    cols="$term_w"
+    frame_cols="$cols"
+    frame_at=$(date +%s)
+    frame_rows=()
+    frame_row_line=()
+    cursor_map=()
+
+    frame_head="${BOLD}DECISIONS${RST}  ${n_open} open · ${n_answered} answered"$'\n\n'
+
+    if (( total_count == 0 )); then
+        frame_rows+=("  ${DIM}no decisions recorded${RST}")
+    fi
+
+    for i in ${open_order[@]+"${open_order[@]}"}; do
+        idx="$i"
+        cursor_map+=("open:$idx")
+        frame_row_line+=("${#frame_rows[@]}")
+        render_open_card "$idx" "$cols"
+    done
+
+    if [[ "$show_answered" == true && "$n_answered" -gt 0 ]]; then
+        (( ${#frame_rows[@]} > 0 )) && frame_rows+=("")
+        frame_rows+=("${DIM}ANSWERED${RST}")
+        for i in ${answered_order[@]+"${answered_order[@]}"}; do
+            idx="$i"
+            cursor_map+=("answered:$idx")
+            frame_row_line+=("${#frame_rows[@]}")
+            render_answered_row "$idx" "$cols"
+        done
+    fi
+
+    (( selected >= ${#cursor_map[@]} )) && selected=$(( ${#cursor_map[@]} - 1 ))
+    (( selected < 0 )) && selected=0
+
+    frame_foot=$'\n'"${DIM}j/k move · ⏎/space expand-collapse · a toggle answered · q quit${RST}"$'\n'
+    frame_foot+="${DIM}${STATUS_NOTE:-}${RST}"$'\n'
+}
+
+paint() {
+    local cols now sel=-1 body first last total out i
+    term_size
+    cols="$term_w"
+    (( selected < ${#frame_row_line[@]} )) && sel="${frame_row_line[$selected]}"
+    total=${#frame_rows[@]}
+    body=$(( term_h - 7 ))
+    (( body < 1 )) && body=1
+    if (( sel >= 0 )); then
+        first="$sel"
+        (( first < frame_top )) && frame_top="$first"
+        (( sel >= frame_top + body )) && frame_top=$(( sel - body + 1 ))
+    fi
+    (( frame_top > total - body )) && frame_top=$(( total - body ))
+    (( frame_top < 0 )) && frame_top=0
+    last=$(( frame_top + body - 1 ))
+    (( last >= total )) && last=$(( total - 1 ))
+
+    out="$frame_head"
+    for (( i = frame_top; i <= last; i++ )); do
+        if (( i == sel )); then
+            out+="${SEL}${frame_rows[$i]}${RST}"$'\n'
+        else
+            out+="${frame_rows[$i]}"$'\n'
+        fi
+    done
+    if (( frame_top > 0 || last < total - 1 )); then
+        out+="${DIM}  ↑ ${frame_top} more · ↓ $(( total - 1 - last )) more${RST}"$'\n'
+    else
+        out+=$'\n'
+    fi
+    out+="$frame_foot"
+    printf '\033[H\033[2J%s' "$out"
+}
+
+render() {
+    term_size
+    local now
+    now=$(date +%s)
+    (( term_w != frame_cols || now - frame_at >= 30 )) && build_frame
+    paint
+}
+
+dump() {
+    local i
+    build_frame
+    printf '%s' "$frame_head"
+    for i in "${!frame_rows[@]}"; do printf '%s\n' "${frame_rows[$i]}"; done
+    printf '%s' "$frame_foot"
+}
+
+# ── entry ───────────────────────────────────────────────
+
+STATUS_NOTE=""
+
+# Enter arrives as the empty string, space as " ". A read -t timeout ALSO
+# leaves the key empty — read's own exit status (> 128 on timeout) is the
+# only way to tell a timeout from Enter; see the file header.
+view() {
+    local key rc kind idx entry last_sig sig
+    tput civis 2>/dev/null
+    trap 'tput cnorm 2>/dev/null' EXIT
+    load_data
+    build_frame
+    paint
+    last_sig=$(decisions_signature)
+    while true; do
+        key=""
+        read -rsn1 -t 2 key
+        rc=$?
+        if (( rc > 128 )); then
+            sig=$(decisions_signature)
+            if [[ "$sig" != "$last_sig" ]]; then
+                last_sig="$sig"
+                load_data
+                build_frame
+                paint
+            else
+                render
+            fi
+            continue
+        fi
+        entry=""
+        (( ${#cursor_map[@]} > 0 && selected < ${#cursor_map[@]} )) && entry="${cursor_map[$selected]}"
+        kind="${entry%%:*}"
+        idx="${entry#*:}"
+        case "$key" in
+            j)
+                (( selected++ ))
+                (( selected >= ${#cursor_map[@]} )) && selected=$(( ${#cursor_map[@]} - 1 ))
+                (( selected < 0 )) && selected=0
+                render ;;
+            k)
+                (( selected-- ))
+                (( selected < 0 )) && selected=0
+                render ;;
+            " "|"")
+                if [[ -n "$entry" ]]; then
+                    card_toggle "$kind" "${d_id[$idx]}"
+                    build_frame
+                fi
+                paint ;;
+            a)
+                if [[ "$show_answered" == true ]]; then show_answered=false; else show_answered=true; fi
+                build_frame
+                paint ;;
+            q)
+                exit 0 ;;
+        esac
+    done
+}
+
+# Sourced by tests/test-hq-decisions.sh: hand back wrap_text and the other
+# pure functions, running no loop and reading no directory.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0 2>/dev/null || true
+fi
+
+case "${1:-}" in
+    -h|--help) usage; exit 0 ;;
+    --dump)
+        load_data
+        dump
+        exit 0
+        ;;
+    "")
+        view
+        ;;
+    *)
+        echo "hq-decisions: unknown argument: $1" >&2
+        usage >&2
+        exit 2
+        ;;
+esac
