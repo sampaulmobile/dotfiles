@@ -5,10 +5,16 @@
 # and formats are usage() below, the reference a user reads; CLAUDE.md
 # points here rather than restating it.
 #
-# READ-ONLY and tmux-free: no tmux subcommand anywhere in this file, not
-# even for terminal size (bin/hq-decision may call `tmux display -p` for a
-# session name; this screen never does). Terminal size comes from
-# $COLUMNS/$LINES, then `tput`, then a default — see term_size.
+# tmux-free: no tmux subcommand anywhere in this file, not even for terminal
+# size (bin/hq-decision may call `tmux display -p` for a session name; this
+# screen never does). Terminal size comes from $COLUMNS/$LINES, then `tput`,
+# then a default — see term_size.
+#
+# The screen's ONE write: the interactive viewer stamps
+# $HQ_DECISIONS_DIR/_state/seen (an ISO time, tmp+mv) once, right after its
+# first paint, so the next run's "since you last looked" cutoff is what the
+# file held before this run started. `--dump` only reads that file and never
+# writes it.
 #
 # Loop shape matches bin/hq-inbox: load_data -> cached build_frame -> paint,
 # so a cursor move alone forks nothing. Unlike hq-inbox's blocking read,
@@ -38,8 +44,19 @@ An open card:
   options  one per line, `id  label — description`; the recommended
            option is marked with a star and "(recommended)"
 
-An answered row (folded): `repo ref · title · → <chosen label> · age`.
+An answered row (folded): `repo ref · title · → <chosen label> · age` for an
+owner answer, `... · → <chosen label> (auto) · age` for an auto-taken one.
 Expanding one (Enter/space) shows its note and its options.
+
+Answered order: auto answers from after the cutoff below come first, newest
+first; then every other answered record, newest first. An unseen auto row
+renders at full brightness; every other answered row (including a seen auto
+one) is dimmed. The header gains ` · K auto since you last looked` when
+K > 0.
+
+"Since you last looked" cutoff: $HQ_DECISIONS_DIR/_state/seen, one ISO
+timestamp, absent meaning every auto answer is unseen. The interactive
+viewer writes it, now, right after its first paint; `--dump` only reads it.
 
 Keys:
   j / k   move          ⏎ / space   expand or collapse the selected card
@@ -122,13 +139,44 @@ card_age() {
     decision_fmt_secs $(( $(date +%s) - epoch ))
 }
 
+# ── seen cutoff ─────────────────────────────────────────
+
+# decisions_seen_file — path to the one-line seen stamp.
+decisions_seen_file() { printf '%s/_state/seen' "$DECISIONS_DIR"; }
+
+# decisions_read_seen_cutoff — sets SEEN_CUTOFF_EPOCH from the seen file's
+# ISO line, or 0 (every auto answer unseen) when the file is absent or its
+# line does not parse. Called once per run, before the first load_data —
+# never re-read mid-loop, so a reload during the same view still measures
+# "since you last looked" against the moment this run started.
+SEEN_CUTOFF_EPOCH=0
+decisions_read_seen_cutoff() {
+    local f line e
+    f=$(decisions_seen_file)
+    SEEN_CUTOFF_EPOCH=0
+    [[ -r "$f" ]] || return 0
+    IFS= read -r line < "$f"
+    e=$(decision_epoch "$line")
+    [[ -n "$e" ]] && SEEN_CUTOFF_EPOCH="$e"
+}
+
+# decisions_write_seen — stamps now into the seen file, tmp+mv, mkdir -p.
+decisions_write_seen() {
+    local f tmp
+    f=$(decisions_seen_file)
+    tmp="$f.tmp.$$"
+    mkdir -p "${f%/*}" || return 1
+    now_iso > "$tmp" || return 1
+    mv -f "$tmp" "$f"
+}
+
 # ── data ────────────────────────────────────────────────
 
 d_id=(); d_repo=(); d_pr=(); d_branch=(); d_title=(); d_context=()
 d_recommend=(); d_session=(); d_created=(); d_state=()
-d_aopt=(); d_anote=(); d_aat=(); d_opts_b64=()
+d_aopt=(); d_anote=(); d_aat=(); d_aby=(); d_aunseen=(); d_opts_b64=()
 open_order=(); answered_order=()
-n_open=0; n_answered=0
+n_open=0; n_answered=0; n_unseen_auto=0
 total_count=0
 
 # collapsed_open / expanded_answered — ids that differ from their card's
@@ -167,14 +215,14 @@ card_toggle() {
 load_data() {
     local recs tsv i
     local f_id f_repo f_pr f_branch f_title f_context f_recommend f_session
-    local f_created f_state f_aopt f_anote f_aat f_opts
+    local f_created f_state f_aopt f_anote f_aat f_aby f_opts
     local sortable_open="" sortable_ans=""
 
     d_id=(); d_repo=(); d_pr=(); d_branch=(); d_title=(); d_context=()
     d_recommend=(); d_session=(); d_created=(); d_state=()
-    d_aopt=(); d_anote=(); d_aat=(); d_opts_b64=()
+    d_aopt=(); d_anote=(); d_aat=(); d_aby=(); d_aunseen=(); d_opts_b64=()
     open_order=(); answered_order=()
-    n_open=0; n_answered=0; total_count=0
+    n_open=0; n_answered=0; n_unseen_auto=0; total_count=0
 
     recs=$(decision_records)
     [[ -n "$recs" ]] || return 0
@@ -190,13 +238,14 @@ load_data() {
             (if .answer != null then .answer.option else "-" end),
             (if .answer != null then (.answer.note | esc) else "-" end),
             (if .answer != null then .answer.at else "-" end),
+            (if .answer != null then (.answer.by // "owner") else "-" end),
             (.options | tostring | @base64)
         ] | map(if . == "" then "-" else . end) | join("\t")
     ')
 
     i=0
     while IFS=$'\t' read -r f_id f_repo f_pr f_branch f_title f_context \
-        f_recommend f_session f_created f_state f_aopt f_anote f_aat f_opts; do
+        f_recommend f_session f_created f_state f_aopt f_anote f_aat f_aby f_opts; do
         [[ -n "$f_id" ]] || continue
         [[ "$f_context" == "-" ]] && f_context=""
         f_context="${f_context//\\n/$'\n'}"
@@ -206,13 +255,21 @@ load_data() {
         d_title+=("$f_title"); d_context+=("$f_context")
         d_recommend+=("$f_recommend"); d_session+=("$f_session")
         d_created+=("$f_created"); d_state+=("$f_state")
-        d_aopt+=("$f_aopt"); d_anote+=("$f_anote"); d_aat+=("$f_aat")
+        d_aopt+=("$f_aopt"); d_anote+=("$f_anote"); d_aat+=("$f_aat"); d_aby+=("$f_aby")
         d_opts_b64+=("$f_opts")
         if [[ "$f_state" == open ]]; then
             sortable_open+="${f_created}"$'\t'"${i}"$'\n'
             n_open=$(( n_open + 1 ))
+            d_aunseen+=("false")
         else
-            sortable_ans+="${f_aat}"$'\t'"${i}"$'\n'
+            local at_epoch tier="1" unseen="false"
+            at_epoch=$(decision_epoch "$f_aat")
+            if [[ "$f_aby" == auto && -n "$at_epoch" ]] && (( at_epoch > SEEN_CUTOFF_EPOCH )); then
+                tier="0"; unseen="true"
+                n_unseen_auto=$(( n_unseen_auto + 1 ))
+            fi
+            d_aunseen+=("$unseen")
+            sortable_ans+="${tier}"$'\t'"${f_aat}"$'\t'"${i}"$'\n'
             n_answered=$(( n_answered + 1 ))
         fi
         i=$(( i + 1 ))
@@ -222,9 +279,9 @@ load_data() {
     while IFS=$'\t' read -r _ i; do
         [[ -n "$i" ]] && open_order+=("$i")
     done < <(printf '%s' "$sortable_open" | sort -t$'\t' -k1,1r)
-    while IFS=$'\t' read -r _ i; do
+    while IFS=$'\t' read -r _ _ i; do
         [[ -n "$i" ]] && answered_order+=("$i")
-    done < <(printf '%s' "$sortable_ans" | sort -t$'\t' -k1,1r)
+    done < <(printf '%s' "$sortable_ans" | sort -t$'\t' -k1,1n -k2,2r)
 }
 
 # decisions_signature — one `ls` fork over every record file's mtime, the
@@ -314,7 +371,7 @@ render_open_card() {
 }
 
 render_answered_row() {
-    local idx="$1" cols="$2" ref label line
+    local idx="$1" cols="$2" ref label line suffix style
     ref="${d_repo[$idx]}"
     if [[ "${d_pr[$idx]}" != "-" ]]; then
         ref+=" #${d_pr[$idx]}"
@@ -323,8 +380,12 @@ render_answered_row() {
     fi
     label=$(jq -nr --arg b64 "${d_opts_b64[$idx]}" --arg o "${d_aopt[$idx]}" \
         '$b64 | @base64d | fromjson | map(select(.id == $o)) | .[0].label // $o')
-    line="${ref}  ·  ${d_title[$idx]}  ·  → ${label}  ·  $(card_age "${d_aat[$idx]}")"
-    frame_rows+=("${DIM}$(clip "$line" "$cols")${RST}")
+    suffix=""
+    [[ "${d_aby[$idx]}" == auto ]] && suffix=" (auto)"
+    line="${ref}  ·  ${d_title[$idx]}  ·  → ${label}${suffix}  ·  $(card_age "${d_aat[$idx]}")"
+    style="$DIM"
+    [[ "${d_aunseen[$idx]}" == true ]] && style=""
+    frame_rows+=("${style}$(clip "$line" "$cols")${RST}")
     card_is_expanded answered "${d_id[$idx]}" || return 0
     if [[ -n "${d_anote[$idx]}" ]]; then
         append_context_lines "${d_anote[$idx]}" "$cols" "    "
@@ -342,7 +403,9 @@ build_frame() {
     frame_row_line=()
     cursor_map=()
 
-    frame_head="${BOLD}DECISIONS${RST}  ${n_open} open · ${n_answered} answered"$'\n\n'
+    local head_extra=""
+    (( n_unseen_auto > 0 )) && head_extra="  ·  ${n_unseen_auto} auto since you last looked"
+    frame_head="${BOLD}DECISIONS${RST}  ${n_open} open · ${n_answered} answered${head_extra}"$'\n\n'
 
     if (( total_count == 0 )); then
         frame_rows+=("  ${DIM}no decisions recorded${RST}")
@@ -432,9 +495,11 @@ view() {
     local key rc kind idx entry last_sig sig
     tput civis 2>/dev/null
     trap 'tput cnorm 2>/dev/null' EXIT
+    decisions_read_seen_cutoff
     load_data
     build_frame
     paint
+    decisions_write_seen
     last_sig=$(decisions_signature)
     while true; do
         key=""
@@ -493,6 +558,7 @@ fi
 case "${1:-}" in
     -h|--help) usage; exit 0 ;;
     --dump)
+        decisions_read_seen_cutoff
         load_data
         dump
         exit 0

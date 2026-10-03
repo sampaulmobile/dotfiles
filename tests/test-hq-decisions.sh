@@ -155,5 +155,55 @@ check "zero decisions" "$(printf '%s\n' "$dump_empty" | grep -c 'no decisions re
 check "the header still counts zero and zero" \
     "$(printf '%s\n' "$dump_empty" | head -1)" "DECISIONS  0 open · 0 answered"
 
+# ── auto-take rendering ──
+
+auto_id=$("$HQD" add --repo proj --pr 30 --title "Pick a cache ttl" \
+    --option 'short|5m' --option 'long|1h' --recommend long --session proj-hub)
+"$HQD" answer --auto "$auto_id" long >/dev/null
+
+old_file="$HQ_DECISIONS_DIR/proj/19990101T000000Z-oldabc.json"
+mkdir -p "$(dirname "$old_file")"
+cat > "$old_file" <<'EOF'
+{"id":"oldabc","key":"proj:-:old-decision","repo":"proj","pr":null,"branch":null,
+ "title":"An old decision","context":"","options":[{"id":"a","label":"A","description":""},{"id":"b","label":"B","description":""}],
+ "recommend":"a","session":"-","created":"1999-01-01T00:00:00Z","updated":"1999-01-01T00:00:00Z",
+ "state":"answered","answer":{"option":"a","note":"","at":"1999-01-01T00:00:00Z"}}
+EOF
+
+sleep 1
+fresh_id=$("$HQD" add --repo proj --pr 31 --title "Pick a worker pool" \
+    --option 'a|2' --option 'b|4' --recommend b --session proj-hub)
+"$HQD" answer "$fresh_id" b "owner picked 4, newer than the auto answer" >/dev/null
+
+echo "── --dump marks the auto row and leaves owner rows unmarked, with no seen stamp written"
+dump2=$(NO_COLOR=1 COLUMNS=70 "$HQDS" --dump 2>"$work/dump2.err")
+if [[ -s "$work/dump2.err" ]]; then bad "--dump wrote to stderr" "$(cat "$work/dump2.err")"; fi
+check "the auto row is marked (auto)" \
+    "$(printf '%s\n' "$dump2" | grep -c 'Pick a cache ttl.*→ 1h (auto)')" "1"
+check "the owner-answered row carries no (auto) marker" \
+    "$(printf '%s\n' "$dump2" | grep -c 'Pick a log level.*→ Info (auto)')" "0"
+check "the old no-by record renders as a plain owner row with no (auto) marker" \
+    "$(printf '%s\n' "$dump2" | grep -c 'An old decision.*→ A  ·')" "1"
+check "the unseen auto row is first under ANSWERED, ahead of the newer owner answer" \
+    "$(printf '%s\n' "$dump2" | awk '/^ANSWERED$/{f=1;next} f && NF {print; exit}')" \
+    "$(printf '%s\n' "$dump2" | grep 'Pick a cache ttl')"
+check "the header counts the one unseen auto answer" \
+    "$(printf '%s\n' "$dump2" | head -1)" "DECISIONS  2 open · 4 answered  ·  1 auto since you last looked"
+check "--dump creates no _state/seen file" "$([[ -e "$HQ_DECISIONS_DIR/_state/seen" ]] && echo yes || echo no)" "no"
+
+echo "── a seen stamp newer than the auto answer returns it to date order and drops the header count"
+mkdir -p "$HQ_DECISIONS_DIR/_state"
+date -u +%Y-%m-%dT%H:%M:%SZ > "$HQ_DECISIONS_DIR/_state/seen"
+dump3=$(NO_COLOR=1 COLUMNS=70 "$HQDS" --dump)
+check "the header no longer counts any unseen auto answer" \
+    "$(printf '%s\n' "$dump3" | head -1)" "DECISIONS  2 open · 4 answered"
+check "the auto row still carries its (auto) marker once seen" \
+    "$(printf '%s\n' "$dump3" | grep -c 'Pick a cache ttl.*→ 1h (auto)')" "1"
+check "the auto row falls back behind the newer owner answer once seen" \
+    "$(printf '%s\n' "$dump3" | awk '/^ANSWERED$/{f=1;next} f && NF {print; exit}')" \
+    "$(printf '%s\n' "$dump3" | grep 'Pick a worker pool')"
+check "--dump still creates no _state/seen file beyond the one this test wrote" \
+    "$(find "$HQ_DECISIONS_DIR/_state" -type f | wc -l | tr -d ' ')" "1"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

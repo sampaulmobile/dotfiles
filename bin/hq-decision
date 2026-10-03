@@ -28,7 +28,7 @@ usage: hq-decision add --repo R [--pr N | --branch B] --title T
        hq-decision update ID [--title T] [--recommend ID]
                         [--context TEXT | --context-file F]
                         [--option 'id|label|description' (2+, repeatable)]
-       hq-decision answer ID OPTION-ID [NOTE ...]
+       hq-decision answer [--auto] ID OPTION-ID [NOTE ...]
        hq-decision list [--open] [--repo R] [--json]
        hq-decision --help
 
@@ -51,7 +51,10 @@ Record fields:
             else "-".
   created, updated   date -u +%Y-%m-%dT%H:%M:%SZ
   state     "open" or "answered"
-  answer    null, or {option, note, at} once answered.
+  answer    null, or {option, note, at, by} once answered. by is "owner" or
+            "auto"; a record answered before this field existed has none and
+            reads as "owner" (decision_records normalises it on every read —
+            the file itself is never rewritten for this alone).
 
 DEDUPE: `add` with a key that already has an OPEN record prints that
 record's id and a stderr note instead of writing a new file — a hub
@@ -64,9 +67,17 @@ usually a reworded title.
 and the ids unique within the call. --pr and --branch are mutually
 exclusive. --context-file - reads context from stdin.
 
-list prints a table: ID STATE REPO PR/BRANCH AGE TITLE, open records first,
-newest first within each state; --json prints the matching records as one
-JSON array via decision_records.
+answer's --auto marks the answer as the hub's own take rather than the
+owner's (answer.by: "auto" vs "owner"); it is also accepted right after
+OPTION-ID. --auto refuses an option that is not the record's `recommend` —
+exit 2, nothing written — since an auto-take needs a clear recommendation to
+take. Answering again without --auto re-stamps the record as an owner
+answer, which is how an owner reverses an auto-taken one.
+
+list prints a table: ID STATE BY REPO PR/BRANCH AGE TITLE, open records
+first, newest first within each state; BY is "owner"/"auto" once answered,
+"-" while open. --json prints the matching records as one JSON array via
+decision_records.
 
 Exit codes: 0 success (dedupe no-op included); 1 unknown id, update or
 answer on no such record; 2 a malformed call (missing/bad flags) — nothing
@@ -131,6 +142,8 @@ decision_records() {
     jq -c --arg open "$open" --arg repo "$repo" '
         select($open != "true" or .state == "open")
         | select($repo == "" or .repo == $repo)
+        | if .answer != null and (.answer.by // null) == null
+          then .answer.by = "owner" else . end
     ' "${files[@]}" 2>/dev/null
 }
 
@@ -387,8 +400,11 @@ cmd_update() {
 # ── answer ──────────────────────────────────────────────
 
 cmd_answer() {
-    local id="$1" option="$2"
+    local auto=false id option
+    if [[ "${1:-}" == "--auto" ]]; then auto=true; shift; fi
+    id="$1"; option="$2"
     shift 2 2>/dev/null || shift $#
+    if [[ "${1:-}" == "--auto" ]]; then auto=true; shift; fi
     local note="$*"
     [[ -n "$id" && -n "$option" ]] || { echo "hq-decision: answer needs an id and an option id" >&2; return 2; }
     local file
@@ -397,15 +413,24 @@ cmd_answer() {
         echo "hq-decision: '$option' does not name one of '$id''s options" >&2
         return 2
     fi
+    if [[ "$auto" == true ]]; then
+        local recommend
+        recommend=$(jq -r '.recommend' "$file")
+        if [[ "$option" != "$recommend" ]]; then
+            echo "hq-decision: --auto refuses '$option' — '$id''s recommended option is '$recommend'" >&2
+            return 2
+        fi
+    fi
     local restamped=false
     [[ "$(jq -r '.state' "$file")" == answered ]] && restamped=true
 
-    local at updated record
+    local at updated record by
     at=$(now_iso)
     updated="$at"
-    record=$(jq --arg option "$option" --arg note "$note" --arg at "$at" --arg updated "$updated" '
+    by="owner"; [[ "$auto" == true ]] && by="auto"
+    record=$(jq --arg option "$option" --arg note "$note" --arg at "$at" --arg updated "$updated" --arg by "$by" '
         .state = "answered"
-        | .answer = {option: $option, note: $note, at: $at}
+        | .answer = {option: $option, note: $note, at: $at, by: $by}
         | .updated = $updated
     ' "$file")
     decision_write "$file" "$record" || { echo "hq-decision: failed to write $file" >&2; return 1; }
@@ -438,20 +463,22 @@ cmd_list() {
     fi
 
     [[ -n "$recs" ]] || { echo "no decisions"; return 0; }
-    printf '%-6s  %-8s  %-10s  %-20s  %6s  %s\n' ID STATE REPO 'PR/BRANCH' AGE TITLE
+    printf '%-6s  %-8s  %-6s  %-10s  %-20s  %6s  %s\n' ID STATE BY REPO 'PR/BRANCH' AGE TITLE
     printf '%s\n' "$recs" \
-        | jq -r '[(if .state == "open" then 0 else 1 end), .created, .state, .created, .id, .repo,
+        | jq -r '[(if .state == "open" then 0 else 1 end), .created, .state,
+                  (if .state == "open" then "-" else (.answer.by // "owner") end),
+                  .created, .id, .repo,
                   (if .pr != null then (.pr | tostring) elif .branch != null then .branch else "-" end),
                   .title] | @tsv' \
         | sort -t$'\t' -k1,1n -k2,2r \
         | cut -f3- \
-        | while IFS=$'\t' read -r state created id repo ref title; do
+        | while IFS=$'\t' read -r state by created id repo ref title; do
             local age now_s created_s secs
             now_s=$(date +%s)
             created_s=$(decision_epoch "$created")
             if [[ -n "$created_s" ]]; then secs=$(( now_s - created_s )); else secs=-1; fi
             age=$(decision_fmt_secs "$secs")
-            printf '%-6s  %-8s  %-10s  %-20s  %6s  %s\n' "$id" "$state" "$repo" "$ref" "$age" "$title"
+            printf '%-6s  %-8s  %-6s  %-10s  %-20s  %6s  %s\n' "$id" "$state" "$by" "$repo" "$ref" "$age" "$title"
         done
 }
 

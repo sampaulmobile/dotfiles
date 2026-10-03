@@ -185,5 +185,55 @@ table=$("$HQD" list)
 check "the answered row is in the table" "$(printf '%s\n' "$table" | grep -c "$id1")" "1"
 check "an open row is in the table" "$(printf '%s\n' "$table" | grep -c "$id3")" "1"
 
+# ── answer --auto ──
+
+echo "── answer --auto writes answer.by=auto, only for the recommended option"
+id5=$("$HQD" add --repo proj --pr 20 --title "Pick a log format" \
+    --option 'json|JSON' --option 'text|Text' --recommend json)
+f5=$(find "$HQ_DECISIONS_DIR" -type f -name "*-$id5.json")
+"$HQD" answer --auto "$id5" json >/dev/null 2>"$work/e_auto"
+check "answer --auto exits 0" "$?" "0"
+check "answer.by is auto" "$(jq -r '.answer.by' "$f5")" "auto"
+check "answer.option is still the chosen one" "$(jq -r '.answer.option' "$f5")" "json"
+
+id6=$("$HQD" add --repo proj --pr 21 --title "Pick a port" \
+    --option 'a|8080' --option 'b|8081' --recommend a)
+f6=$(find "$HQ_DECISIONS_DIR" -type f -name "*-$id6.json")
+before_json=$(cat "$f6")
+"$HQD" answer --auto "$id6" b >/dev/null 2>"$work/e_autobad"
+check "answer --auto on a non-recommended option exits 2" "$?" "2"
+check "the file is unchanged" "$(cat "$f6")" "$before_json"
+
+echo "── a plain answer writes answer.by=owner, and --auto is also accepted after OPTION-ID"
+id7=$("$HQD" add --repo proj --pr 22 --title "Pick a timeout" \
+    --option 'a|5s' --option 'b|10s' --recommend a)
+f7=$(find "$HQ_DECISIONS_DIR" -type f -name "*-$id7.json")
+"$HQD" answer "$id7" a "owner's own call" >/dev/null 2>"$work/e_owner"
+check "plain answer.by is owner" "$(jq -r '.answer.by' "$f7")" "owner"
+
+id8=$("$HQD" add --repo proj --pr 23 --title "Pick a worker count" \
+    --option 'a|2' --option 'b|4' --recommend b)
+f8=$(find "$HQ_DECISIONS_DIR" -type f -name "*-$id8.json")
+"$HQD" answer "$id8" b --auto "auto note after the option" >/dev/null 2>"$work/e_autoafter"
+check "--auto right after OPTION-ID also writes by=auto" "$(jq -r '.answer.by' "$f8")" "auto"
+
+echo "── an old record with no answer.by field reads as owner"
+old_file="$HQ_DECISIONS_DIR/proj/19990101T000000Z-oldabc.json"
+mkdir -p "$(dirname "$old_file")"
+cat > "$old_file" <<'EOF'
+{"id":"oldabc","key":"proj:-:old-decision","repo":"proj","pr":null,"branch":null,
+ "title":"An old decision","context":"","options":[{"id":"a","label":"A","description":""},{"id":"b","label":"B","description":""}],
+ "recommend":"a","session":"-","created":"1999-01-01T00:00:00Z","updated":"1999-01-01T00:00:00Z",
+ "state":"answered","answer":{"option":"a","note":"","at":"1999-01-01T00:00:00Z"}}
+EOF
+check "list --json normalises the missing by to owner" \
+    "$("$HQD" list --json | jq -r '.[] | select(.id == "oldabc") | .answer.by')" "owner"
+check "the BY column shows owner for the old record" \
+    "$("$HQD" list | grep oldabc | awk '{print $3}')" "owner"
+check "the BY column shows auto for an auto-answered record" \
+    "$("$HQD" list | grep "$id5" | awk '{print $3}')" "auto"
+check "the BY column shows - for an open record" \
+    "$("$HQD" list | grep "$id3" | awk '{print $3}')" "-"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))
