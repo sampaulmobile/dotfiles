@@ -193,7 +193,7 @@ Round N>1 (SCOPED re-review): scope is the previous findings list and the fix di
 
 Prose-only round (any N): no code review. Check contradictions between the changed files and the files they describe, stale file/flag/path references, public-repo leaks, comments-rule violations, and flag lists that match the flags the skill defines. Blocking only for a leak or a contradiction.
 
-Findings file `.feature/findings-round-<N>.md`: line 1 the verdict, `CLEAN` or `FINDINGS`; line 2 the pass, `full`, `scoped`, `scoped→widened: <path>` or `prose`; then blocking findings (file:line, what is wrong, concrete failure scenario), then non-blocking notes (in a re-review: the per-finding verdicts, then new breakage, then out-of-scope observations), then the blast-radius line when one was required.
+The reviewer RETURNS its findings as its final text — the harness refuses a subagent's Write to `.feature/` — and you write them verbatim to `.feature/findings-round-<N>.md` BEFORE reading them for a verdict, so the file is the record and your reasoning follows it. Shape: line 1 the verdict, `CLEAN` or `FINDINGS`; line 2 the pass, `full`, `scoped`, `scoped→widened: <path>` or `prose`; then blocking findings (file:line, what is wrong, concrete failure scenario), then non-blocking notes (in a re-review: the per-finding verdicts, then new breakage, then out-of-scope observations), then the blast-radius line when one was required.
 
 **4. Loop**
 - `FINDINGS` → back to step 2 with the new findings file. A fix round is ALWAYS followed by another review round — never ship code the reviewer hasn't seen; the newest fix must not be the only unreviewed code.
