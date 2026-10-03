@@ -65,5 +65,22 @@ check "model maps back to empty"       "$mdl" ""
 check "status lands in its column"     "$st"  "idle"
 check "window lands in its column"     "$win" "0"
 
+echo "plan_kill: session whole only when every row of it is in the batch"
+sessions=(a a b c); panes=(%1 %2 %3 %4)
+plan_kill 0;     check "one of two rows: its pane"        "${kill_sessions[*]}|${kill_panes[*]}" "|%1"
+plan_kill 0 1;   check "both rows: the session"           "${kill_sessions[*]}|${kill_panes[*]}" "a|"
+plan_kill 2;     check "only row: the session"            "${kill_sessions[*]}|${kill_panes[*]}" "b|"
+plan_kill 1 2 3; check "mixed batch"                      "${kill_sessions[*]}|${kill_panes[*]}" "b c|%2"
+panes=(%1 "" %3 %4)
+plan_kill 1;     check "empty target refuses"             "$?|${kill_error:+err}" "1|err"
+
+echo "marks follow pane ids"
+sessions=(a b c); panes=(%1 %2 %3); marked=" "
+toggle_mark %2; toggle_mark %3; toggle_mark %2
+check "toggle twice unmarks"           "$marked" " %3 "
+is_marked %1 && r=yes || r=no; check "unmarked pane" "$r" "no"
+panes=(%1 %5); prune_marks
+check "a gone pane's mark is pruned"   "$marked" " "
+
 echo; echo "passed $pass, failed $fail"
 (( fail == 0 ))
