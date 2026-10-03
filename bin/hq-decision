@@ -2,22 +2,15 @@
 # hq-decision — records an owner decision (title, context, options,
 # recommendation) as one JSON file, so a hub never puts a decision only in
 # chat. `bin/hq-decisions` is the read-only screen over the same files.
+# Subcommands, storage layout, the dedupe key and record fields are usage()
+# below (`--help`), the reference a user reads — not restated here.
 #
-# Storage: one file per decision under $HQ_DECISIONS_DIR (default
-# ~/.local/state/hq/decisions), at <repo>/<UTC-stamp>-<id>.json. Every write
-# is <file>.tmp.$$ then `mv` over the target; nothing here is ever removed
-# (dots/claude/rules/deletion-safety.md) — answering or updating a record
-# rewrites its own file in place, nothing archived or pruned.
-#
-# DEDUPE: the key (`--key`, or <repo>:<pr-or-branch-or-->:<slug(title)>) is
-# how a hub re-stating the same decision across a transcript collapses onto
-# one card — `add` on a key with an OPEN record is a no-op that hands back
-# the existing id. An ANSWERED record never blocks a new `add` with the same
-# key, so revisiting an answered decision starts a fresh card.
-#
-# All record reads go through decision_records, ONE jq call over every file
-# under the dir — `list`, dedupe and bin/hq-decisions all consume it, so the
-# record shape is parsed in exactly one place.
+# Invariants: every write is <file>.tmp.$$ then `mv` over the target;
+# nothing here is ever removed (dots/claude/rules/deletion-safety.md) —
+# answering or updating a record rewrites its own file in place. All record
+# reads go through decision_records, ONE jq call over every file under the
+# dir — list, dedupe and bin/hq-decisions all consume it, so the record
+# shape is parsed in exactly one place.
 #
 # Sourceable: everything below the BASH_SOURCE guard is the command line,
 # skipped when another script sources this one for decision_records and the
@@ -178,12 +171,38 @@ decision_write() {
 
 now_iso() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
+# decision_parse_option <opt> <opts_json> — validates one
+# --option 'id|label|description' (non-empty id and label, id unique within
+# opts_json) and echoes the appended options array; exits 2 with a message
+# on stderr and nothing echoed on a bad option. Shared by cmd_add/cmd_update
+# so the --option grammar is defined in exactly one place.
+decision_parse_option() {
+    local opt="$1" opts_json="$2" o_id o_label o_desc rest
+    o_id="${opt%%|*}"
+    rest="${opt#*|}"
+    if [[ "$rest" == "$opt" ]]; then
+        o_label=""; o_desc=""
+    else
+        o_label="${rest%%|*}"
+        if [[ "${rest#*|}" == "$rest" ]]; then o_desc=""; else o_desc="${rest#*|}"; fi
+    fi
+    [[ -n "$o_id" && -n "$o_label" ]] || {
+        echo "hq-decision: --option needs a non-empty id and label (got '$opt') — use 'id|label|description'" >&2
+        return 2
+    }
+    if [[ "$(jq -n --argjson opts "$opts_json" --arg id "$o_id" '$opts | any(.[]; .id == $id)')" == true ]]; then
+        echo "hq-decision: duplicate --option id '$o_id'" >&2
+        return 2
+    fi
+    jq -nc --argjson opts "$opts_json" --arg id "$o_id" --arg lbl "$o_label" --arg desc "$o_desc" \
+        '$opts + [{id: $id, label: $lbl, description: $desc}]'
+}
+
 # ── add ─────────────────────────────────────────────────
 
 cmd_add() {
     local repo="" pr="" branch="" title="" context="" context_file="" key=""
-    local session="" recommend="" opt seen_ids=","
-    local opts_json="[]" o_id o_label o_desc rest
+    local session="" recommend="" opts_json="[]"
     while (( $# )); do
         case "$1" in
             --repo) repo="$2"; shift 2 ;;
@@ -191,27 +210,8 @@ cmd_add() {
             --branch) branch="$2"; shift 2 ;;
             --title) title="$2"; shift 2 ;;
             --option)
-                opt="$2"; shift 2
-                o_id="${opt%%|*}"
-                rest="${opt#*|}"
-                if [[ "$rest" == "$opt" ]]; then
-                    o_label=""; o_desc=""
-                else
-                    o_label="${rest%%|*}"
-                    if [[ "${rest#*|}" == "$rest" ]]; then o_desc=""; else o_desc="${rest#*|}"; fi
-                fi
-                [[ -n "$o_id" && -n "$o_label" ]] || {
-                    echo "hq-decision: --option needs a non-empty id and label (got '$opt') — use 'id|label|description'" >&2
-                    return 2
-                }
-                case "$seen_ids" in
-                    *",$o_id,"*)
-                        echo "hq-decision: duplicate --option id '$o_id'" >&2
-                        return 2 ;;
-                esac
-                seen_ids+="$o_id,"
-                opts_json=$(jq -nc --argjson opts "$opts_json" --arg id "$o_id" --arg lbl "$o_label" --arg desc "$o_desc" \
-                    '$opts + [{id: $id, label: $lbl, description: $desc}]')
+                opts_json=$(decision_parse_option "$2" "$opts_json") || return 2
+                shift 2
                 ;;
             --recommend) recommend="$2"; shift 2 ;;
             --context) context="$2"; shift 2 ;;
@@ -235,6 +235,9 @@ cmd_add() {
         echo "hq-decision: --pr must be a number" >&2
         return 2
     fi
+    # Normalise leading zeros (--pr 007 and --pr 7 must dedupe to one key);
+    # base-10 forced so bash's arithmetic context doesn't read "007" as octal.
+    [[ -n "$pr" ]] && pr=$(( 10#$pr ))
     if [[ "$(printf '%s' "$opts_json" | jq 'length')" -lt 2 ]]; then
         echo "hq-decision: need at least 2 --option flags" >&2
         return 2
@@ -321,8 +324,8 @@ cmd_update() {
     state=$(jq -r '.state' "$file")
     [[ "$state" == open ]] || { echo "hq-decision: '$id' is answered — update refuses to touch it" >&2; return 1; }
 
-    local title="" context="" context_file="" recommend="" opt
-    local opts_json="" seen_ids="," o_id o_label o_desc rest have_opts=false
+    local title="" context="" context_file="" recommend=""
+    local opts_json="" have_opts=false
     while (( $# )); do
         case "$1" in
             --title) title="$2"; shift 2 ;;
@@ -332,27 +335,8 @@ cmd_update() {
             --option)
                 have_opts=true
                 [[ -n "$opts_json" ]] || opts_json="[]"
-                opt="$2"; shift 2
-                o_id="${opt%%|*}"
-                rest="${opt#*|}"
-                if [[ "$rest" == "$opt" ]]; then
-                    o_label=""; o_desc=""
-                else
-                    o_label="${rest%%|*}"
-                    if [[ "${rest#*|}" == "$rest" ]]; then o_desc=""; else o_desc="${rest#*|}"; fi
-                fi
-                [[ -n "$o_id" && -n "$o_label" ]] || {
-                    echo "hq-decision: --option needs a non-empty id and label (got '$opt') — use 'id|label|description'" >&2
-                    return 2
-                }
-                case "$seen_ids" in
-                    *",$o_id,"*)
-                        echo "hq-decision: duplicate --option id '$o_id'" >&2
-                        return 2 ;;
-                esac
-                seen_ids+="$o_id,"
-                opts_json=$(jq -nc --argjson opts "$opts_json" --arg id "$o_id" --arg lbl "$o_label" --arg desc "$o_desc" \
-                    '$opts + [{id: $id, label: $lbl, description: $desc}]')
+                opts_json=$(decision_parse_option "$2" "$opts_json") || return 2
+                shift 2
                 ;;
             *) echo "hq-decision: update: unknown argument '$1'" >&2; return 2 ;;
         esac
