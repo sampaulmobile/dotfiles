@@ -1,0 +1,530 @@
+#!/usr/bin/env bash
+# hq-make-decision — records an owner decision (title, context, options,
+# recommendation) as one JSON file, so a hub never puts a decision only in
+# chat. `bin/hq-decisions` is read-only over the same files, apart from its
+# own interactive-viewer seen stamp.
+# Subcommands, storage layout, the dedupe key and record fields are usage()
+# below (`--help`), the reference a user reads — not restated here.
+#
+# Invariants: every write is <file>.tmp.$$ then `mv` over the target;
+# nothing here is ever removed (dots/claude/rules/deletion-safety.md) —
+# answering or updating a record rewrites its own file in place. All record
+# reads go through decision_records, ONE jq call over every file under the
+# dir — list, dedupe and bin/hq-decisions all consume it, so the record
+# shape is parsed in exactly one place.
+#
+# Sourceable: everything below the BASH_SOURCE guard is the command line,
+# skipped when another script sources this one for decision_records and the
+# dir. See tests/test-hq-make-decision.sh.
+
+DECISIONS_DIR="${HQ_DECISIONS_DIR:-$HOME/.local/state/hq/decisions}"
+
+usage() {
+    cat <<'EOF'
+usage: hq-make-decision add --repo R [--pr N | --branch B] --title T
+                        --option 'id|label|description' (2+, repeatable)
+                        --recommend ID
+                        [--context TEXT | --context-file F] [--key K]
+                        [--session NAME] [--why TEXT]
+       hq-make-decision update ID [--title T] [--recommend ID]
+                        [--context TEXT | --context-file F]
+                        [--option 'id|label|description' (2+, repeatable)]
+                        [--why TEXT]
+       hq-make-decision answer [--auto] ID OPTION-ID [NOTE ...]
+       hq-make-decision list [--open] [--repo R] [--json]
+       hq-make-decision --help
+
+A decision record: a title, context, 2+ options, and which one is
+recommended. `add` writes one JSON file; `update` revises it in place;
+`answer` marks it answered with the chosen option and a timestamp. Nothing
+is ever removed — an answered record stays as history.
+
+Storage: $HQ_DECISIONS_DIR (default ~/.local/state/hq/decisions), one file
+per decision at <repo>/<UTC-stamp>-<id>.json, written <file>.tmp.$$ then
+mv'ed over the target.
+
+Record fields:
+  id        6 lowercase hex, the file's handle for update/answer.
+  key       dedupe key: --key, or <repo>:<pr-or-branch-or-->:<slug(title)>.
+  repo, pr, branch, title, context
+  options   [{id, label, description}]
+  recommend the id of the recommended option
+  why       optional: the recommendation's rationale. Absent unless set by
+            `--why`; a record written before this field existed has none.
+  session   --session, else the caller's tmux session when $TMUX is set,
+            else "-".
+  created, updated   date -u +%Y-%m-%dT%H:%M:%SZ
+  state     "open" or "answered"
+  answer    null, or {option, note, at, by} once answered. by is "owner" or
+            "auto"; a record answered before this field existed has none and
+            reads as "owner" (decision_records normalises it on every read).
+
+DEDUPE: `add` with a key that already has an OPEN record prints that
+record's id and a stderr note instead of writing a new file — a hub
+re-stating the same decision collapses onto one card. An ANSWERED record
+never blocks a new add on the same key. `add` also warns on stderr when
+other OPEN records share the repo and the pr/branch but a different key —
+usually a reworded title.
+
+--option is split on the first two `|`; the id and label must be non-empty
+and the ids unique within the call. --pr and --branch are mutually
+exclusive. --context-file - reads context from stdin.
+
+answer's --auto marks the answer as the hub's own take rather than the
+owner's (answer.by: "auto" vs "owner"); it is also accepted right after
+OPTION-ID. --auto refuses an option that is not the record's `recommend` —
+exit 2, nothing written. --auto on an already-answered record also refuses
+— exit 1, nothing written. Answering again without --auto re-stamps the
+record as an owner answer, which is how an owner reverses an auto-taken
+one.
+
+list prints a table: ID STATE BY REPO PR/BRANCH AGE TITLE, open records
+first, newest first within each state; BY is "owner"/"auto" once answered,
+"-" while open. --json prints the matching records as one JSON array via
+decision_records.
+
+Exit codes: 0 success (dedupe no-op included); 1 unknown id, update or
+answer on no such record; 2 a malformed call (missing/bad flags) — nothing
+is written.
+EOF
+}
+
+# ── writer ──────────────────────────────────────────────
+
+# decision_slug <text> — lowercase, non-alnum runs to '-', trimmed.
+decision_slug() {
+    local s
+    s=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')
+    printf '%s' "$s"
+}
+
+# decision_dir <repo> — the repo's subdirectory under DECISIONS_DIR.
+decision_dir() { printf '%s/%s' "$DECISIONS_DIR" "$1"; }
+
+# decision_new_id — 6 lowercase hex, regenerated until no file under
+# DECISIONS_DIR ends in -<id>.json.
+decision_new_id() {
+    local id
+    while :; do
+        id=$(od -An -N4 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n' | cut -c1-6)
+        [[ -n "$id" ]] || continue
+        # shellcheck disable=SC2144  # the glob is meant to match at most once
+        if ! compgen -G "$DECISIONS_DIR"/*/*"-$id.json" >/dev/null 2>&1; then
+            printf '%s' "$id"
+            return 0
+        fi
+    done
+}
+
+# decision_session — --session's caller passes it resolved; this is the
+# fallback when none was given.
+decision_session() {
+    if [[ -n "${TMUX:-}" ]]; then
+        tmux display -p '#S' 2>/dev/null || printf '-'
+    else
+        printf '-'
+    fi
+}
+
+# decision_records [--open] [--repo R] — every record under DECISIONS_DIR as
+# one compact JSON line each, via ONE jq call over every file. The only
+# reader of the on-disk shape; list, dedupe and bin/hq-decisions all call
+# this instead of parsing a file themselves.
+decision_records() {
+    local open=false repo="" files=()
+    while (( $# )); do
+        case "$1" in
+            --open) open=true; shift ;;
+            --repo) repo="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    while IFS= read -r f; do
+        [[ -n "$f" ]] && files+=("$f")
+    done < <(find "$DECISIONS_DIR" -type f -name '*.json' ! -name '*.tmp.*' 2>/dev/null)
+    (( ${#files[@]} )) || return 0
+    jq -c --arg open "$open" --arg repo "$repo" '
+        select($open != "true" or .state == "open")
+        | select($repo == "" or .repo == $repo)
+        | if .answer != null and (.answer.by // null) == null
+          then .answer.by = "owner" else . end
+    ' "${files[@]}" 2>/dev/null
+}
+
+# decision_find_open_key <key> — the id of the OPEN record with this key, if
+# any.
+decision_find_open_key() {
+    decision_records --open | jq -r --arg key "$1" 'select(.key == $key) | .id' | head -n1
+}
+
+# decision_siblings <repo> <ref> <key> — ids of other OPEN records sharing
+# repo and pr/branch ref but a different key (likely a reworded title).
+decision_siblings() {
+    local repo="$1" ref="$2" key="$3"
+    decision_records --open --repo "$repo" \
+        | jq -r --arg ref "$ref" --arg key "$key" '
+            select(.key != $key)
+            | select((.pr != null and (.pr | tostring) == $ref) or .branch == $ref)
+            | .id
+        '
+}
+
+# decision_find_file <id> — the one file whose name ends -<id>.json.
+decision_find_file() {
+    local f
+    f=$(compgen -G "$DECISIONS_DIR"/*/*"-$1.json" 2>/dev/null | head -n1)
+    [[ -n "$f" ]] || return 1
+    printf '%s' "$f"
+}
+
+# decision_write <file> <json> — <file>.tmp.$$ then mv over the target.
+decision_write() {
+    local f="$1" json="$2" tmp
+    tmp="$f.tmp.$$"
+    mkdir -p "${f%/*}" || return 1
+    printf '%s\n' "$json" > "$tmp" || return 1
+    mv -f "$tmp" "$f"
+}
+
+now_iso() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+# decision_parse_option <opt> <opts_json> — validates one
+# --option 'id|label|description' (non-empty id and label, id unique within
+# opts_json) and echoes the appended options array; exits 2 with a message
+# on stderr and nothing echoed on a bad option. Shared by cmd_add/cmd_update
+# so the --option grammar is defined in exactly one place.
+decision_parse_option() {
+    local opt="$1" opts_json="$2" o_id o_label o_desc rest
+    o_id="${opt%%|*}"
+    rest="${opt#*|}"
+    if [[ "$rest" == "$opt" ]]; then
+        o_label=""; o_desc=""
+    else
+        o_label="${rest%%|*}"
+        if [[ "${rest#*|}" == "$rest" ]]; then o_desc=""; else o_desc="${rest#*|}"; fi
+    fi
+    [[ -n "$o_id" && -n "$o_label" ]] || {
+        echo "hq-make-decision: --option needs a non-empty id and label (got '$opt') — use 'id|label|description'" >&2
+        return 2
+    }
+    if [[ "$(jq -n --argjson opts "$opts_json" --arg id "$o_id" '$opts | any(.[]; .id == $id)')" == true ]]; then
+        echo "hq-make-decision: duplicate --option id '$o_id'" >&2
+        return 2
+    fi
+    jq -nc --argjson opts "$opts_json" --arg id "$o_id" --arg lbl "$o_label" --arg desc "$o_desc" \
+        '$opts + [{id: $id, label: $lbl, description: $desc}]'
+}
+
+# ── add ─────────────────────────────────────────────────
+
+cmd_add() {
+    local repo="" pr="" branch="" title="" context="" context_file="" key=""
+    local session="" recommend="" opts_json="[]" why=""
+    while (( $# )); do
+        case "$1" in
+            --repo) repo="$2"; shift 2 ;;
+            --pr) pr="$2"; shift 2 ;;
+            --branch) branch="$2"; shift 2 ;;
+            --title) title="$2"; shift 2 ;;
+            --option)
+                opts_json=$(decision_parse_option "$2" "$opts_json") || return 2
+                shift 2
+                ;;
+            --recommend) recommend="$2"; shift 2 ;;
+            --context) context="$2"; shift 2 ;;
+            --context-file) context_file="$2"; shift 2 ;;
+            --key) key="$2"; shift 2 ;;
+            --session) session="$2"; shift 2 ;;
+            --why) why="$2"; shift 2 ;;
+            *) echo "hq-make-decision: add: unknown argument '$1'" >&2; return 2 ;;
+        esac
+    done
+
+    [[ -n "$repo" && "$repo" != */* && "$repo" != . && "$repo" != .. ]] || {
+        echo "hq-make-decision: --repo is required and must not contain '/' or be '.'/'..'" >&2
+        return 2
+    }
+    [[ -n "$title" ]] || { echo "hq-make-decision: --title is required" >&2; return 2; }
+    if [[ -n "$pr" && -n "$branch" ]]; then
+        echo "hq-make-decision: --pr and --branch are mutually exclusive" >&2
+        return 2
+    fi
+    if [[ -n "$pr" ]] && ! [[ "$pr" =~ ^[0-9]+$ ]]; then
+        echo "hq-make-decision: --pr must be a number" >&2
+        return 2
+    fi
+    # Normalise leading zeros (--pr 007 and --pr 7 must dedupe to one key);
+    # base-10 forced so bash's arithmetic context doesn't read "007" as octal.
+    [[ -n "$pr" ]] && pr=$(( 10#$pr ))
+    if [[ "$(printf '%s' "$opts_json" | jq 'length')" -lt 2 ]]; then
+        echo "hq-make-decision: need at least 2 --option flags" >&2
+        return 2
+    fi
+    [[ -n "$recommend" ]] || { echo "hq-make-decision: --recommend is required" >&2; return 2; }
+    if [[ "$(printf '%s' "$opts_json" | jq --arg r "$recommend" '[.[] | select(.id == $r)] | length')" -eq 0 ]]; then
+        echo "hq-make-decision: --recommend '$recommend' does not name one of the --option ids" >&2
+        return 2
+    fi
+    if [[ -n "$context" && -n "$context_file" ]]; then
+        echo "hq-make-decision: --context and --context-file are mutually exclusive" >&2
+        return 2
+    fi
+    if [[ -n "$context_file" ]]; then
+        if [[ "$context_file" == "-" ]]; then
+            context=$(cat)
+        else
+            [[ -r "$context_file" ]] || { echo "hq-make-decision: --context-file '$context_file' is not readable" >&2; return 2; }
+            context=$(cat "$context_file")
+        fi
+    fi
+
+    local ref="-"
+    [[ -n "$pr" ]] && ref="$pr"
+    [[ -n "$branch" ]] && ref="$branch"
+    if [[ -z "$key" ]]; then
+        key="$repo:$ref:$(decision_slug "$title")"
+    fi
+
+    local existing
+    existing=$(decision_find_open_key "$key")
+    if [[ -n "$existing" ]]; then
+        printf '%s\n' "$existing"
+        echo "hq-make-decision: already open as $existing — use 'hq-make-decision update $existing' to revise it" >&2
+        return 0
+    fi
+
+    [[ -n "$session" ]] || session=$(decision_session)
+
+    local id created
+    id=$(decision_new_id)
+    created=$(now_iso)
+    local pr_json=null branch_json=null
+    [[ -n "$pr" ]] && pr_json="$pr"
+    [[ -n "$branch" ]] && branch_json=$(jq -n --arg b "$branch" '$b')
+
+    local record
+    record=$(jq -n \
+        --arg id "$id" --arg key "$key" --arg repo "$repo" \
+        --argjson pr "$pr_json" --argjson branch "$branch_json" \
+        --arg title "$title" --arg context "$context" \
+        --argjson options "$opts_json" --arg recommend "$recommend" \
+        --arg session "$session" --arg created "$created" --arg why "$why" \
+        '{
+            id: $id, key: $key, repo: $repo, pr: $pr, branch: $branch,
+            title: $title, context: $context, options: $options,
+            recommend: $recommend, session: $session,
+            created: $created, updated: $created,
+            state: "open", answer: null
+        } + (if $why != "" then {why: $why} else {} end)')
+
+    local stamp file
+    stamp=$(printf '%s' "$created" | tr -d ':-')
+    file="$(decision_dir "$repo")/${stamp}-${id}.json"
+    decision_write "$file" "$record" || { echo "hq-make-decision: failed to write $file" >&2; return 1; }
+
+    local siblings
+    siblings=$(decision_siblings "$repo" "$ref" "$key")
+    if [[ -n "$siblings" ]]; then
+        echo "hq-make-decision: other open decisions on $repo $ref: $(printf '%s' "$siblings" | tr '\n' ' ') — check for a reworded duplicate" >&2
+    fi
+
+    printf '%s\n' "$id"
+}
+
+# ── update ──────────────────────────────────────────────
+
+cmd_update() {
+    local id="$1"; shift
+    [[ -n "$id" ]] || { echo "hq-make-decision: update needs an id" >&2; return 2; }
+    local file
+    file=$(decision_find_file "$id") || { echo "hq-make-decision: no such decision '$id'" >&2; return 1; }
+    local state
+    state=$(jq -r '.state' "$file")
+    [[ "$state" == open ]] || { echo "hq-make-decision: '$id' is answered — update refuses to touch it" >&2; return 1; }
+
+    local title="" context="" context_file="" recommend="" why=""
+    local opts_json="" have_opts=false
+    while (( $# )); do
+        case "$1" in
+            --title) title="$2"; shift 2 ;;
+            --recommend) recommend="$2"; shift 2 ;;
+            --context) context="$2"; shift 2 ;;
+            --context-file) context_file="$2"; shift 2 ;;
+            --why) why="$2"; shift 2 ;;
+            --option)
+                have_opts=true
+                [[ -n "$opts_json" ]] || opts_json="[]"
+                opts_json=$(decision_parse_option "$2" "$opts_json") || return 2
+                shift 2
+                ;;
+            *) echo "hq-make-decision: update: unknown argument '$1'" >&2; return 2 ;;
+        esac
+    done
+    if [[ -n "$context" && -n "$context_file" ]]; then
+        echo "hq-make-decision: --context and --context-file are mutually exclusive" >&2
+        return 2
+    fi
+    if [[ -n "$context_file" ]]; then
+        if [[ "$context_file" == "-" ]]; then
+            context=$(cat)
+        else
+            [[ -r "$context_file" ]] || { echo "hq-make-decision: --context-file '$context_file' is not readable" >&2; return 2; }
+            context=$(cat "$context_file")
+        fi
+    fi
+    if [[ "$have_opts" == true && "$(printf '%s' "$opts_json" | jq 'length')" -lt 2 ]]; then
+        echo "hq-make-decision: need at least 2 --option flags" >&2
+        return 2
+    fi
+
+    local updated record
+    updated=$(now_iso)
+    record=$(jq \
+        --arg title "$title" --arg has_title "$([[ -n "$title" ]] && echo true || echo false)" \
+        --arg context "$context" --arg has_context "$([[ -n "$context" || -n "$context_file" ]] && echo true || echo false)" \
+        --arg recommend "$recommend" --arg has_recommend "$([[ -n "$recommend" ]] && echo true || echo false)" \
+        --argjson options "${opts_json:-null}" --arg has_options "$have_opts" \
+        --arg why "$why" --arg has_why "$([[ -n "$why" ]] && echo true || echo false)" \
+        --arg updated "$updated" '
+        (if $has_title == "true" then .title = $title else . end)
+        | (if $has_context == "true" then .context = $context else . end)
+        | (if $has_options == "true" then .options = $options else . end)
+        | (if $has_recommend == "true" then .recommend = $recommend else . end)
+        | (if $has_why == "true" then .why = $why else . end)
+        | .updated = $updated
+    ' "$file")
+
+    local rec_recommend
+    rec_recommend=$(printf '%s' "$record" | jq -r '.recommend')
+    if [[ "$(printf '%s' "$record" | jq --arg r "$rec_recommend" '[.options[] | select(.id == $r)] | length')" -eq 0 ]]; then
+        echo "hq-make-decision: recommend '$rec_recommend' does not name one of this record's option ids after the update" >&2
+        return 2
+    fi
+
+    decision_write "$file" "$record" || { echo "hq-make-decision: failed to write $file" >&2; return 1; }
+    printf '%s\n' "$id"
+}
+
+# ── answer ──────────────────────────────────────────────
+
+cmd_answer() {
+    local auto=false id option
+    if [[ "${1:-}" == "--auto" ]]; then auto=true; shift; fi
+    id="$1"; option="$2"
+    shift 2 2>/dev/null || shift $#
+    if [[ "${1:-}" == "--auto" ]]; then auto=true; shift; fi
+    local note="$*"
+    [[ -n "$id" && -n "$option" ]] || { echo "hq-make-decision: answer needs an id and an option id" >&2; return 2; }
+    local file
+    file=$(decision_find_file "$id") || { echo "hq-make-decision: no such decision '$id'" >&2; return 1; }
+    if [[ "$(jq --arg o "$option" '[.options[] | select(.id == $o)] | length' "$file")" -eq 0 ]]; then
+        echo "hq-make-decision: '$option' does not name one of '$id''s options" >&2
+        return 2
+    fi
+    local restamped=false
+    [[ "$(jq -r '.state' "$file")" == answered ]] && restamped=true
+    if [[ "$auto" == true ]]; then
+        local recommend
+        recommend=$(jq -r '.recommend' "$file")
+        if [[ "$option" != "$recommend" ]]; then
+            echo "hq-make-decision: --auto refuses '$option' — '$id''s recommended option is '$recommend'" >&2
+            return 2
+        fi
+        if [[ "$restamped" == true ]]; then
+            echo "hq-make-decision: '$id' is already answered — answer --auto refuses to re-stamp it; a plain answer re-stamps" >&2
+            return 1
+        fi
+    fi
+
+    local at updated record by
+    at=$(now_iso)
+    updated="$at"
+    by="owner"; [[ "$auto" == true ]] && by="auto"
+    record=$(jq --arg option "$option" --arg note "$note" --arg at "$at" --arg updated "$updated" --arg by "$by" '
+        .state = "answered"
+        | .answer = {option: $option, note: $note, at: $at, by: $by}
+        | .updated = $updated
+    ' "$file")
+    decision_write "$file" "$record" || { echo "hq-make-decision: failed to write $file" >&2; return 1; }
+    [[ "$restamped" == true ]] && echo "hq-make-decision: '$id' was already answered — re-stamped with this answer" >&2
+    printf '%s\n' "$id"
+}
+
+# ── list ────────────────────────────────────────────────
+
+cmd_list() {
+    local open=false repo="" json=false
+    while (( $# )); do
+        case "$1" in
+            --open) open=true; shift ;;
+            --repo) repo="$2"; shift 2 ;;
+            --json) json=true; shift ;;
+            *) echo "hq-make-decision: list: unknown argument '$1'" >&2; return 2 ;;
+        esac
+    done
+
+    local args=()
+    [[ "$open" == true ]] && args+=(--open)
+    [[ -n "$repo" ]] && args+=(--repo "$repo")
+    local recs
+    recs=$(decision_records "${args[@]}")
+
+    if [[ "$json" == true ]]; then
+        if [[ -z "$recs" ]]; then printf '[]\n'; else printf '%s' "$recs" | jq -s '.'; fi
+        return 0
+    fi
+
+    [[ -n "$recs" ]] || { echo "no decisions"; return 0; }
+    { printf 'ID\tSTATE\tBY\tREPO\tPR/BRANCH\tAGE\tTITLE\n'
+    printf '%s\n' "$recs" \
+        | jq -r '[(if .state == "open" then 0 else 1 end), .created, .state,
+                  (if .state == "open" then "-" else .answer.by end),
+                  .created, .id, .repo,
+                  (if .pr != null then (.pr | tostring) elif .branch != null then .branch else "-" end),
+                  .title] | @tsv' \
+        | sort -t$'\t' -k1,1n -k2,2r \
+        | cut -f3- \
+        | while IFS=$'\t' read -r state by created id repo ref title; do
+            local age now_s created_s secs
+            now_s=$(date +%s)
+            created_s=$(decision_epoch "$created")
+            if [[ -n "$created_s" ]]; then secs=$(( now_s - created_s )); else secs=-1; fi
+            age=$(decision_fmt_secs "$secs")
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$state" "$by" "$repo" "$ref" "$age" "$title"
+        done; } \
+        | awk -F'\t' '{ for (c = 1; c <= 6; c++) if (length($c) > w[c]) w[c] = length($c); row[NR] = $0 }
+            END { for (r = 1; r <= NR; r++) { split(row[r], f, "\t")
+                printf "%-*s  %-*s  %-*s  %-*s  %-*s  %*s  %s\n", w[1], f[1], w[2], f[2], w[3], f[3], w[4], f[4], w[5], f[5], w[6], f[6], f[7] } }'
+}
+
+# decision_epoch <ISO> — UTC seconds via the platform date; empty on a
+# malformed timestamp.
+decision_epoch() {
+    date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" +%s 2>/dev/null \
+        || date -u -d "$1" +%s 2>/dev/null
+}
+
+decision_fmt_secs() {
+    local s="$1"
+    [[ "$s" =~ ^-?[0-9]+$ ]] || { printf '-'; return 0; }
+    (( s < 0 )) && { printf '-'; return 0; }
+    if (( s < 60 )); then printf '%ds' "$s"
+    elif (( s < 3600 )); then printf '%dm' $(( s / 60 ))
+    elif (( s < 86400 )); then printf '%dh' $(( s / 3600 ))
+    else printf '%dd' $(( s / 86400 )); fi
+}
+
+# Sourced by bin/hq-decisions and tests/test-hq-make-decision.sh: hand back the
+# decisions and stop.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0 2>/dev/null || true
+fi
+
+case "${1:-}" in
+    -h|--help|"") usage; [[ "${1:-}" == "" ]] && exit 2; exit 0 ;;
+    add) shift; cmd_add "$@"; exit $? ;;
+    update) shift; cmd_update "$@"; exit $? ;;
+    answer) shift; cmd_answer "$@"; exit $? ;;
+    list) shift; cmd_list "$@"; exit $? ;;
+    *) echo "hq-make-decision: unknown subcommand '$1'" >&2; usage >&2; exit 2 ;;
+esac
