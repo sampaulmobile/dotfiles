@@ -244,12 +244,11 @@ classify_pane_status() {
         [[ -n "$line" ]] && filtered+=("$line")
     done
 
-    # Claude Code renders an agents list below the footer whenever the
-    # session has subagents running, and a session that goes idle right
-    # after leaves it in the last painted frame indefinitely (observed
-    # 2026-10-04: a row frozen at "36m 12s" over 25 minutes). Its rows
-    # carry a "36m 12s · ↓ 421.5k tokens" tail, so they both look like the
-    # spinner and crowd the window below. "← for agents" is the footer hint,
+    # Claude Code renders an agents list below the footer while the session
+    # has subagents running, and a session that goes idle leaves it in the
+    # last painted frame indefinitely. Its rows end in a
+    # "36m 12s · ↓ 421.5k tokens" tail, so they look like the spinner and
+    # crowd the window below. "← for agents" is the footer hint,
     # present whether or not the list is up, so everything after the last
     # one is chrome. Older UI generations have no such line and are left
     # whole.
@@ -285,10 +284,9 @@ classify_pane_status() {
     # "⎿  Running…" (tool in flight), and the spinner status line
     # "· <Verb>… (41s · ↓ 1.9k tokens)", whose only stable fragment is the
     # "s · ↓ " + "tokens" pair — the verbs are randomized. The current UI
-    # dropped "esc to interrupt", so the spinner is the only live marker
-    # left, and it is matched PER LINE between its parentheses: an agents
-    # list row carries the same fragment bare, and matching the whole blob
-    # let one line's "(" pair with another's "tokens".
+    # emits no "esc to interrupt", so the spinner is the only live marker
+    # left; it is matched PER LINE between its parentheses, since an agents
+    # list row carries the same fragment bare.
     if [[ "$content" == *"to interrupt"* || "$content" == *"⎿  Running…"* ]]; then
         echo "working"
         return
