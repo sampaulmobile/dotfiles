@@ -170,6 +170,9 @@ check "the header counts 3 open, 1 auto-taken, 2 answered" \
 check "the unseen-auto marker shows 1" \
     "$(printf '%s\n' "$dump" | head -1 | grep -c '● 1 auto-taken since you last looked')" "1"
 check "ANSWERED is hidden by default" "$(printf '%s\n' "$dump" | grep -c '^ANSWERED$')" "0"
+check "hidden ANSWERED collapses to one placeholder line with its count" \
+    "$(printf '%s\n' "$dump" | grep -c '^ANSWERED · 2 hidden — a to show$')" "1"
+check "an answered row is not rendered while hidden" "$(printf '%s\n' "$dump" | grep -c 'Pick a log level')" "0"
 check "OPEN precedes AUTO-TAKEN" \
     "$(printf '%s\n' "$dump" | grep -nE '^(OPEN|AUTO-TAKEN)' | head -2 | cut -d: -f2 | tr '\n' ',')" \
     "OPEN · needs you,AUTO-TAKEN · taken for you, say so to reverse,"
@@ -179,6 +182,7 @@ check "each open decision appears exactly once" \
 echo "── --dump --answered shows the ANSWERED section"
 dumpa=$(NO_COLOR=1 COLUMNS=80 "$HQDS" --dump --answered)
 check "ANSWERED section header appears" "$(printf '%s\n' "$dumpa" | grep -c '^ANSWERED$')" "1"
+check "no placeholder once ANSWERED is shown" "$(printf '%s\n' "$dumpa" | grep -c 'hidden — a to show')" "0"
 check "the owner-answered row is in it" "$(printf '%s\n' "$dumpa" | grep -c 'Pick a log level')" "1"
 check "the old no-by record is in it, rendered as owner" \
     "$(printf '%s\n' "$dumpa" | grep -c 'An old decision.*✓ a · you')" "1"

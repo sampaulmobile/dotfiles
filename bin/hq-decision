@@ -475,7 +475,7 @@ cmd_list() {
     fi
 
     [[ -n "$recs" ]] || { echo "no decisions"; return 0; }
-    printf '%-6s  %-8s  %-6s  %-10s  %-20s  %6s  %s\n' ID STATE BY REPO 'PR/BRANCH' AGE TITLE
+    { printf 'ID\tSTATE\tBY\tREPO\tPR/BRANCH\tAGE\tTITLE\n'
     printf '%s\n' "$recs" \
         | jq -r '[(if .state == "open" then 0 else 1 end), .created, .state,
                   (if .state == "open" then "-" else .answer.by end),
@@ -490,8 +490,11 @@ cmd_list() {
             created_s=$(decision_epoch "$created")
             if [[ -n "$created_s" ]]; then secs=$(( now_s - created_s )); else secs=-1; fi
             age=$(decision_fmt_secs "$secs")
-            printf '%-6s  %-8s  %-6s  %-10s  %-20s  %6s  %s\n' "$id" "$state" "$by" "$repo" "$ref" "$age" "$title"
-        done
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$state" "$by" "$repo" "$ref" "$age" "$title"
+        done; } \
+        | awk -F'\t' '{ for (c = 1; c <= 6; c++) if (length($c) > w[c]) w[c] = length($c); row[NR] = $0 }
+            END { for (r = 1; r <= NR; r++) { split(row[r], f, "\t")
+                printf "%-*s  %-*s  %-*s  %-*s  %-*s  %*s  %s\n", w[1], f[1], w[2], f[2], w[3], f[3], w[4], f[4], w[5], f[5], w[6], f[6], f[7] } }'
 }
 
 # decision_epoch <ISO> — UTC seconds via the platform date; empty on a

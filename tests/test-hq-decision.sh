@@ -185,6 +185,18 @@ table=$("$HQD" list)
 check "the answered row is in the table" "$(printf '%s\n' "$table" | grep -c "$id1")" "1"
 check "an open row is in the table" "$(printf '%s\n' "$table" | grep -c "$id3")" "1"
 
+echo "── list's columns widen to a branch longer than the header"
+long_dir="$work/long"
+HQ_DECISIONS_DIR="$long_dir" "$HQD" add --repo proj --branch feature/a-branch-name-well-past-twenty \
+    --title "Long branch" --option 'a|A' --option 'b|B' --recommend a >/dev/null
+HQ_DECISIONS_DIR="$long_dir" "$HQD" add --repo proj --branch main \
+    --title "Short branch" --option 'a|A' --option 'b|B' --recommend a >/dev/null
+table=$(HQ_DECISIONS_DIR="$long_dir" "$HQD" list)
+age_end=$(( $(printf '%s\n' "$table" | head -1 | awk '{ print index($0, "AGE") }') + 2 ))
+check "every row's AGE ends in the header's AGE column" \
+    "$(printf '%s\n' "$table" | awk -v e="$age_end" 'substr($0, e, 3) !~ /^[^ ]  $/ { bad++ } END { print bad + 0 }')" "0"
+check "the long branch is printed whole" "$(printf '%s\n' "$table" | grep -c 'feature/a-branch-name-well-past-twenty')" "1"
+
 # ── answer --auto ──
 
 echo "── answer --auto writes answer.by=auto, only for the recommended option"

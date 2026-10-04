@@ -61,7 +61,8 @@ usage: hq-decisions                     run the viewer in this terminal
 
 LIST (default): one line per decision, sections in order OPEN (needs you),
 AUTO-TAKEN (taken for you, say so to reverse), ANSWERED (hidden unless `a`
-is pressed or --answered is given); a section with no rows is omitted.
+is pressed or --answered is given, when it collapses to one
+`ANSWERED · N hidden — a to show` line); a section with no rows is omitted.
 
 Header: `DECISIONS  N open · M auto-taken · P answered`, then
 `  ● K auto-taken since you last looked` when K > 0, then `updated <age> ago`
@@ -702,7 +703,12 @@ build_list_frame() {
             "${row_asked[i]}" "${row_last[i]}" "${row_age[i]}" \
             "$where_w" "$title_w" "$asked_w" "$last_w" "$narrow")")
     done
-    (( n == 0 )) && frame_rows+=("  ${DIM}no decisions recorded${RST}")
+    if [[ "$show_answered" != true ]] && (( n_answered > 0 )); then
+        (( ${#frame_rows[@]} > 0 )) && frame_rows+=("")
+        frame_rows+=("${DIM}$(clip "ANSWERED · ${n_answered} hidden — a to show" "$term_w")${RST}")
+    elif (( n == 0 )); then
+        frame_rows+=("  ${DIM}no decisions recorded${RST}")
+    fi
 
     local k ent eidx
     for k in "${!cursor_map[@]}"; do
