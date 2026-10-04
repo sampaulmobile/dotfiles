@@ -555,7 +555,8 @@ decisions_other_option() {
 
 # list_where <idx> — "<repo> #<pr>" or "<repo> <branch>", plain text.
 list_where() {
-    local idx="$1" s="${d_repo[$idx]}"
+    local idx="$1" s
+    s="${d_repo[$idx]}"
     if [[ "${d_pr[$idx]}" != "-" ]]; then s+=" #${d_pr[$idx]}"
     elif [[ "${d_branch[$idx]}" != "-" ]]; then s+=" ${d_branch[$idx]}"
     fi

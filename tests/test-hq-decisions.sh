@@ -142,7 +142,7 @@ open_nowhy_id=$("$HQD" add --repo proj --pr 9 --title "Pick a batch size" \
 auto_id=$("$HQD" add --repo proj --pr 30 --title "Pick a cache ttl" \
     --option 'short|5m' --option 'long|1h' --recommend long --session proj-hub)
 "$HQD" answer --auto "$auto_id" long >/dev/null
-owner_id=$("$HQD" add --repo proj --branch feat/y --title "Pick a log level" \
+owner_id=$("$HQD" add --repo other --branch feat/y --title "Pick a log level" \
     --option 'debug|Debug' --option 'info|Info' --recommend info --session proj-hub)
 "$HQD" answer "$owner_id" debug "went with debug despite the rec" >/dev/null
 
@@ -198,6 +198,8 @@ for cols in 80 160; do
         "$(printf '%s\n' "$d" | grep -c '● long · auto')" "1"
     check "[$cols] answered row LAST column" \
         "$(printf '%s\n' "$d" | grep -c '✓ debug · you')" "1"
+    check "[$cols] answered row WHERE is its own repo, not the previous row's" \
+        "$(printf '%s\n' "$d" | grep -c 'other feat/y.*Pick a log level.*✓ debug · you')" "1"
     check "[$cols] the 200-char title's row is clipped with …" \
         "$(printf '%s\n' "$d" | grep -c 'XXXX.*….*proj-hub')" "1"
     maxlen=0

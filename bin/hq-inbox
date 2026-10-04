@@ -473,13 +473,15 @@ dump() {
 # ── actions ─────────────────────────────────────────────
 
 mark_seen() {
-    local idx="$1" m="${r_mtime[$idx]}"
+    local idx="$1" m
+    m="${r_mtime[$idx]}"
     [[ "$m" =~ ^[0-9]+$ ]] || return 0
     inbox_state_put "$(inbox_state_file seen)" "${r_repo[$idx]}" "${r_branch[$idx]}" "$m"
 }
 
 toggle_archive() {
-    local idx="$1" f m="${r_mtime[$idx]}"
+    local idx="$1" f m
+    m="${r_mtime[$idx]}"
     f=$(inbox_state_file archived)
     [[ "$m" =~ ^[0-9]+$ ]] || m=0
     if [[ "${r_bucket[$idx]}" == ARCHIVED ]]; then
@@ -527,7 +529,8 @@ go_to_hub() {
 }
 
 open_thread() {
-    local idx="$1" f="${r_thread[$idx]}"
+    local idx="$1" f
+    f="${r_thread[$idx]}"
     if [[ ! -r "$f" ]]; then
         STATUS_NOTE="no entries yet for ${r_repo[$idx]}/${r_branch[$idx]}"
         return 0
