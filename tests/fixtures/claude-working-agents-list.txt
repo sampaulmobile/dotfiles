@@ -1,0 +1,14 @@
+⏺ Bash(grep -rn "example" src/)
+  ⎿  Running…
+
+✳ Moonwalking… (42s · ↓ 2.9k tokens)
+───────────────────────────────────────────────────────────────────────────────────── proj-hub ─
+❯
+───────────────────────────────────────────────────────────────────────────────────────────────
+  proj · ⎇ master                                        ⬢ Opus 5[1M]·high · ctx 23% · 5h 10% left
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+                                                                                                /rc
+  ⏺ main
+  ◯ high  Reviewing the diff for correctness                                        12m 30s · ↓ 88.1k tokens
+  ◯ high  Checking the test fixtures                                                 9m 02s · ↓ 51.4k tokens
+  ◯ high  Updating the fixture README                                                 4m 11s · ↓ 12.8k tokens
