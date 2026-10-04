@@ -333,6 +333,55 @@ check "the repaint's bar says answered by you" "$(printf '%s' "$screen_out" | gr
 check "the chosen option is marked owner chose" "$(printf '%s' "$screen_out" | grep -c '· owner chose')" "1"
 check "no stale TO ANSWER bar remains" "$(printf '%s' "$screen_out" | grep -c 'TO ANSWER')" "0"
 
+# ── fd hardening (Amendment) ──
+#
+# load_data/build_frame/paint and the wrap_text/decisions_split helpers they
+# call must never grow the process's own fd count: bash 3.2 does not
+# reliably close a `< <(…)` process substitution or a `<<<` here-string fd
+# opened inside a function on a path that runs every tick, and a pane left
+# open long enough hits "Too many open files" (the bug this Amendment
+# fixes). 200 cycles under a tight ulimit, in a subshell so the limit and
+# any exhaustion stay contained to this test.
+
+echo "── fd hardening: 200 cycles of load_data/build_frame/paint leak no descriptors"
+fd_open_id=$("$HQD" add --repo proj --pr 201 --title "FD hardening: open decision" \
+    --option 'a|Option A|a description long enough to wrap across more than one physical line of the detail body width' \
+    --option 'b|Option B|another description, also long enough to wrap onto a second physical line here' \
+    --recommend a --session hub \
+    --why "a recommendation rationale that is long enough to wrap across more than one physical line too" \
+    --context "$(printf 'word%.0s ' $(seq 1 120))
+$(printf 'word%.0s ' $(seq 1 120))")
+fd_ans_id=$("$HQD" add --repo proj --pr 202 --title "FD hardening: answered decision" \
+    --option 'a|A' --option 'b|Chosen option with a longer label to wrap' --recommend a --session hub)
+"$HQD" answer "$fd_ans_id" b "a note long enough to force a wrap across more than one physical line in the detail body" >/dev/null
+
+fd_err="$work/fd-hardening.err"
+fd_report="$work/fd-hardening.out"
+(
+    ulimit -n 32
+    decisions_read_seen_cutoff
+    before=$(ls /dev/fd | wc -l | tr -d ' ')
+    for n in $(seq 1 200); do
+        load_data
+        view_mode=list; selected_id=""; build_frame; paint >/dev/null
+        view_mode=detail; detail_id="$fd_open_id"; build_frame; paint >/dev/null
+        view_mode=detail; detail_id="$fd_ans_id"; build_frame; paint >/dev/null
+        wrap_text "$(printf 'word%.0s ' $(seq 1 30))
+$(printf 'word%.0s ' $(seq 1 30))" 24 >/dev/null
+    done
+    after=$(ls /dev/fd | wc -l | tr -d ' ')
+    printf 'BEFORE=%s AFTER=%s\n' "$before" "$after"
+) >"$fd_report" 2>"$fd_err"
+fd_before=$(grep -oE 'BEFORE=[0-9]+' "$fd_report" | cut -d= -f2)
+fd_after=$(grep -oE 'AFTER=[0-9]+' "$fd_report" | cut -d= -f2)
+check "fd count is unchanged after 200 cycles under ulimit -n 32" "$fd_after" "$fd_before"
+if grep -qi 'too many open files' "$fd_err"; then
+    bad "no 'Too many open files' in stderr" "$(cat "$fd_err")"
+else
+    ok "no 'Too many open files' in stderr"
+fi
+view_mode=list
+
 # ── scrolling (screen_out, no terminal) ──
 
 echo "── scrolling: a store with 30 open records under LINES=20"
