@@ -244,7 +244,23 @@ classify_pane_status() {
         [[ -n "$line" ]] && filtered+=("$line")
     done
 
-    local total=${#filtered[@]}
+    # Claude Code renders an agents list below the footer while the session
+    # has subagents running, and a session that goes idle leaves it in the
+    # last painted frame indefinitely. Its rows end in a
+    # "36m 12s · ↓ 421.5k tokens" tail, so they look like the spinner and
+    # crowd the window below. "← for agents" is the footer hint,
+    # present whether or not the list is up, so everything after the last
+    # one is chrome. Older UI generations have no such line and are left
+    # whole.
+    local total=${#filtered[@]} i cut=-1
+    for (( i = 0; i < total; i++ )); do
+        [[ "${filtered[i]}" == *"← for agents"* ]] && cut="$i"
+    done
+    if (( cut >= 0 )); then
+        filtered=("${filtered[@]:0:$(( cut + 1 ))}")
+        total=${#filtered[@]}
+    fi
+
     if (( total == 0 )); then
         echo "unknown"
         return
@@ -267,12 +283,20 @@ classify_pane_status() {
     # Working markers across UI generations: "esc to interrupt" (older),
     # "⎿  Running…" (tool in flight), and the spinner status line
     # "· <Verb>… (41s · ↓ 1.9k tokens)", whose only stable fragment is the
-    # "s · ↓ " + "tokens" pair — the verbs are randomized.
-    if [[ "$content" == *"to interrupt"* || "$content" == *"⎿  Running…"* ]] \
-       || [[ "$content" == *"s · ↓ "* && "$content" == *"tokens"* ]]; then
+    # "s · ↓ " + "tokens" pair — the verbs are randomized. The current UI
+    # emits no "esc to interrupt", so the spinner is the only live marker
+    # left; it is matched PER LINE between its parentheses, since an agents
+    # list row carries the same fragment bare.
+    if [[ "$content" == *"to interrupt"* || "$content" == *"⎿  Running…"* ]]; then
         echo "working"
         return
     fi
+    for w in "${window[@]}"; do
+        if [[ "$w" == *"("*"s · ↓ "*"tokens"*")"* ]]; then
+            echo "working"
+            return
+        fi
+    done
 
     # Must be tested before idle: ❯ appears in the Yes/No selector too.
     if [[ "$content" == *"Yes"* && "$content" == *"No"* ]]; then
