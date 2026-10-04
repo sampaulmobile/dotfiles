@@ -436,5 +436,17 @@ else
     bad "the cursor row did not change" "$cursor_line"
 fi
 
+echo "── j/k: list_move alone (no build_frame) moves the › on the next paint"
+list_move 1
+paint >/dev/null
+moved_line=$(printf "%s" "$screen_out" | grep "›")
+entry="${cursor_map[1]}"; idx="${entry#*:}"
+check "after list_move 1 the › line is the SECOND record" \
+    "$(printf "%s" "$moved_line" | grep -Fc -- "${d_title[$idx]}")" "1"
+list_move -1
+paint >/dev/null
+check "after list_move -1 the › line is the FIRST record again" \
+    "$(printf "%s" "$screen_out" | grep "›" | grep -Fc -- "$first_title")" "1"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

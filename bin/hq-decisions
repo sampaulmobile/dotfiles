@@ -1036,6 +1036,7 @@ list_move() {
         entry="${cursor_map[$selected]}"
         idx="${entry#*:}"
         selected_id="${d_id[$idx]}"
+        frame_cursor_line="${frame_row_line[$selected]}"
     fi
 }
 
