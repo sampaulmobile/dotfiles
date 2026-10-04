@@ -21,12 +21,12 @@ don't re-derive them here.
 
 Coordinator notes for this session:
 
-- Track outstanding delegations: run `hq-decision list --open` and check
+- Track outstanding delegations: run `hq-make-decision list --open` and check
   `~/.local/state/hq/snapshot/pipelines.tsv` before `state/backlog.md`; relay
   results to the user as they land.
 - A decision that is the owner's call never goes into chat without a
   record — the auto-take test, the asked/auto-taken split and the
-  `hq-decision` calls are all in `~/.claude/skills/feature/SKILL.md`'s
+  `hq-make-decision` calls are all in `~/.claude/skills/feature/SKILL.md`'s
   "After a Launch, on the requester's side"; this session follows it rather
   than its own copy.
 - Steering: relay user feedback to the task session by message. If the user

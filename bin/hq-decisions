@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hq-decisions — read-only over bin/hq-decision's records; its one write is
+# hq-decisions — read-only over bin/hq-make-decision's records; its one write is
 # _state/seen, interactive viewer only (see below). Two views: a flat LIST
 # (one line per decision, sections OPEN / AUTO-TAKEN / ANSWERED) and a
 # full-screen DETAIL of one decision (⏎ on a row). Columns, keys and formats
@@ -37,7 +37,7 @@
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 # shellcheck source=/dev/null
-source "$DOTFILES/bin/hq-decision"
+source "$DOTFILES/bin/hq-make-decision"
 # shellcheck source=/dev/null
 source "$DOTFILES/bin/project-dirs-lib"
 
@@ -82,7 +82,7 @@ AUTO-TAKEN / ANSWERED) · repo · pr-or-branch · asked/taken/answered <age>
 ago by <session> · id, then the title, CONTEXT, and OPTIONS (the
 recommended option marked ●, with its `why` if the record has one; an
 answered record also marks the chosen option ✓ and shows its note). The
-bottom bar gives the exact `hq-decision answer` command: TO ANSWER for an
+bottom bar gives the exact `hq-make-decision answer` command: TO ANSWER for an
 open decision, TO REVERSE for an auto-taken one, or `answered by you <age>
 ago` once the owner has answered. J/K step to the next/prev decision in the
 same section (NEEDS YOU or ANSWERED); j/k scroll the body when it doesn't fit.
@@ -241,7 +241,7 @@ wrap_text() {
     printf '%s' "$out"
 }
 
-# age_of <ISO> — age formatted like bin/hq-decision's own table; "-" for a
+# age_of <ISO> — age formatted like bin/hq-make-decision's own table; "-" for a
 # timestamp that does not parse.
 age_of() {
     local epoch
@@ -807,13 +807,13 @@ build_detail_bar() {
     case "$kind" in
         open)
             label="TO ANSWER"
-            message="tell $(session_text "${d_session[$idx]}") \"go with ${d_recommend[$idx]}\" — it records: hq-decision answer ${d_id[$idx]} ${d_recommend[$idx]}"
+            message="tell $(session_text "${d_session[$idx]}") \"go with ${d_recommend[$idx]}\" — it records: hq-make-decision answer ${d_id[$idx]} ${d_recommend[$idx]}"
             ;;
         auto)
             local other
             other=$(decisions_other_option "$idx" "${d_aopt[$idx]}")
             label="TO REVERSE"
-            message="tell $(session_text "${d_session[$idx]}") \"reverse ${d_id[$idx]}, ${other} instead\" — it re-records as yours: hq-decision answer ${d_id[$idx]} ${other}"
+            message="tell $(session_text "${d_session[$idx]}") \"reverse ${d_id[$idx]}, ${other} instead\" — it re-records as yours: hq-make-decision answer ${d_id[$idx]} ${other}"
             ;;
         *)
             message="answered by you $(age_of "${d_aat[$idx]}") ago"

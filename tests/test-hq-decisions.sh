@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# bin/hq-decisions: read-only over bin/hq-decision's records; its one write
+# bin/hq-decisions: read-only over bin/hq-make-decision's records; its one write
 # is _state/seen, interactive viewer only. Two views: LIST (one line per
 # decision) and DETAIL (⏎ on a row).
 #
 #   tests/test-hq-decisions.sh
 #
-# Fixtures are written by `hq-decision add`/`answer` into a throwaway
+# Fixtures are written by `hq-make-decision add`/`answer` into a throwaway
 # mktemp -d tree (HQ_DECISIONS_DIR); --dump renders them with no terminal.
 # Offline: no tmux server, no network.
 
@@ -27,7 +27,7 @@ check() {
 
 unset TMUX
 export HQ_DECISIONS_DIR="$work/decisions"
-HQD="$repo/bin/hq-decision"
+HQD="$repo/bin/hq-make-decision"
 HQDS="$repo/bin/hq-decisions"
 
 # ── sourcing hands back the pure functions and starts no loop ──
@@ -272,7 +272,7 @@ check "the recommended option is dotted and marked recommended" \
 check "the why text follows the recommendation" \
     "$(printf '%s\n' "$d" | grep -c 'why: fewer retries waste less time')" "1"
 check "the TO ANSWER bar names the recommended option and the answer command" \
-    "$(printf '%s' "$d" | tr '\n' ' ' | grep -c 'TO ANSWER.*go with long.*hq-decision answer '"$open_why_id"' long')" "1"
+    "$(printf '%s' "$d" | tr '\n' ' ' | grep -c 'TO ANSWER.*go with long.*hq-make-decision answer '"$open_why_id"' long')" "1"
 check "the recommended option's head: 2-wide mark, id, two spaces, label, suffix" \
     "$(printf '%s\n' "$d" | grep -c '^● long  5 attempts · recommended$')" "1"
 check "an unmarked option's head: blank mark column, id, two spaces, label" \
@@ -290,7 +290,7 @@ check "state line shows AUTO-TAKEN" "$(printf '%s\n' "$d" | grep -c '^AUTO-TAKEN
 check "the chosen option is marked as the recommendation" \
     "$(printf '%s\n' "$d" | grep -c '✓ long.*was the recommendation')" "1"
 check "TO REVERSE names the other option" \
-    "$(printf '%s' "$d" | tr '\n' ' ' | grep -c 'TO REVERSE.*reverse '"$auto_id"', short instead.*hq-decision answer '"$auto_id"' short')" "1"
+    "$(printf '%s' "$d" | tr '\n' ' ' | grep -c 'TO REVERSE.*reverse '"$auto_id"', short instead.*hq-make-decision answer '"$auto_id"' short')" "1"
 check "the TO REVERSE bar keeps two spaces after the label" \
     "$(printf '%s\n' "$d" | grep -c '^TO REVERSE  tell')" "1"
 
@@ -424,7 +424,7 @@ view_mode=list
 echo "── scrolling: a store with 30 open records under LINES=20"
 work2=$(mktemp -d "$work/hq-decisions-scroll.XXXXXX")
 export HQ_DECISIONS_DIR="$work2/decisions"
-# DECISIONS_DIR (bin/hq-decision's global) was fixed at the `source "$HQDS"`
+# DECISIONS_DIR (bin/hq-make-decision's global) was fixed at the `source "$HQDS"`
 # above; the sourced functions below need it repointed explicitly.
 DECISIONS_DIR="$HQ_DECISIONS_DIR"
 for i in $(seq 1 30); do

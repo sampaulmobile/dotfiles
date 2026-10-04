@@ -112,7 +112,7 @@ ask the user, before dispatching.
   workplans are off.
 - A decision that is the owner's call never goes into chat without a
   record — the auto-take test, the asked/auto-taken split and the
-  `hq-decision` calls are all in that same section of
+  `hq-make-decision` calls are all in that same section of
   `~/.claude/skills/feature/SKILL.md`; this session follows it rather than
   its own copy.
 - Relay results to the user as they land — PR URLs and summaries, or the

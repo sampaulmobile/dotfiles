@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# bin/hq-decision: one JSON file per decision, dedupe on key, tmp+mv,
+# bin/hq-make-decision: one JSON file per decision, dedupe on key, tmp+mv,
 # removes nothing.
 #
-#   tests/test-hq-decision.sh
+#   tests/test-hq-make-decision.sh
 #
 # Offline: HQ_DECISIONS_DIR points at a throwaway mktemp -d tree for every
 # case, TMUX is unset so `session` always falls back to "-", and nothing
@@ -12,7 +12,7 @@
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo=$(dirname "$here")
 
-work=$(mktemp -d "${TMPDIR:-/tmp}/hq-decision-test.XXXXXX")
+work=$(mktemp -d "${TMPDIR:-/tmp}/hq-make-decision-test.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
 pass=0
@@ -26,7 +26,7 @@ check() {
 
 unset TMUX
 export HQ_DECISIONS_DIR="$work/decisions"
-HQD="$repo/bin/hq-decision"
+HQD="$repo/bin/hq-make-decision"
 
 # ── sourcing hands back the decisions and starts no command ──
 
