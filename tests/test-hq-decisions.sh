@@ -332,6 +332,26 @@ else
     bad "[detail] a line exceeds the terminal width" "$maxlen > 80"
 fi
 
+echo "── g: a recorded <session>-hub peer name falls back to tmux session <session>"
+# tmux is a function here: it answers for a fake session list and records
+# the switch, so no tmux server is reached.
+hub_jump() (
+    tmux() {
+        case "$1" in
+            has-session) [[ " hq other " == *" ${3#=} "* ]] ;;
+            display) echo /dev/ttys001 ;;
+            list-clients) printf '5 /dev/ttys001\n9 /dev/ttys002\n' ;;
+            switch-client) echo "SWITCH ${5#=}" ;;
+        esac
+    }
+    go_to_hub "$1"; printf '%s' "$STATUS_NOTE"
+)
+check "hq-hub with no such session goes to hq" "$(hub_jump hq-hub)" "SWITCH hq
+sent /dev/ttys002 to hq"
+check "an exact session match is used as is" "$(hub_jump other)" "SWITCH other
+sent /dev/ttys002 to other"
+check "nothing to fall back to says not running" "$(hub_jump gone-hub)" "gone-hub is not running"
+
 echo "── DETAIL reload: an answered record follows its id out of OPEN into ANSWERED"
 reload_id=$("$HQD" add --repo proj --pr 55 --title "Pick a reload target" \
     --option 'a|A' --option 'b|B' --recommend a --session proj-hub)

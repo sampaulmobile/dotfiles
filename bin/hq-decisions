@@ -77,7 +77,7 @@ answered one, plus ` · overrode` when it is not the recommendation.
 Color carries who answered: amber open, teal auto-taken, green you.
 Column widths are recomputed every repaint from the terminal width.
 
-DETAIL (⏎ on a row, esc/backspace back to the list): state (OPEN /
+DETAIL (⏎ on a row, q/esc/backspace back to the list): state (OPEN /
 AUTO-TAKEN / ANSWERED) · repo · pr-or-branch · asked/taken/answered <age>
 ago by <session> · id, then the title, CONTEXT, and OPTIONS (the
 recommended option marked ●, with its `why` if the record has one; an
@@ -88,11 +88,12 @@ ago` once the owner has answered. J/K step to the next/prev decision in the
 same section (NEEDS YOU or ANSWERED); j/k scroll the body when it doesn't fit.
 
 Keys, both views:
-  g    jump the other tmux client to the asking session
+  g    jump the other tmux client to the asking session (`X-hub` falls
+       back to session `X`)
   o    open the decision's PR (needs a PR number and a resolvable origin)
-  q    quit
+  ^C   quit
 LIST only:   j/k move · ⏎ open DETAIL · a show/hide ANSWERED
-DETAIL only: j/k scroll · J/K next/prev decision · esc/backspace back
+DETAIL only: j/k scroll · J/K next/prev decision · q/esc/backspace back
 
 "Since you last looked" cutoff: $HQ_DECISIONS_DIR/_state/seen, one ISO
 timestamp, absent meaning every auto-taken decision is unseen. The
@@ -355,6 +356,12 @@ go_to_hub() {
     if [[ -z "$session" || "$session" == "-" ]]; then
         STATUS_NOTE="no hub session"
         return 0
+    fi
+    # A main checkout's hub claude is named "<session>-hub" (new_hub_session),
+    # and hubs record that peer name, not the tmux session it runs in.
+    if ! tmux has-session -t "=$session" 2>/dev/null \
+        && [[ "$session" == *-hub ]] && tmux has-session -t "=${session%-hub}" 2>/dev/null; then
+        session="${session%-hub}"
     fi
     if ! tmux has-session -t "=$session" 2>/dev/null; then
         STATUS_NOTE="$session is not running"
@@ -713,7 +720,7 @@ build_list_frame() {
     fi
 
     frame_tail=""
-    local foot_plain="j/k move · ⏎ open · a show/hide answered · g jump to hub · q quit"
+    local foot_plain="j/k move · ⏎ open · a show/hide answered · g jump to hub · ^C quit"
     frame_foot="${DIM}$(clip "$foot_plain" "$term_w")${RST}"$'\n'
 }
 
@@ -842,7 +849,7 @@ build_detail_frame() {
     local section_word="$detail_section"
     local section_len=${#ans_order[@]}
     [[ "$detail_section" == open ]] && section_len=${#open_order[@]}
-    local left1="‹ esc  back to list"
+    local left1="‹ q  back to list"
     local right1="decision $(( detail_pos + 1 )) of ${section_len} ${section_word}"
     local pad1=$(( term_w - ${#left1} - ${#right1} ))
     local line1
@@ -915,7 +922,7 @@ build_detail_frame() {
 
     build_detail_bar "$idx"
     frame_cursor_line=-1
-    local foot_plain="J/K next/prev decision · o open PR · g jump to ${sess_text} · q quit"
+    local foot_plain="J/K next/prev decision · o open PR · g jump to ${sess_text} · ^C quit"
     frame_foot="${DIM}$(clip "$foot_plain" "$term_w")${RST}"$'\n'
 }
 
@@ -1073,6 +1080,7 @@ view() {
     local key rc kind idx entry last_sig sig fail_count=0 t0
     tput civis 2>/dev/null
     trap 'tput cnorm 2>/dev/null' EXIT
+    trap 'exit 130' INT
     decisions_read_seen_cutoff
     load_data
     build_frame
@@ -1131,13 +1139,12 @@ view() {
                 g)
                     [[ -n "$entry" ]] && go_to_hub "${d_session[$idx]}"
                     paint ;;
-                q) exit 0 ;;
             esac
         else
             idx="$LOCATE_IDX"
             decisions_locate_id "$detail_id" && idx="$LOCATE_IDX"
             case "$key" in
-                $'\e'|$'\x7f'|$'\b')
+                q|$'\e'|$'\x7f'|$'\b')
                     selected_id="$detail_id"
                     view_mode=list
                     frame_top=0
@@ -1149,7 +1156,6 @@ view() {
                 k) frame_top=$(( frame_top - 1 )); paint ;;
                 o) decisions_open_pr "$idx"; paint ;;
                 g) go_to_hub "${d_session[$idx]}"; paint ;;
-                q) exit 0 ;;
             esac
         fi
     done
