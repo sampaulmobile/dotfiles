@@ -31,10 +31,14 @@ check() {
 }
 
 # The transcript readers are the lib's; only the record shape is under test.
+# Each reader call is counted, so a cache hit shows as no new reads.
 model=""
-get_context_and_model()  { printf '1234\t%s' "$model"; }
+reads="$work/reads"
+stub_key="1700000000 100"
+get_context_and_model()  { echo x >> "$reads"; printf '1234\t%s' "$model"; }
 get_totals_incremental() { printf '10\t20\t3\t-'; }
-_agent_file_mtime()      { printf '1700000000'; }
+_row_key()               { [[ -n "$1" ]] && printf '%s' "$stub_key"; }
+nreads() { if [[ -f "$reads" ]]; then wc -l < "$reads" | tr -d ' '; else echo 0; fi; }
 
 echo "get_row_stats record"
 rec=$(get_row_stats row "$work/t.jsonl")
@@ -45,9 +49,27 @@ check "mtime stays in its column"      "$mt"  "1700000000"
 check "window stays in its column"     "$win" "0"
 
 model="claude-opus-5"
+stub_key="1700000000 200"
 IFS=$'\t' read -r ctx tout tall turns cost mdl mt win <<< "$(get_row_stats row "$work/t.jsonl")"
 check "a model passes through"         "$mdl" "claude-opus-5"
 check "mtime unchanged with a model"   "$mt"  "1700000000"
+
+echo "get_row_stats row cache"
+before=$(nreads)
+IFS=$'\t' read -r ctx tout tall turns cost mdl mt win <<< "$(get_row_stats row "$work/t.jsonl")"
+check "same mtime+size reads nothing"  "$(( $(nreads) - before ))" "0"
+check "a hit returns the cached line"  "$mdl" "claude-opus-5"
+model="claude-sonnet-5"; stub_key="1700000000 300"
+IFS=$'\t' read -r ctx tout tall turns cost mdl mt win <<< "$(get_row_stats row "$work/t.jsonl")"
+check "a grown transcript re-reads"    "$(( $(nreads) - before ))" "1"
+check "a re-read returns the new line" "$mdl" "claude-sonnet-5"
+model="claude-haiku-4-5"
+IFS=$'\t' read -r ctx tout tall turns cost mdl mt win <<< "$(skip_row_cache=1 get_row_stats row "$work/t.jsonl")"
+check "skip_row_cache re-reads"        "$mdl" "claude-haiku-4-5"
+IFS=$'\t' read -r ctx tout tall turns cost mdl mt win <<< "$(get_row_stats row "$work/t.jsonl")"
+check "and rewrites the cache"         "$mdl" "claude-haiku-4-5"
+IFS=$'\t' read -r ctx tout tall turns cost mdl mt win <<< "$(get_row_stats other "$work/t.jsonl")"
+check "rows never share a cache"       "$(( $(nreads) - before ))" "3"
 
 IFS=$'\t' read -r ctx tout tall turns cost mdl mt win <<< "$(get_row_stats row "")"
 check "no transcript reads unknown"    "$mdl" "unknown"
@@ -55,7 +77,7 @@ check "no transcript reads unknown"    "$mdl" "unknown"
 echo "load_data's read of the collect record"
 # The collect step prefixes cwd, cwd_ok and status; the reader maps the two
 # placeholders ("-" cwd, "-" model) back to empty.
-model=""
+model=""; stub_key="1700000000 400"
 printf '%s\t%s\t%s\t%s' "-" 1 idle "$(get_row_stats row "$work/t.jsonl")" > "$work/rec"
 IFS=$'\t' read -r cwd cwd_ok st ctx tout tall turns cost mdl mt win < "$work/rec"
 [[ "$cwd" == "-" ]] && cwd=""

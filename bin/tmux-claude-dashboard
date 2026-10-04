@@ -61,24 +61,25 @@ mkdir -p "$CACHE_DIR/agents"
 # percent shown; coloring falls back to absolute thresholds).
 # Codex rows never come here: their rollout states its own
 # model_context_window, which the row carries instead (windows[] below).
+# context_window_for <var> <model> — assigns, like the lib's formatters
 context_window_for() {
-    local m="${1#claude-}"
-    case "$m" in
-        *\[1m\]*)                       echo 1000000 ;;
-        fable-*|mythos-*)               echo 1000000 ;;
-        opus-5*|opus-4-[678]*)          echo 1000000 ;;
-        sonnet-5*|sonnet-4-6*)          echo 1000000 ;;
-        haiku-*|sonnet-*|opus-*)        echo 200000 ;;
-        *)                              echo 0 ;;
+    local _cw=0
+    case "${2#claude-}" in
+        *\[1m\]*)                       _cw=1000000 ;;
+        fable-*|mythos-*)               _cw=1000000 ;;
+        opus-5*|opus-4-[678]*)          _cw=1000000 ;;
+        sonnet-5*|sonnet-4-6*)          _cw=1000000 ;;
+        haiku-*|sonnet-*|opus-*)        _cw=200000 ;;
     esac
+    printf -v "$1" '%s' "$_cw"
 }
 
-# compact window label for the CONTEXT used/total fraction: 1M, 200k
+# format_window <var> <tokens> — the CONTEXT fraction's window label: 1M, 200k
 format_window() {
-    if (( $1 % 1000000 == 0 )); then
-        printf '%dM' $(( $1 / 1000000 ))
+    if (( $2 % 1000000 == 0 )); then
+        printf -v "$1" '%dM' $(( $2 / 1000000 ))
     else
-        printf '%dk' $(( $1 / 1000 ))
+        printf -v "$1" '%dk' $(( $2 / 1000 ))
     fi
 }
 
@@ -124,12 +125,14 @@ reload_sessions() {
     panes=()
     names=()
     agents=()
-    local sess pid widx agent name
-    while IFS=$'\t' read -r sess pid widx agent; do
+    cwds=()
+    local sess pid widx agent cwd name
+    while IFS=$'\t' read -r sess pid widx agent cwd; do
         [[ -z "$pid" ]] && continue
         sessions+=("$sess")
         panes+=("$pid")
         agents+=("${agent:-claude}")
+        cwds+=("$cwd")
         name="$sess"
         [[ "$widx" != "1" ]] && name="${name}:${widx}"
         # two claude panes in one window (split): disambiguate by pane id
@@ -240,13 +243,20 @@ reload_after_kill() {
     load_data
 }
 
+# _row_key <path> — "<mtime> <size>", the row cache's key; empty when missing
+_row_key() {
+    stat -f '%m %z' "$1" 2>/dev/null || stat -c '%Y %s' "$1" 2>/dev/null
+}
+
 # get_row_stats <row-name> <jsonl-path> [agent]
 #   Token/turn/cost stats for one row's transcript, tab-separated:
 #   context, output, total, turns, cost, model, mtime, context_window.
 #   The trailing window is 0 for claude rows (the per-model table sizes
 #   them) and the rollout's own model_context_window for codex rows.
-#   row-name only keys the totals cache (it's unique per pane, so two agents
-#   in one session can't share a cache file).
+#   row-name only keys the caches (it's unique per pane, so two agents in one
+#   session can't share a cache file). The whole line is cached against the
+#   transcript's mtime+size, so an unchanged transcript costs one stat;
+#   a non-empty $skip_row_cache recomputes and rewrites it instead.
 get_row_stats() {
     local session="$1"
     local jsonl="$2"
@@ -257,10 +267,19 @@ get_row_stats() {
         return
     fi
 
-    # Per row + transcript, hashed so a path cannot escape into a filename.
-    local jsonl_hash
-    jsonl_hash=$(echo "$jsonl" | md5 -q 2>/dev/null || echo "$jsonl" | md5sum 2>/dev/null | cut -d' ' -f1)
-    local totals_cache="${CACHE_DIR}/${session}.${jsonl_hash}.totals"
+    # Per row + transcript. Transcript and rollout basenames carry a uuid.
+    local cache_base="${CACHE_DIR}/${session}.${jsonl##*/}"
+    local totals_cache="${cache_base}.totals" row_cache="${cache_base}.row"
+
+    local key ck cv
+    key=$(_row_key "$jsonl")
+    if [[ -n "$key" && -z "$skip_row_cache" && -f "$row_cache" ]]; then
+        { IFS= read -r ck; IFS= read -r cv; } < "$row_cache"
+        if [[ "$ck" == "$key" && -n "$cv" ]]; then
+            printf '%s' "$cv"
+            return
+        fi
+    fi
 
     local ctx mdl win=0 tout tall turns cost mt
 
@@ -275,9 +294,11 @@ get_row_stats() {
     # render shows this mtime as an age on idle/done/permission rows. The
     # model column is written "-" when empty: a tab run collapses on `read`,
     # and the reader in load_data maps it back.
-    mt=$(_agent_file_mtime "$jsonl")
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
+    mt="${key%% *}"
+    printf -v cv '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
         "${ctx:-0}" "${tout:-0}" "${tall:-0}" "${turns:-0}" "${cost:--}" "${mdl:--}" "${mt:-0}" "${win:-0}"
+    [[ -n "$key" ]] && printf '%s\n%s\n' "$key" "$cv" > "$row_cache" 2>/dev/null
+    printf '%s' "$cv"
 }
 
 # get_row_agent_tree <row-name> <jsonl-path>
@@ -324,8 +345,8 @@ get_row_agent_tree() {
 #   Lays out and formats every row for the current data into frame_head,
 #   frame_rows[i] / frame_trees[i] (session line, then its agent tree and
 #   snippets) and frame_foot, at the width in $cols and the clock in $now.
-#   This is the expensive half (a dozen forks per row: bc, printf, the
-#   helpers); render() reuses it across cursor moves. A cached row is
+#   Fork-free per row, so it scales with the session count; render() still
+#   reuses it across cursor moves. A cached row is
 #   cursor-neutral: two leading spaces where the marker goes and the name
 #   wrapped in \x01..\x02, which render() turns into bold on the selected
 #   row and strips elsewhere.
@@ -344,18 +365,19 @@ build_frame() {
     # ctx_w fits the used/total fraction, e.g. "199.9k/200k"
     local ctx_w=12 out_w=9 all_w=9 mdl_w=12 pct_w=4 turns_w=5 cost_w=7
 
-    # Exact VISIBLE chars for a layout:
+    # row_width sets rw to the exact VISIBLE chars of a layout:
     # row = marker(2) + name_w + status(15) + ctx(12) + 1+pct(4)
     #       [+ 2+mdl] [+ 1+turns] [+ 1+out] [+ 1+all] [+ 1+cost]
+    local rw
     row_width() {
         local nw=$1 o=$2 t=$3 m=$4 u=$5 c=$6
-        local w=$(( 2 + nw + 15 + ctx_w + 1 + pct_w ))
-        (( o )) && w=$(( w + 1 + out_w ))
-        (( t )) && w=$(( w + 1 + all_w ))
-        (( m )) && w=$(( w + 2 + mdl_w ))
-        (( u )) && w=$(( w + 1 + turns_w ))
-        (( c )) && w=$(( w + 1 + cost_w ))
-        echo $w
+        rw=$(( 2 + nw + 15 + ctx_w + 1 + pct_w ))
+        (( o )) && rw=$(( rw + 1 + out_w ))
+        (( t )) && rw=$(( rw + 1 + all_w ))
+        (( m )) && rw=$(( rw + 2 + mdl_w ))
+        (( u )) && rw=$(( rw + 1 + turns_w ))
+        (( c )) && rw=$(( rw + 1 + cost_w ))
+        return 0
     }
 
     # Full names are preferred over columns: drop optional columns first,
@@ -370,9 +392,11 @@ build_frame() {
             total)  show_total=0 ;;
             output) show_output=0 ;;
         esac
-        (( $(row_width $max_name $show_output $show_total $show_model $show_turns $show_cost) <= cols )) && break
+        row_width $max_name $show_output $show_total $show_model $show_turns $show_cost
+        (( rw <= cols )) && break
     done
-    if (( $(row_width $max_name $show_output $show_total $show_model $show_turns $show_cost) > cols )); then
+    row_width $max_name $show_output $show_total $show_model $show_turns $show_cost
+    if (( rw > cols )); then
         # must truncate names — same drop cascade, judged at min_name; the
         # name column then gets whatever the surviving columns leave over
         show_output=1; show_total=1; show_model=1; show_turns=1; show_cost=1
@@ -384,13 +408,16 @@ build_frame() {
                 total)  show_total=0 ;;
                 output) show_output=0 ;;
             esac
-            (( $(row_width $min_name $show_output $show_total $show_model $show_turns $show_cost) <= cols )) && break
+            row_width $min_name $show_output $show_total $show_model $show_turns $show_cost
+            (( rw <= cols )) && break
         done
-        name_w=$(( cols - $(row_width 0 $show_output $show_total $show_model $show_turns $show_cost) ))
+        row_width 0 $show_output $show_total $show_model $show_turns $show_cost
+        name_w=$(( cols - rw ))
         (( name_w < min_name )) && name_w=$min_name
     fi
 
-    local spare=$(( cols - $(row_width $name_w $show_output $show_total $show_model $show_turns $show_cost) ))
+    row_width $name_w $show_output $show_total $show_model $show_turns $show_cost
+    local spare=$(( cols - rw ))
 
     # MODEL gets first claim on spare width (it's cheap and bounded): grow
     # mdl_w up to the longest model/agent-type actually rendered, so
@@ -434,10 +461,11 @@ build_frame() {
 
     # full rendered row width — snippet lines truncate here, matching the
     # table's right edge
-    local table_w=$(( $(row_width $name_w $show_output $show_total $show_model $show_turns $show_cost) + name_gap ))
+    row_width $name_w $show_output $show_total $show_model $show_turns $show_cost
+    local table_w=$(( rw + name_gap ))
     (( table_w > cols - 1 )) && table_w=$(( cols - 1 ))
 
-    local out=""
+    local out="" _p
 
     local rhs="[⏎ · ␣ · x · X · a · r · q]"
     (( cols >= 80 )) && rhs="[⏎ switch · x kill · X prune · a agents · r refresh · q quit]"
@@ -445,18 +473,20 @@ build_frame() {
     local title="  Agent Sessions"
     local pad=$(( cols - ${#title} - ${#rhs} ))
     (( pad < 1 )) && pad=1
-    out+="${BOLD}${title}${RST}$(printf '%*s' "$pad" '')${DIM}${rhs}${RST}"$'\n'
-    out+="  $(printf '─%.0s' $(seq 1 $(( cols - 4 ))))"$'\n'
+    printf -v _p '%*s' "$pad" ''
+    out+="${BOLD}${title}${RST}${_p}${DIM}${rhs}${RST}"$'\n'
+    printf -v _p '%*s' $(( cols - 4 )) ''
+    out+="  ${_p// /─}"$'\n'
 
     local hdr
     local hdr_name_w=$(( name_w + name_gap ))
-    hdr=$(printf "%-${hdr_name_w}s %-13s " "SESSION" "STATUS")
-    (( show_model ))  && hdr+=$(printf "%-${mdl_w}s  " "MODEL")
-    hdr+=$(printf "%${ctx_w}s %${pct_w}s" "CONTEXT" "CTX%")
-    (( show_turns ))  && hdr+=$(printf " %${turns_w}s" "TURNS")
-    (( show_output )) && hdr+=$(printf " %${out_w}s" "OUTPUT")
-    (( show_total ))  && hdr+=$(printf " %${all_w}s" "TOTAL")
-    (( show_cost ))   && hdr+=$(printf " %${cost_w}s" "COST")
+    printf -v hdr "%-${hdr_name_w}s %-13s " "SESSION" "STATUS"
+    (( show_model ))  && printf -v _p "%-${mdl_w}s  " "MODEL" && hdr+=$_p
+    printf -v _p "%${ctx_w}s %${pct_w}s" "CONTEXT" "CTX%"; hdr+=$_p
+    (( show_turns ))  && printf -v _p " %${turns_w}s" "TURNS" && hdr+=$_p
+    (( show_output )) && printf -v _p " %${out_w}s" "OUTPUT" && hdr+=$_p
+    (( show_total ))  && printf -v _p " %${all_w}s" "TOTAL" && hdr+=$_p
+    (( show_cost ))   && printf -v _p " %${cost_w}s" "COST" && hdr+=$_p
     out+="  ${DIM}${hdr}${RST}"$'\n'
     frame_head="$out"
 
@@ -496,7 +526,8 @@ build_frame() {
         out+="  "$'\x01'"${name}"$'\x02'
         (( working_agents > 0 )) && out+="${CYAN}${badge}${RST}"
         [[ -n "$pipe" ]] && out+="${DIM}${pipe}${RST}"
-        out+="$(printf '%*s' "$(( name_w - ${#name} - ${#badge} - ${#pipe} + name_gap ))" '')"
+        printf -v _p '%*s' "$(( name_w - ${#name} - ${#badge} - ${#pipe} + name_gap ))" ''
+        out+="$_p"
 
         # An idle row carrying an attention flag shows as "done", so the
         # dashboard reveals WHICH agent the statusbar's ✅ belongs to. The
@@ -515,7 +546,8 @@ build_frame() {
         local sage=""
         if [[ "$st" == "idle" || "$st" == "done" || "$st" == "permission" ]] \
             && [[ "${mtimes[$i]:-0}" =~ ^[0-9]+$ ]] && (( ${mtimes[$i]:-0} > 0 )); then
-            sage=" $(format_age $(( now - mtimes[i] )))"
+            format_age sage $(( now - mtimes[i] ))
+            sage=" $sage"
         fi
         local st_color st_text st_iconw=1
         case "$st" in
@@ -533,7 +565,8 @@ build_frame() {
         esac
         local st_padn=$(( 15 - ${#st_text} - (st_iconw - 1) ))
         (( st_padn < 1 )) && st_padn=1
-        out+="${st_color}${st_text}${RST}$(printf '%*s' "$st_padn" '')"
+        printf -v _p '%*s' "$st_padn" ''
+        out+="${st_color}${st_text}${RST}${_p}"
 
         # model — left-aligned right after status
         if (( show_model )); then
@@ -541,24 +574,26 @@ build_frame() {
             if (( ${#mdl_field} > mdl_w )); then
                 (( mdl_w > 1 )) && mdl_field="${mdl_field:0:$(( mdl_w - 1 ))}…" || mdl_field="…"
             fi
-            out+="${DIM}$(printf "%-${mdl_w}s" "$mdl_field")${RST}  "
+            printf -v _p "%-${mdl_w}s" "$mdl_field"
+            out+="${DIM}${_p}${RST}  "
         fi
 
         # context column — colored by percent of the model's window when the
         # window is known, else the old absolute thresholds
         local ctx_raw="$ctx"
         local ctx_fmt
-        ctx_fmt=$(format_tokens "$ctx_raw")
+        format_tokens ctx_fmt "$ctx_raw"
         # codex rows carry their window from the rollout; claude rows get
         # it from the per-model table
         local win pct=-1 pct_fmt="-"
         win="${windows[$i]:-0}"
         [[ "$win" =~ ^[0-9]+$ ]] || win=0
-        (( win == 0 )) && win=$(context_window_for "$mdl")
+        (( win == 0 )) && context_window_for win "$mdl"
         if (( win > 0 )); then
             pct=$(( ctx_raw * 100 / win ))
             pct_fmt="${pct}%"
-            ctx_fmt="${ctx_fmt}/$(format_window "$win")"
+            format_window _p "$win"
+            ctx_fmt="${ctx_fmt}/${_p}"
         fi
         local ctx_color=""
         if (( pct >= 90 || (pct < 0 && ctx_raw >= 600000) )); then
@@ -569,10 +604,11 @@ build_frame() {
             ctx_color="${YELLOW}"
         fi
 
-        out+="${ctx_color}$(printf "%${ctx_w}s %${pct_w}s" "$ctx_fmt" "$pct_fmt")${RST}"
-        (( show_turns ))  && out+="$(printf " %${turns_w}s" "${turns_counts[$i]:-0}")"
-        (( show_output )) && out+="$(printf " %${out_w}s" "$out_tok")"
-        (( show_total ))  && out+="$(printf " %${all_w}s" "$all_tok")"
+        printf -v _p "%${ctx_w}s %${pct_w}s" "$ctx_fmt" "$pct_fmt"
+        out+="${ctx_color}${_p}${RST}"
+        (( show_turns ))  && printf -v _p " %${turns_w}s" "${turns_counts[$i]:-0}" && out+=$_p
+        (( show_output )) && printf -v _p " %${out_w}s" "$out_tok" && out+=$_p
+        (( show_total ))  && printf -v _p " %${all_w}s" "$all_tok" && out+=$_p
         # COST: "$1.23" = exact (claude's own cost-state snapshot),
         # "~$1.23" = price-sheet estimate, "5h:42%" = codex's rate-limit
         # window usage (plan billing has no per-token cost), "-" = none
@@ -581,11 +617,12 @@ build_frame() {
             if [[ "$cost_raw" == *"%" ]]; then
                 cost_fmt="$cost_raw"
             elif [[ "$cost_raw" == "~"* ]]; then
-                cost_fmt="~$(printf '$%.2f' "${cost_raw#\~}")"
+                printf -v cost_fmt '~$%.2f' "${cost_raw#\~}"
             elif [[ "$cost_raw" != "-" ]]; then
-                cost_fmt=$(printf '$%.2f' "$cost_raw")
+                printf -v cost_fmt '$%.2f' "$cost_raw"
             fi
-            out+="$(printf " %${cost_w}s" "$cost_fmt")"
+            printf -v _p " %${cost_w}s" "$cost_fmt"
+            out+=$_p
         fi
         frame_rows[$i]="$out"
         out=""
@@ -624,10 +661,10 @@ build_frame() {
                     (( aage < 0 )) && aage=0
                 fi
                 local aage_str
-                aage_str=$(format_age "$aage")
+                format_age aage_str "$aage"
 
                 local aindent
-                aindent=$(printf '%*s' $(( 2 * adepth )) '')
+                printf -v aindent '%*s' $(( 2 * adepth )) ''
 
                 # ── SESSION column: tree marker + description in the same
                 # hdr_name_w field the session name uses. Truncating the
@@ -678,12 +715,14 @@ build_frame() {
                 # show_* gates the session row computed for this render, so
                 # agent rows drop columns at identical breakpoints.
                 local actx_fmt aout_fmt
-                actx_fmt=$(format_tokens "${actx:-0}")
-                aout_fmt=$(format_tokens "${aout:-0}")
+                format_tokens actx_fmt "${actx:-0}"
+                format_tokens aout_fmt "${aout:-0}"
 
                 local row=""
-                row+="  ${sess_colored}$(printf '%*s' "$sess_pad" '')"
-                row+="${st_color}${st_label}${RST}$(printf '%*s' "$st_pad" '')"
+                printf -v _p '%*s' "$sess_pad" ''
+                row+="  ${sess_colored}${_p}"
+                printf -v _p '%*s' "$st_pad" ''
+                row+="${st_color}${st_label}${RST}${_p}"
                 if (( show_model )); then
                     # "agentType·model": the subagent_type plus the model it
                     # actually ran on, so a per-seat model override is
@@ -699,27 +738,30 @@ build_frame() {
                     # to the right. Pad by character count instead.
                     local amdl_pad=$(( mdl_w - ${#amdl_field} ))
                     (( amdl_pad < 0 )) && amdl_pad=0
-                    row+="${DIM}${amdl_field}${RST}$(printf '%*s' "$(( amdl_pad + 2 ))" '')"
+                    printf -v _p '%*s' "$(( amdl_pad + 2 ))" ''
+                    row+="${DIM}${amdl_field}${RST}${_p}"
                 fi
                 # The window is sized from the transcript's model id, not
                 # from the agentType the MODEL column shows.
                 local awin apct=-1 apct_fmt="-" apct_color=""
-                awin=$(context_window_for "$amdl")
+                context_window_for awin "$amdl"
                 if (( awin > 0 )) && [[ "${actx:-0}" =~ ^[0-9]+$ ]]; then
                     apct=$(( ${actx:-0} * 100 / awin ))
                     apct_fmt="${apct}%"
-                    actx_fmt="${actx_fmt}/$(format_window "$awin")"
+                    format_window _p "$awin"
+                    actx_fmt="${actx_fmt}/${_p}"
                 fi
                 if (( apct >= 90 )); then apct_color="${BOLD_RED}"
                 elif (( apct >= 70 )); then apct_color="${RED}"
                 elif (( apct >= 50 )); then apct_color="${YELLOW}"
                 fi
-                row+="$(printf "%${ctx_w}s" "$actx_fmt")"
-                row+=" ${apct_color}$(printf "%${pct_w}s" "$apct_fmt")${RST}"
-                (( show_turns ))  && row+="$(printf " %${turns_w}s" "${aturns:-0}")"
-                (( show_output )) && row+="$(printf " %${out_w}s" "$aout_fmt")"
-                (( show_total ))  && row+="$(printf " %${all_w}s" "-")"
-                (( show_cost ))   && row+="$(printf " %${cost_w}s" "-")"
+                printf -v _p "%${ctx_w}s" "$actx_fmt"; row+=$_p
+                printf -v _p "%${pct_w}s" "$apct_fmt"
+                row+=" ${apct_color}${_p}${RST}"
+                (( show_turns ))  && printf -v _p " %${turns_w}s" "${aturns:-0}" && row+=$_p
+                (( show_output )) && printf -v _p " %${out_w}s" "$aout_fmt" && row+=$_p
+                (( show_total ))  && printf -v _p " %${all_w}s" "-" && row+=$_p
+                (( show_cost ))   && printf -v _p " %${cost_w}s" "-" && row+=$_p
                 out+="${row}"$'\n'
 
                 # ── activity snippet: its own dim line beneath the row,
@@ -727,7 +769,7 @@ build_frame() {
                 # agents only.
                 if (( aworking )) && [[ -n "$asnip" ]]; then
                     local snip_indent
-                    snip_indent=$(printf '%*s' $(( 2 + ${#sess_prefix} + 2 )) '')
+                    printf -v snip_indent '%*s' $(( 2 + ${#sess_prefix} + 2 )) ''
                     local snip_plain="${snip_indent}\"${asnip}\""
                     if (( ${#snip_plain} > table_w )); then
                         local sbudget=$(( table_w - ${#snip_indent} - 2 ))
@@ -847,7 +889,7 @@ load_data() {
         (
             pid="${panes[$i]}"
             agent="${agents[$i]:-claude}"
-            cwd=$(tmux display-message -p -t "$pid" '#{pane_current_path}' 2>/dev/null)
+            cwd="${cwds[$i]}"
             cwd_ok=1
             [[ -n "$cwd" && ! -d "$cwd" ]] && cwd_ok=0
             st=$(get_pane_status "$pid" "$agent")
@@ -886,11 +928,12 @@ load_data() {
             pipeline_fields[$i]=$(pipeline_for_cwd "$cwd")
             statuses[$i]="$st"
             contexts[$i]="$ctx"
-            outputs[$i]=$(format_tokens "$tout")
-            total_alls[$i]=$(format_tokens "$tall")
+            local fmt
+            format_tokens fmt "$tout"; outputs[$i]=$fmt
+            format_tokens fmt "$tall"; total_alls[$i]=$fmt
             turns_counts[$i]="${turns:-0}"
             costs[$i]="${cost:--}"
-            models[$i]=$(short_model "$mdl")
+            models[$i]=${mdl#claude-}
             mtimes[$i]="${mt:-0}"
             windows[$i]="${win:-0}"
         fi
@@ -930,6 +973,8 @@ sessions=()
 panes=()
 names=()
 agents=()
+cwds=()
+skip_row_cache=""
 statuses=()
 contexts=()
 outputs=()
@@ -1077,7 +1122,9 @@ while true; do
             reload_sessions
             rm -f "${CACHE_DIR}"/*.totals 2>/dev/null
             rm -f "${CACHE_DIR}/agents/"* 2>/dev/null
+            skip_row_cache=1
             load_data
+            skip_row_cache=""
             ;;
         ""|Enter)
             # switch to the selected row's exact pane (a pane id resolves
