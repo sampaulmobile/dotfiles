@@ -195,7 +195,8 @@ get_claude_sessions() {
 
 # get_claude_panes
 #   Prints one line per agent PANE — any window of any session —
-#   tab-separated: session_name, pane_id, window_index, agent. Most recently
+#   tab-separated: session_name, pane_id, window_index, agent, cwd (last, so
+#   a path holding a tab still reads whole). Most recently
 #   active session first, window order within a session. The dashboard's row
 #   source: per-pane (unlike get_claude_sessions) so an agent outside window
 #   1 gets its own row, and the agent column tells each row which telemetry
@@ -203,14 +204,14 @@ get_claude_sessions() {
 get_claude_panes() {
     local map rest
     map=$(_agent_tty_map) || return 0
-    tmux list-panes -a -F $'#{session_activity}\t#{session_name}\t#{pane_id}\t#{window_index}\t#{pane_tty}' 2>/dev/null \
-        | while IFS=$'\t' read -r act name pid widx tty; do
+    tmux list-panes -a -F $'#{session_activity}\t#{session_name}\t#{pane_id}\t#{window_index}\t#{pane_tty}\t#{pane_current_path}' 2>/dev/null \
+        | while IFS=$'\t' read -r act name pid widx tty cwd; do
             rest="${map#*$'\n'"${tty#/dev/}"$'\t'}"
             [[ "$rest" == "$map" ]] && continue
-            printf '%s\t%s\t%s\t%s\t%s\n' "$act" "$name" "$pid" "$widx" "${rest%%$'\n'*}"
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$act" "$name" "$pid" "$widx" "${rest%%$'\n'*}" "$cwd"
         done \
         | sort -t$'\t' -k1,1rn -k4,4n \
-        | cut -f2-5
+        | cut -f2-
 }
 
 # classify_pane_status <raw-content> [agent]
@@ -1008,38 +1009,35 @@ get_agent_snippet() {
     printf '%s' "$text"
 }
 
-# format_age <seconds>
-#   Pretty-prints an age/duration: 45 -> 45s, 300 -> 5m, 7200 -> 2h
+# The formatters below assign to the variable named first instead of
+# printing, so the dashboard's per-row loop forks nothing. bash 3.2's
+# printf -v rejects an array element: pass a plain variable.
+
+# format_age <var> <seconds> — 45 -> 45s, 300 -> 5m, 7200 -> 2h, empty -> ?
 format_age() {
-    local s="$1"
-    [[ -z "$s" ]] && printf '?' && return
-    if (( s < 60 )); then
-        printf '%ds' "$s"
-    elif (( s < 3600 )); then
-        printf '%dm' "$(( s / 60 ))"
+    local _fa_s="$2"
+    if [[ -z "$_fa_s" ]]; then
+        printf -v "$1" '?'
+    elif (( _fa_s < 60 )); then
+        printf -v "$1" '%ds' "$_fa_s"
+    elif (( _fa_s < 3600 )); then
+        printf -v "$1" '%dm' $(( _fa_s / 60 ))
     else
-        printf '%dh' "$(( s / 3600 ))"
+        printf -v "$1" '%dh' $(( _fa_s / 3600 ))
     fi
 }
 
-# format_tokens <number>
-#   Pretty-prints token counts: 1234567 -> 1.2M, 12345 -> 12.3k, 999 -> 999
+# format_tokens <var> <number> — 1234567 -> 1.2M, 12345 -> 12.3k, 999 -> 999.
+#   The decimal truncates, never rounds: 1299 -> 1.2k.
 format_tokens() {
-    local n="$1"
-    if (( n >= 1000000 )); then
-        printf "%.1fM" "$(echo "scale=1; $n / 1000000" | bc)"
-    elif (( n >= 1000 )); then
-        printf "%.1fk" "$(echo "scale=1; $n / 1000" | bc)"
+    local _ft_n="$2"
+    if (( _ft_n >= 1000000 )); then
+        printf -v "$1" '%d.%dM' $(( _ft_n / 1000000 )) $(( _ft_n % 1000000 / 100000 ))
+    elif (( _ft_n >= 1000 )); then
+        printf -v "$1" '%d.%dk' $(( _ft_n / 1000 )) $(( _ft_n % 1000 / 100 ))
     else
-        echo "$n"
+        printf -v "$1" '%s' "$_ft_n"
     fi
-}
-
-# short_model <model-string>
-#   Shortens model names: claude-opus-4-6 -> opus-4-6, claude-sonnet-4-6 -> sonnet-4-6.
-#   Codex model ids carry no such prefix and pass through untouched.
-short_model() {
-    echo "$1" | sed 's/^claude-//'
 }
 
 # ── codex ───────────────────────────────────────────────
