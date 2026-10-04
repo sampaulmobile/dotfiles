@@ -164,48 +164,59 @@ long_id=$("$HQD" add --repo proj --pr 99 --title "$longtitle" \
 echo "── --dump: header counts and section order"
 dump=$(NO_COLOR=1 COLUMNS=100 "$HQDS" --dump 2>"$work/dump.err")
 if [[ -s "$work/dump.err" ]]; then bad "--dump wrote to stderr" "$(cat "$work/dump.err")"; fi
-check "the header counts 3 open, 1 auto-taken, 2 answered" \
-    "$(printf '%s\n' "$dump" | head -1 | grep -oE '^DECISIONS  [0-9]+ open · [0-9]+ auto-taken · [0-9]+ answered')" \
-    "DECISIONS  3 open · 1 auto-taken · 2 answered"
+check "the header counts 3 open, 3 answered of which 1 auto" \
+    "$(printf '%s\n' "$dump" | head -1 | grep -oE '^DECISIONS  [0-9]+ open · [0-9]+ answered \([0-9]+ auto\)')" \
+    "DECISIONS  3 open · 3 answered (1 auto)"
 check "the unseen-auto marker shows 1" \
-    "$(printf '%s\n' "$dump" | head -1 | grep -c '● 1 auto-taken since you last looked')" "1"
+    "$(printf '%s\n' "$dump" | head -1 | grep -c '  1 auto-taken since you last looked')" "1"
 check "ANSWERED is hidden by default" "$(printf '%s\n' "$dump" | grep -c '^ANSWERED$')" "0"
-check "hidden ANSWERED collapses to one placeholder line with its count" \
-    "$(printf '%s\n' "$dump" | grep -c '^ANSWERED · 2 hidden — a to show$')" "1"
+check "hidden ANSWERED collapses to one line with its count and the new auto-takes" \
+    "$(printf '%s\n' "$dump" | grep -c '^ANSWERED · 3 hidden (1 new auto-taken) — a to show$')" "1"
 check "an answered row is not rendered while hidden" "$(printf '%s\n' "$dump" | grep -c 'Pick a log level')" "0"
-check "OPEN precedes AUTO-TAKEN" \
-    "$(printf '%s\n' "$dump" | grep -nE '^(OPEN|AUTO-TAKEN)' | head -2 | cut -d: -f2 | tr '\n' ',')" \
-    "OPEN · needs you,AUTO-TAKEN · taken for you, say so to reverse,"
+check "NEEDS YOU heads the list" "$(printf '%s\n' "$dump" | grep -nE '^(NEEDS YOU|ANSWERED)' | head -1 | cut -d: -f2)" "NEEDS YOU"
 check "each open decision appears exactly once" \
     "$(printf '%s\n' "$dump" | grep -c 'Pick a retry budget')" "1"
 
 echo "── --dump --answered shows the ANSWERED section"
 dumpa=$(NO_COLOR=1 COLUMNS=80 "$HQDS" --dump --answered)
 check "ANSWERED section header appears" "$(printf '%s\n' "$dumpa" | grep -c '^ANSWERED$')" "1"
+check "auto-taken rows live in ANSWERED, after its header" \
+    "$(printf '%s\n' "$dumpa" | awk '/^ANSWERED$/ { a = 1 } /Pick a cache ttl/ { print (a ? "after" : "before") }')" "after"
+check "no AUTO-TAKEN section any more" "$(printf '%s\n' "$dumpa" | grep -c '^AUTO-TAKEN')" "0"
+hdr_line=$(printf '%s\n' "$dumpa" | grep '^ *AGE ')
+row_line=$(printf '%s\n' "$dumpa" | grep 'Debug · overrode')
+hdr_pre="${hdr_line%%OUTCOME*}"; row_pre="${row_line%%Debug · overrode*}"
+check "the OUTCOME header sits over its rows' values" \
+    "$(a=$(printf '%s' "$hdr_pre" | LC_ALL=en_US.UTF-8 wc -m | tr -d ' '); b=$(printf '%s' "$row_pre" | LC_ALL=en_US.UTF-8 wc -m | tr -d ' ')
+       [[ -n "$row_line" && "$a" == "$b" ]] && echo aligned || echo "$a vs $b")" "aligned"
 check "no placeholder once ANSWERED is shown" "$(printf '%s\n' "$dumpa" | grep -c 'hidden — a to show')" "0"
 check "the owner-answered row is in it" "$(printf '%s\n' "$dumpa" | grep -c 'Pick a log level')" "1"
-check "the old no-by record is in it, rendered as owner" \
-    "$(printf '%s\n' "$dumpa" | grep -c 'An old decision.*✓ a · you')" "1"
+check "the old no-by record shows its label, no overrode" \
+    "$(printf '%s\n' "$dumpa" | grep -c 'An old decision.*  A$')" "1"
 check "a >=1000-day-old age clips to the 5-char AGE column rather than shifting the row" \
     "$(printf '%s\n' "$dumpa" | grep 'An old decision' | cut -c3-7)" "1013…"
+
+echo "── an empty NEEDS YOU says so"
+check "nothing-waiting line absent while decisions are open" \
+    "$(printf '%s\n' "$dump" | grep -c 'nothing waiting on you')" "0"
 
 # ── LIST: row content per kind, at two widths ──
 
 for cols in 80 160; do
     echo "── --dump at COLUMNS=$cols: row content and width"
     d=$(NO_COLOR=1 COLUMNS=$cols "$HQDS" --dump --answered)
-    check "[$cols] open row: where + title + session" \
-        "$(printf '%s\n' "$d" | grep -c 'proj #7.*Pick a retry budget.*proj-hub')" "1"
-    check "[$cols] open row LAST column: star + rec id + label" \
-        "$(printf '%s\n' "$d" | grep -c '★ long · 5 attempts')" "1"
-    check "[$cols] auto row LAST column" \
-        "$(printf '%s\n' "$d" | grep -c '● long · auto')" "1"
-    check "[$cols] answered row LAST column" \
-        "$(printf '%s\n' "$d" | grep -c '✓ debug · you')" "1"
+    check "[$cols] open row: session + where + title" \
+        "$(printf '%s\n' "$d" | grep -c 'proj-hub.*proj #7.*Pick a retry budget')" "1"
+    check "[$cols] open row OUTCOME: the recommendation's label" \
+        "$(printf '%s\n' "$d" | grep -c 'Pick a retry budget.*rec: 5 attempts$')" "1"
+    check "[$cols] auto row OUTCOME: the taken option's label, WAITED filled" \
+        "$(printf '%s\n' "$d" | grep -cE 'Pick a cache ttl.* [0-9]+[smhd]  1h$')" "1"
+    check "[$cols] owner row off the recommendation says overrode" \
+        "$(printf '%s\n' "$d" | grep -c 'Pick a log level.*Debug · overrode$')" "1"
     check "[$cols] answered row WHERE is its own repo, not the previous row's" \
-        "$(printf '%s\n' "$d" | grep -c 'other feat/y.*Pick a log level.*✓ debug · you')" "1"
+        "$(printf '%s\n' "$d" | grep -c 'other feat/y.*Pick a log level')" "1"
     check "[$cols] the 200-char title's row is clipped with …" \
-        "$(printf '%s\n' "$d" | grep -c 'XXXX.*….*proj-hub')" "1"
+        "$(printf '%s\n' "$d" | grep -c 'proj-hub.*XXXX.*…')" "1"
     maxlen=0
     while IFS= read -r l; do
         n=$(printf '%s' "$l" | wc -m)
@@ -244,26 +255,26 @@ fi
 echo "── --dump still creates no _state/seen file"
 check "no seen file after --dump" "$([[ -e "$HQ_DECISIONS_DIR/_state/seen" ]] && echo yes || echo no)" "no"
 
-echo "── an empty decisions dir prints the empty message"
+echo "── an empty decisions dir prints an empty NEEDS YOU"
 empty_dir="$work/empty"
 dump_empty=$(HQ_DECISIONS_DIR="$empty_dir" NO_COLOR=1 COLUMNS=60 "$HQDS" --dump)
-check "zero decisions" "$(printf '%s\n' "$dump_empty" | grep -c 'no decisions recorded')" "1"
+check "zero decisions: an empty NEEDS YOU" "$(printf '%s\n' "$dump_empty" | grep -c 'nothing waiting on you')" "1"
 check "the header still counts all zero" \
-    "$(printf '%s\n' "$dump_empty" | head -1)" "DECISIONS  0 open · 0 auto-taken · 0 answered"
+    "$(printf '%s\n' "$dump_empty" | head -1)" "DECISIONS  0 open · 0 answered (0 auto)"
 
 # ── DETAIL ──
 
 echo "── --dump --detail: open with why"
 d=$(NO_COLOR=1 COLUMNS=80 "$HQDS" --dump --detail "$open_why_id")
 check "state line shows OPEN" "$(printf '%s\n' "$d" | grep -c '^OPEN ·')" "1"
-check "the recommended option is starred and marked recommended" \
-    "$(printf '%s\n' "$d" | grep -c '★ long.*· recommended')" "1"
+check "the recommended option is dotted and marked recommended" \
+    "$(printf '%s\n' "$d" | grep -c '● long.*· recommended')" "1"
 check "the why text follows the recommendation" \
     "$(printf '%s\n' "$d" | grep -c 'why: fewer retries waste less time')" "1"
 check "the TO ANSWER bar names the recommended option and the answer command" \
     "$(printf '%s' "$d" | tr '\n' ' ' | grep -c 'TO ANSWER.*go with long.*hq-decision answer '"$open_why_id"' long')" "1"
 check "the recommended option's head: 2-wide mark, id, two spaces, label, suffix" \
-    "$(printf '%s\n' "$d" | grep -c '^★ long  5 attempts · recommended$')" "1"
+    "$(printf '%s\n' "$d" | grep -c '^● long  5 attempts · recommended$')" "1"
 check "an unmarked option's head: blank mark column, id, two spaces, label" \
     "$(printf '%s\n' "$d" | grep -c '^  short  2 attempts$')" "1"
 check "the TO ANSWER bar keeps two spaces after the label" \
@@ -275,9 +286,9 @@ check "no why: line appears" "$(printf '%s\n' "$d" | grep -c '^    why:')" "0"
 
 echo "── --dump --detail: auto-taken"
 d=$(NO_COLOR=1 COLUMNS=80 "$HQDS" --dump --detail "$auto_id")
-check "state line shows AUTO-TAKEN" "$(printf '%s\n' "$d" | grep -c '● AUTO-TAKEN')" "1"
+check "state line shows AUTO-TAKEN" "$(printf '%s\n' "$d" | grep -c '^AUTO-TAKEN ·')" "1"
 check "the chosen option is marked as the recommendation" \
-    "$(printf '%s\n' "$d" | grep -c '● long.*was the recommendation')" "1"
+    "$(printf '%s\n' "$d" | grep -c '✓ long.*was the recommendation')" "1"
 check "TO REVERSE names the other option" \
     "$(printf '%s' "$d" | tr '\n' ' ' | grep -c 'TO REVERSE.*reverse '"$auto_id"', short instead.*hq-decision answer '"$auto_id"' short')" "1"
 check "the TO REVERSE bar keeps two spaces after the label" \
@@ -285,17 +296,17 @@ check "the TO REVERSE bar keeps two spaces after the label" \
 
 echo "── --dump --detail: owner-answered on a non-recommended option"
 d=$(NO_COLOR=1 COLUMNS=80 "$HQDS" --dump --detail "$owner_id")
-check "state line shows ANSWERED" "$(printf '%s\n' "$d" | grep -c '✓ ANSWERED')" "1"
+check "state line shows ANSWERED" "$(printf '%s\n' "$d" | grep -c 'ANSWERED ·')" "1"
 check "the chosen option is marked owner chose" \
     "$(printf '%s\n' "$d" | grep -c '✓ debug.*owner chose')" "1"
 check "the note is shown" "$(printf '%s\n' "$d" | grep -c 'went with debug despite the rec')" "1"
 check "the recommended option still shows its star" \
-    "$(printf '%s\n' "$d" | grep -c '★ info.*recommended')" "1"
+    "$(printf '%s\n' "$d" | grep -c '● info.*recommended')" "1"
 check "the bottom bar says answered by you" "$(printf '%s\n' "$d" | grep -c '^answered by you')" "1"
 
 echo "── --dump --detail: an old record with neither why nor answer.by renders as owner"
 d=$(NO_COLOR=1 COLUMNS=80 "$HQDS" --dump --detail oldabc)
-check "state line shows ANSWERED (owner)" "$(printf '%s\n' "$d" | grep -c '✓ ANSWERED')" "1"
+check "state line shows ANSWERED (owner)" "$(printf '%s\n' "$d" | grep -c 'ANSWERED ·')" "1"
 check "no why: line appears" "$(printf '%s\n' "$d" | grep -c '^    why:')" "0"
 
 echo "── --dump --detail: an unknown id exits 1"
@@ -334,7 +345,7 @@ decisions_enter_detail "$LOCATE_IDX"
 load_data
 build_frame
 paint >/dev/null
-check "the repaint shows ANSWERED" "$(printf '%s' "$screen_out" | grep -c '✓ ANSWERED')" "1"
+check "the repaint shows ANSWERED" "$(printf '%s' "$screen_out" | grep -c 'ANSWERED ·')" "1"
 check "the repaint's bar says answered by you" "$(printf '%s' "$screen_out" | grep -c 'answered by you')" "1"
 check "the chosen option is marked owner chose" "$(printf '%s' "$screen_out" | grep -c '· owner chose')" "1"
 check "no stale TO ANSWER bar remains" "$(printf '%s' "$screen_out" | grep -c 'TO ANSWER')" "0"

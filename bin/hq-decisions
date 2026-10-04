@@ -23,7 +23,7 @@
 #
 # Width/padding discipline (bash 3.2 gotcha): `printf '%-Ns'` pads by BYTES
 # and `${#x}` counts bytes under a non-UTF-8 locale, so every multi-byte
-# glyph (★ ● ✓ ›) breaks column math. decisions_ensure_utf8_locale forces a
+# glyph (● ✓ › …) breaks column math. decisions_ensure_utf8_locale forces a
 # UTF-8 LC_CTYPE so `${#x}` is character-based, and `pad`/`clip` are the only
 # places width is measured — always on PLAIN text, with color codes spliced
 # in afterward so they never count toward a width.
@@ -59,30 +59,33 @@ usage: hq-decisions                     run the viewer in this terminal
        hq-decisions --dump [--answered] print the LIST once and exit
        hq-decisions --dump --detail ID  print one decision's DETAIL once
 
-LIST (default): one line per decision, sections in order OPEN (needs you),
-AUTO-TAKEN (taken for you, say so to reverse), ANSWERED (hidden unless `a`
-is pressed or --answered is given, when it collapses to one
-`ANSWERED · N hidden — a to show` line); a section with no rows is omitted.
+LIST (default): two sections. NEEDS YOU (open decisions) is always shown,
+with `nothing waiting on you` when empty. ANSWERED (auto-taken and
+owner-answered together, newest answer first) is hidden unless `a` is
+pressed or --answered is given, when it collapses to one
+`ANSWERED · N hidden (K new auto-taken) — a to show` line.
 
-Header: `DECISIONS  N open · M auto-taken · P answered`, then
-`  ● K auto-taken since you last looked` when K > 0, then `updated <age> ago`
+Header: `DECISIONS  N open · M answered (A auto)`, then
+`  K auto-taken since you last looked` when K > 0, then `updated <age> ago`
 right-aligned when the header fits the terminal width.
 
-Row: AGE (right-aligned) · WHERE (`repo #pr` or `repo branch`) · TITLE
-(takes all slack, clipped with … when the terminal is too narrow) ·
-ASKED BY (session) · last column: open -> `★ id · label`, auto -> `● id ·
-auto`, answered -> `✓ id · you`. Column widths are recomputed every repaint
-from the terminal width.
+Row: AGE (right-aligned) · SHELL (the asking session) · WHERE (`repo #pr`
+or `repo branch`) · TITLE (takes all slack, clipped with … when the
+terminal is too narrow) · WAITED (asked to answered, blank while open) ·
+OUTCOME: `rec: <label>` on an open row, the chosen option's label on an
+answered one, plus ` · overrode` when it is not the recommendation.
+Color carries who answered: amber open, teal auto-taken, green you.
+Column widths are recomputed every repaint from the terminal width.
 
-DETAIL (⏎ on a row, esc/backspace back to the list): state (OPEN / ●
-AUTO-TAKEN / ✓ ANSWERED) · repo · pr-or-branch · asked/taken/answered <age>
+DETAIL (⏎ on a row, esc/backspace back to the list): state (OPEN /
+AUTO-TAKEN / ANSWERED) · repo · pr-or-branch · asked/taken/answered <age>
 ago by <session> · id, then the title, CONTEXT, and OPTIONS (the
-recommended option starred, with its `why` if the record has one; an
-answered record also marks the chosen option and shows its note). The
+recommended option marked ●, with its `why` if the record has one; an
+answered record also marks the chosen option ✓ and shows its note). The
 bottom bar gives the exact `hq-decision answer` command: TO ANSWER for an
 open decision, TO REVERSE for an auto-taken one, or `answered by you <age>
 ago` once the owner has answered. J/K step to the next/prev decision in the
-same section; j/k scroll the body when it doesn't fit.
+same section (NEEDS YOU or ANSWERED); j/k scroll the body when it doesn't fit.
 
 Keys, both views:
   g    jump the other tmux client to the asking session
@@ -96,8 +99,7 @@ timestamp, absent meaning every auto-taken decision is unseen. The
 interactive viewer writes it, now, right after its first paint; `--dump`
 only reads it.
 
-Zero decisions still prints the header, with `no decisions recorded` in
-place of any rows.
+Zero decisions still prints the header and an empty NEEDS YOU.
 EOF
 }
 
@@ -372,31 +374,30 @@ go_to_hub() {
 d_id=(); d_repo=(); d_pr=(); d_branch=(); d_title=(); d_context=()
 d_recommend=(); d_rec_label=(); d_session=(); d_created=(); d_updated=()
 d_state=(); d_aopt=(); d_anote=(); d_aat=(); d_aby=(); d_ans_label=()
-d_why=(); d_opts_b64=()
-open_order=(); auto_order=(); ans_order=()
+d_why=(); d_opts_b64=(); d_waited=()
+open_order=(); ans_order=()
 n_open=0; n_auto=0; n_answered=0; n_unseen_auto=0; total_count=0
 store_newest_updated_iso=""
 
 # load_data — one decision_records call, one jq pass to TSV (recommend and
 # answer labels resolved here so no per-row jq at LIST paint time), then
-# three ordered index arrays: open_order (open, newest created first),
-# auto_order (answer.by=auto, unseen before seen, newest answer.at first
-# within each group), ans_order (answer.by=owner, newest answer.at first).
+# two ordered index arrays: open_order (open, newest created first) and
+# ans_order (auto-taken and owner-answered together, newest answer.at first).
 load_data() {
     local recs tsv i line
     local -a tsv_lines=() cols=() sorted_lines=()
     local f_id f_repo f_pr f_branch f_title f_context f_recommend f_rec_label
     local f_session f_created f_updated f_state f_aopt f_anote f_aat f_aby
     local f_ans_label f_why f_opts
-    local sortable_open="" sortable_auto="" sortable_ans=""
-    local sorted_open="" sorted_auto="" sorted_ans=""
+    local sortable_open="" sortable_ans=""
+    local sorted_open="" sorted_ans=""
     local newest_epoch=-1 newest_iso=""
 
     d_id=(); d_repo=(); d_pr=(); d_branch=(); d_title=(); d_context=()
     d_recommend=(); d_rec_label=(); d_session=(); d_created=(); d_updated=()
     d_state=(); d_aopt=(); d_anote=(); d_aat=(); d_aby=(); d_ans_label=()
-    d_why=(); d_opts_b64=()
-    open_order=(); auto_order=(); ans_order=()
+    d_why=(); d_opts_b64=(); d_waited=()
+    open_order=(); ans_order=()
     n_open=0; n_auto=0; n_answered=0; n_unseen_auto=0; total_count=0
     store_newest_updated_iso=""
 
@@ -465,29 +466,32 @@ load_data() {
             newest_epoch="$upd_epoch"; newest_iso="$f_updated"
         fi
 
+        local at_epoch cr_epoch waited=""
         if [[ "$f_state" == open ]]; then
             sortable_open+="${f_created}"$'\t'"${i}"$'\n'
             n_open=$(( n_open + 1 ))
-        elif [[ "$f_aby" == auto ]]; then
-            local at_epoch tier="1"
-            at_epoch=$(decision_epoch "$f_aat")
-            if [[ -n "$at_epoch" ]] && (( at_epoch > SEEN_CUTOFF_EPOCH )); then
-                tier="0"
-                n_unseen_auto=$(( n_unseen_auto + 1 ))
-            fi
-            sortable_auto+="${tier}"$'\t'"${f_aat}"$'\t'"${i}"$'\n'
-            n_auto=$(( n_auto + 1 ))
         else
+            at_epoch=$(decision_epoch "$f_aat")
+            cr_epoch=$(decision_epoch "$f_created")
+            if [[ -n "$at_epoch" && -n "$cr_epoch" ]]; then
+                waited=$(decision_fmt_secs $(( at_epoch - cr_epoch )))
+            fi
+            if [[ "$f_aby" == auto ]]; then
+                n_auto=$(( n_auto + 1 ))
+                if [[ -n "$at_epoch" ]] && (( at_epoch > SEEN_CUTOFF_EPOCH )); then
+                    n_unseen_auto=$(( n_unseen_auto + 1 ))
+                fi
+            fi
             sortable_ans+="${f_aat}"$'\t'"${i}"$'\n'
             n_answered=$(( n_answered + 1 ))
         fi
+        d_waited+=("$waited")
         i=$(( i + 1 ))
     done
     total_count="$i"
     store_newest_updated_iso="$newest_iso"
 
     sorted_open=$(printf '%s' "$sortable_open" | sort -t$'\t' -k1,1r)
-    sorted_auto=$(printf '%s' "$sortable_auto" | sort -t$'\t' -k1,1n -k2,2r)
     sorted_ans=$(printf '%s' "$sortable_ans" | sort -t$'\t' -k1,1r)
 
     decisions_split "$sorted_open" $'\n'
@@ -495,13 +499,6 @@ load_data() {
     for line in ${sorted_lines[@]+"${sorted_lines[@]}"}; do
         i="${line##*$'\t'}"
         [[ -n "$i" ]] && open_order+=("$i")
-    done
-
-    decisions_split "$sorted_auto" $'\n'
-    sorted_lines=(${SPLIT_OUT[@]+"${SPLIT_OUT[@]}"})
-    for line in ${sorted_lines[@]+"${sorted_lines[@]}"}; do
-        i="${line##*$'\t'}"
-        [[ -n "$i" ]] && auto_order+=("$i")
     done
 
     decisions_split "$sorted_ans" $'\n'
@@ -525,16 +522,12 @@ decisions_locate_id() {
     for i in "${!d_id[@]}"; do
         [[ "${d_id[$i]}" == "$id" ]] || continue
         LOCATE_IDX="$i"
-        if [[ "${d_state[$i]}" == open ]]; then LOCATE_SECTION=open
-        elif [[ "${d_aby[$i]}" == auto ]]; then LOCATE_SECTION=auto
-        else LOCATE_SECTION=answered
-        fi
         local -a oa=()
-        case "$LOCATE_SECTION" in
-            open) oa=(${open_order[@]+"${open_order[@]}"}) ;;
-            auto) oa=(${auto_order[@]+"${auto_order[@]}"}) ;;
-            answered) oa=(${ans_order[@]+"${ans_order[@]}"}) ;;
-        esac
+        if [[ "${d_state[$i]}" == open ]]; then
+            LOCATE_SECTION=open; oa=(${open_order[@]+"${open_order[@]}"})
+        else
+            LOCATE_SECTION=answered; oa=(${ans_order[@]+"${ans_order[@]}"})
+        fi
         LOCATE_POS=0
         for j in "${!oa[@]}"; do
             [[ "${oa[$j]}" == "$i" ]] && { LOCATE_POS="$j"; break; }
@@ -570,15 +563,15 @@ list_where() {
 render_list_row() {
     local idx="$1" kind="$2" where="$3" asked="$4" last="$5" age="$6"
     local where_w="$7" title_w="$8" asked_w="$9" last_w="${10}" narrow="${11}"
-    local title="${d_title[$idx]}"
+    local title="${d_title[$idx]}" waited="${d_waited[$idx]}"
     if [[ "$narrow" == true ]]; then
-        clip "  ${age}  ${where}  ${title}  ${asked}  ${last}" "$term_w"
+        clip "  ${age}  ${asked}  ${where}  ${title}  ${last}" "$term_w"
         return 0
     fi
     local age_c last_c title_style
     case "$kind" in
         open)     age_c="$C_AMBER"; last_c="$C_AMBER"; title_style="$BOLD" ;;
-        auto)     age_c="$C_TEAL";  last_c="$C_TEAL";  title_style=""     ;;
+        auto)     age_c="$C_TEAL";  last_c="$C_TEAL";  title_style="$DIM" ;;
         *)        age_c="$DIM";     last_c="$C_GREEN"; title_style="$DIM" ;;
     esac
     local where_clip title_clip asked_clip last_clip repo_len
@@ -597,9 +590,10 @@ render_list_row() {
     where_rest="${where_padded:repo_len}"
 
     line="  ${age_c}$(pad "$(clip "$age" 5)" 5 right)${RST}  "
+    line+="${DIM}${asked_padded}${RST}  "
     line+="${BOLD}${where_rep}${RST}${where_rest}  "
     line+="${title_style}${title_padded}${RST}  "
-    line+="${DIM}${asked_padded}${RST}  "
+    line+="${DIM}$(pad "$(clip "$waited" 6)" 6 right)${RST}  "
     line+="${last_c}${last_clip}${RST}"
     printf '%s' "$line"
 }
@@ -608,29 +602,27 @@ build_list_frame() {
     local -a row_idx=() row_kind=() row_where=() row_asked=() row_last=() row_age=()
     local i
 
+    local outcome
     for i in ${open_order[@]+"${open_order[@]}"}; do
         row_idx+=("$i"); row_kind+=("open")
         row_where+=("$(list_where "$i")"); row_asked+=("${d_session[$i]}")
-        row_last+=("★ ${d_recommend[$i]} · ${d_rec_label[$i]}")
+        row_last+=("rec: ${d_rec_label[$i]}")
         row_age+=("$(age_of "${d_created[$i]}")")
-    done
-    for i in ${auto_order[@]+"${auto_order[@]}"}; do
-        row_idx+=("$i"); row_kind+=("auto")
-        row_where+=("$(list_where "$i")"); row_asked+=("${d_session[$i]}")
-        row_last+=("● ${d_aopt[$i]} · auto")
-        row_age+=("$(age_of "${d_aat[$i]}")")
     done
     if [[ "$show_answered" == true ]]; then
         for i in ${ans_order[@]+"${ans_order[@]}"}; do
-            row_idx+=("$i"); row_kind+=("answered")
+            if [[ "${d_aby[$i]}" == auto ]]; then row_kind+=("auto"); else row_kind+=("answered"); fi
+            row_idx+=("$i")
             row_where+=("$(list_where "$i")"); row_asked+=("${d_session[$i]}")
-            row_last+=("✓ ${d_aopt[$i]} · you")
+            outcome="${d_ans_label[$i]}"
+            [[ "${d_aopt[$i]}" != "${d_recommend[$i]}" ]] && outcome+=" · overrode"
+            row_last+=("$outcome")
             row_age+=("$(age_of "${d_aat[$i]}")")
         done
     fi
 
     local n=${#row_idx[@]}
-    local where_max=5 asked_max=8 last_max=10
+    local where_max=5 asked_max=5 last_max=7
     for (( i = 0; i < n; i++ )); do
         (( ${#row_where[i]} > where_max )) && where_max=${#row_where[i]}
         (( ${#row_asked[i]} > asked_max )) && asked_max=${#row_asked[i]}
@@ -639,9 +631,9 @@ build_list_frame() {
     local where_w=$(( where_max < 28 ? where_max : 28 ))
     local asked_w=$(( asked_max < 18 ? asked_max : 18 ))
     local last_w=$(( last_max < 32 ? last_max : 32 ))
-    local title_w=$(( term_w - 15 - where_w - asked_w - last_w ))
+    local title_w=$(( term_w - 23 - where_w - asked_w - last_w ))
     local narrow=false
-    if (( term_w < 40 )); then
+    if (( term_w < 50 )); then
         narrow=true
     else
         while (( title_w < 12 )); do
@@ -650,19 +642,20 @@ build_list_frame() {
             elif (( where_w > 6 )); then where_w=$(( where_w - 1 ))
             else break
             fi
-            title_w=$(( term_w - 15 - where_w - asked_w - last_w ))
+            title_w=$(( term_w - 23 - where_w - asked_w - last_w ))
         done
         (( title_w < 1 )) && title_w=1
     fi
 
-    local plain_left="DECISIONS  ${n_open} open · ${n_auto} auto-taken · ${n_answered} answered"
+    local counts="${n_open} open · ${n_answered} answered (${n_auto} auto)"
+    local plain_left="DECISIONS  ${counts}"
     local plain_extra="" colored_extra=""
     if (( n_unseen_auto > 0 )); then
-        plain_extra="  ● ${n_unseen_auto} auto-taken since you last looked"
-        colored_extra="  ${C_TEAL}● ${n_unseen_auto} auto-taken since you last looked${RST}"
+        plain_extra="  ${n_unseen_auto} auto-taken since you last looked"
+        colored_extra="  ${C_TEAL}${n_unseen_auto} auto-taken since you last looked${RST}"
     fi
     local plain_full="${plain_left}${plain_extra}"
-    local colored_left="${BOLD}DECISIONS${RST}  ${n_open} open · ${n_auto} auto-taken · ${n_answered} answered"
+    local colored_left="${BOLD}DECISIONS${RST}  ${counts}"
     local age_part="" header_line
     [[ -n "$store_newest_updated_iso" ]] && age_part="updated $(age_of "$store_newest_updated_iso") ago"
     local pad_n=$(( term_w - ${#plain_full} - ${#age_part} ))
@@ -675,27 +668,23 @@ build_list_frame() {
     fi
 
     local label_line
-    if [[ "$narrow" == true ]]; then
+    if [[ "$narrow" == true ]] || (( n == 0 )); then
         label_line=""
     else
-        label_line="  $(pad AGE 5 right)  $(pad WHERE "$where_w")  $(pad DECISION "$title_w")  $(pad 'ASKED BY' "$asked_w")  RECOMMENDS"
+        label_line="  $(pad AGE 5 right)  $(pad SHELL "$asked_w")  $(pad WHERE "$where_w")  $(pad DECISION "$title_w")  WAITED  OUTCOME"
         label_line="$(clip "$label_line" "$term_w")"
     fi
     frame_head="${header_line}"$'\n\n'
     [[ -n "$label_line" ]] && frame_head+="${DIM}${label_line}${RST}"$'\n'
 
     frame_rows=(); cursor_map=(); frame_row_line=()
-    local cur_kind="" section_label
+    frame_rows+=("${DIM}NEEDS YOU${RST}")
+    (( n_open == 0 )) && frame_rows+=("  ${DIM}nothing waiting on you${RST}")
+    local answered_started=false
     for (( i = 0; i < n; i++ )); do
-        if [[ "${row_kind[i]}" != "$cur_kind" ]]; then
-            (( ${#frame_rows[@]} > 0 )) && frame_rows+=("")
-            case "${row_kind[i]}" in
-                open) section_label="OPEN · needs you" ;;
-                auto) section_label="AUTO-TAKEN · taken for you, say so to reverse" ;;
-                *)    section_label="ANSWERED" ;;
-            esac
-            frame_rows+=("${DIM}$(clip "$section_label" "$term_w")${RST}")
-            cur_kind="${row_kind[i]}"
+        if [[ "${row_kind[i]}" != open && "$answered_started" == false ]]; then
+            frame_rows+=("" "${DIM}ANSWERED${RST}")
+            answered_started=true
         fi
         cursor_map+=("${row_kind[i]}:${row_idx[i]}")
         frame_row_line+=("${#frame_rows[@]}")
@@ -704,10 +693,9 @@ build_list_frame() {
             "$where_w" "$title_w" "$asked_w" "$last_w" "$narrow")")
     done
     if [[ "$show_answered" != true ]] && (( n_answered > 0 )); then
-        (( ${#frame_rows[@]} > 0 )) && frame_rows+=("")
-        frame_rows+=("${DIM}$(clip "ANSWERED · ${n_answered} hidden — a to show" "$term_w")${RST}")
-    elif (( n == 0 )); then
-        frame_rows+=("  ${DIM}no decisions recorded${RST}")
+        local hidden="ANSWERED · ${n_answered} hidden"
+        (( n_unseen_auto > 0 )) && hidden+=" (${n_unseen_auto} new auto-taken)"
+        frame_rows+=("" "${DIM}$(clip "${hidden} — a to show" "$term_w")${RST}")
     fi
 
     local k ent eidx
@@ -742,19 +730,18 @@ append_detail_option() {
     [[ "${d_aopt[$idx]}" != "-" && "$o_id" == "${d_aopt[$idx]}" ]] && is_chosen=true
 
     local mark=" " suffix="" head_color=""
-    if [[ "$detail_section" == open ]]; then
+    if [[ "${d_state[$idx]}" == open ]]; then
         if [[ "$is_rec" == true ]]; then
-            mark="★"; suffix=" · recommended"; head_color="${C_AMBER}${BOLD}"
+            mark="●"; suffix=" · recommended"; head_color="${C_AMBER}${BOLD}"
         fi
     elif [[ "$is_chosen" == true ]]; then
-        if [[ "$detail_section" == auto ]]; then mark="●"; head_color="$C_TEAL"
-        else mark="✓"; head_color="$C_GREEN"
-        fi
+        mark="✓"; head_color="$C_GREEN"
+        [[ "${d_aby[$idx]}" == auto ]] && head_color="$C_TEAL"
         if [[ "$o_id" == "${d_recommend[$idx]}" ]]; then suffix=" · was the recommendation"
         else suffix=" · owner chose"
         fi
     elif [[ "$is_rec" == true ]]; then
-        mark="★"; suffix=" · recommended"; head_color="${C_AMBER}${BOLD}"
+        mark="●"; suffix=" · recommended"; head_color="${C_AMBER}${BOLD}"
     fi
 
     # Mark column is 2 wide (blank for an unmarked option) so every id in the
@@ -795,7 +782,7 @@ append_detail_option() {
                 frame_rows+=("${indent}$wline")
             done
         fi
-        local verb="answered"; [[ "$detail_section" == auto ]] && verb="taken"
+        local verb="answered"; [[ "${d_aby[$idx]}" == auto ]] && verb="taken"
         frame_rows+=("${indent}${verb} $(age_of "${d_aat[$idx]}") ago")
     fi
 }
@@ -808,7 +795,9 @@ append_detail_option() {
 # reserved column keeps the result within term_w either way.
 build_detail_bar() {
     local idx="$1" label="" message full wrap_w first=true wline
-    case "$detail_section" in
+    local kind="${d_state[$idx]}"
+    [[ "$kind" != open && "${d_aby[$idx]}" == auto ]] && kind=auto
+    case "$kind" in
         open)
             label="TO ANSWER"
             message="tell $(session_text "${d_session[$idx]}") \"go with ${d_recommend[$idx]}\" — it records: hq-decision answer ${d_id[$idx]} ${d_recommend[$idx]}"
@@ -851,13 +840,8 @@ build_detail_frame() {
     dw=$term_w; (( dw > 100 )) && dw=100
 
     local section_word="$detail_section"
-    [[ "$section_word" == auto ]] && section_word="auto-taken"
-    local section_len=0
-    case "$detail_section" in
-        open) section_len=${#open_order[@]} ;;
-        auto) section_len=${#auto_order[@]} ;;
-        *)    section_len=${#ans_order[@]} ;;
-    esac
+    local section_len=${#ans_order[@]}
+    [[ "$detail_section" == open ]] && section_len=${#open_order[@]}
     local left1="‹ esc  back to list"
     local right1="decision $(( detail_pos + 1 )) of ${section_len} ${section_word}"
     local pad1=$(( term_w - ${#left1} - ${#right1} ))
@@ -869,11 +853,12 @@ build_detail_frame() {
     fi
     (( ${#line1} > term_w )) && line1="$(clip "$line1" "$term_w")"
 
-    local state_word state_plain verb
-    case "$detail_section" in
+    local state_word state_plain verb kind="$detail_section"
+    [[ "$kind" != open && "${d_aby[$idx]}" == auto ]] && kind=auto
+    case "$kind" in
         open)     state_word="${C_AMBER}OPEN${RST}"; state_plain="OPEN"; verb="asked" ;;
-        auto)     state_word="${C_TEAL}● AUTO-TAKEN${RST}"; state_plain="● AUTO-TAKEN"; verb="taken" ;;
-        *)        state_word="${C_GREEN}✓ ANSWERED${RST}"; state_plain="✓ ANSWERED"; verb="answered" ;;
+        auto)     state_word="${C_TEAL}AUTO-TAKEN${RST}"; state_plain="AUTO-TAKEN"; verb="taken" ;;
+        *)        state_word="${C_GREEN}ANSWERED${RST}"; state_plain="ANSWERED"; verb="answered" ;;
     esac
     local ref="${d_pr[$idx]}"
     [[ "$ref" != "-" ]] && ref="#${d_pr[$idx]}" || ref="${d_branch[$idx]}"
@@ -1060,11 +1045,9 @@ decisions_enter_detail() {
 decisions_detail_step() {
     local delta="$1" len idx
     local -a oa=()
-    case "$detail_section" in
-        open) oa=(${open_order[@]+"${open_order[@]}"}) ;;
-        auto) oa=(${auto_order[@]+"${auto_order[@]}"}) ;;
-        *)    oa=(${ans_order[@]+"${ans_order[@]}"}) ;;
-    esac
+    if [[ "$detail_section" == open ]]; then oa=(${open_order[@]+"${open_order[@]}"})
+    else oa=(${ans_order[@]+"${ans_order[@]}"})
+    fi
     len=${#oa[@]}
     (( len == 0 )) && return 0
     detail_pos=$(( detail_pos + delta ))
