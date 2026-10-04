@@ -19,7 +19,7 @@ Only stage files that are part of the current work. Do NOT use `git add -A` or `
 
 ## 4. Commit
 
-Attempt the commit with a message following the repo's existing style. Write the message to a file under `/tmp` and use `git commit -F <file>` — file-based messages avoid all shell-quoting issues. (If the repo's CLAUDE.md prescribes a specific commit-message mechanism, e.g. multiple `-m` flags, the repo's convention wins.)
+Attempt the commit with a message following the repo's existing style. Write the message to a file in the session scratchpad (or `mktemp`) and use `git commit -F <file>` — file-based messages avoid all shell-quoting issues. (If the repo's CLAUDE.md prescribes a specific commit-message mechanism, e.g. multiple `-m` flags, the repo's convention wins.)
 
 If pre-commit hooks fail and modify files (formatting, linting), re-stage the modified files and commit again as a NEW commit (do not amend). If there are lint/type errors that need manual fixes, fix them, re-stage, and try again. Repeat until the commit succeeds. Ignore pre-existing hook failures unrelated to our changes.
 
@@ -33,7 +33,7 @@ Create a PR with `gh pr create`. The title is conventional — `<type>: <subject
 
 Determine the default branch first: `git symbolic-ref --short refs/remotes/origin/HEAD | sed 's|origin/||'` (fall back to `main`). Then use `git log <default>..HEAD` and `git diff <default>...HEAD` to understand the FULL scope of changes across all commits on this branch, not just the latest commit.
 
-Write the PR body to a file under `/tmp` and pass it with `--body-file <file>` — NEVER pass a multi-line body inline or via HEREDOC; shell quoting mangles backticks, `$`, and code fences, which then requires ugly `gh pr edit` / API-PATCH repair after the fact.
+Write the PR body to a file in the session scratchpad (or `mktemp`) and pass it with `--body-file <file>` — NEVER pass a multi-line body inline or via HEREDOC; shell quoting mangles backticks, `$`, and code fences. To update an existing PR's body later, use `gh api -X PATCH repos/<owner>/<repo>/pulls/<N> --input <file>` with `<file>` holding `{"body": "..."}`: `gh pr edit --body-file` can fail on an unrelated GraphQL deprecation error, and `gh api -f body=@file` writes the literal string `@file` instead of the file's contents.
 
 The body is written for the person deciding whether to merge, and answers three questions in that order: what is this and why, what must I judge, was it checked. Everything else belongs in the diff, the commit messages, or a collapsed block.
 
