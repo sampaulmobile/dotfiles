@@ -27,6 +27,13 @@
 # UTF-8 LC_CTYPE so `${#x}` is character-based, and `pad`/`clip` are the only
 # places width is measured — always on PLAIN text, with color codes spliced
 # in afterward so they never count toward a width.
+#
+# fd safety (bash 3.2 gotcha): this bash does not reliably close the fd a
+# `< <(…)` process substitution or a `<<<` here-string opens inside a
+# function on a path that runs every tick, so a pane left open long enough
+# hits "Too many open files". load_data/build_frame/paint and everything
+# they call split text with decisions_split/decisions_split_lines_preserve
+# (below) instead, which capture with `$(…)` and index into an array.
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 # shellcheck source=/dev/null
@@ -146,19 +153,67 @@ count_lines() {
     printf '%s' "${#nl}"
 }
 
+# decisions_split <text> <seps> — splits <text> on any char in <seps> into
+# the global array SPLIT_OUT, with no `read`, no `<<<`, no `< <(…)` (see the
+# fd-safety note above). A run of IFS-whitespace separators (space/tab/
+# newline) collapses and strips at the ends, exactly like `read`'s default
+# splitting — every string this file splits this way is either never empty
+# (an id) or already has its empty fields replaced with "-" by the TSV layer,
+# so collapsing never drops real data. bash 3.2 has no `declare -n`, so the
+# result comes back in this global rather than a caller-named one — copy it
+# into a local array before calling this again, since the next call
+# overwrites it.
+decisions_split() {
+    local text="$1" seps="$2" oIFS="$IFS" had_f=0
+    case "$-" in *f*) had_f=1 ;; esac
+    IFS="$seps"
+    set -f
+    SPLIT_OUT=($text)
+    IFS="$oIFS"
+    (( had_f )) || set +f
+}
+
+# decisions_split_lines_preserve <text> — like decisions_split "$text" $'\n'
+# but keeps every line INCLUDING empty ones (wrap_text emits a blank line
+# for a paragraph break, which plain IFS splitting would collapse away).
+# Matches `while read -r l || [[ -n "$l" ]]; done <<< "$text"` with no
+# here-string.
+decisions_split_lines_preserve() {
+    local text="$1" rest line
+    SPLIT_OUT=()
+    rest="$text"
+    while :; do
+        if [[ "$rest" == *$'\n'* ]]; then
+            line="${rest%%$'\n'*}"
+            rest="${rest#*$'\n'}"
+        else
+            line="$rest"
+            rest=""
+        fi
+        SPLIT_OUT+=("$line")
+        [[ -z "$rest" ]] && break
+    done
+}
+
 # wrap_text <text> <width> — pure bash word wrap, no fork: honors embedded
 # newlines as paragraph breaks and hard-splits a word longer than width.
 # Prints the wrapped lines, one per line, to stdout.
 wrap_text() {
-    local text="$1" width="$2" para line word out="" first_para=true
-    local IFS=$' \t\n'
-    local -a words
+    local text="$1" width="$2" para rest line word out="" first_para=true
     (( width < 1 )) && width=1
-    while IFS= read -r para || [[ -n "$para" ]]; do
+    rest="$text"
+    while :; do
+        if [[ "$rest" == *$'\n'* ]]; then
+            para="${rest%%$'\n'*}"
+            rest="${rest#*$'\n'}"
+        else
+            para="$rest"
+            rest=""
+        fi
         if [[ "$first_para" == true ]]; then first_para=false; else out+=$'\n'; fi
         line=""
-        read -ra words <<< "$para"
-        for word in "${words[@]}"; do
+        decisions_split "$para" $' \t\n'
+        for word in ${SPLIT_OUT[@]+"${SPLIT_OUT[@]}"}; do
             while (( ${#word} > width )); do
                 if [[ -n "$line" ]]; then
                     out+="$line"$'\n'
@@ -177,7 +232,8 @@ wrap_text() {
             fi
         done
         out+="$line"
-    done < <(printf '%s' "$text")
+        [[ -z "$rest" ]] && break
+    done
     printf '%s' "$out"
 }
 
@@ -277,13 +333,17 @@ decisions_open_pr() {
 # other_client — the tty of the most recently active attached client that is
 # not this one; empty when this screen is the only client.
 other_client() {
-    local mine act tty best="" bestact=-1
+    local mine out line act tty best="" bestact=-1
     mine=$(tmux display -p '#{client_tty}' 2>/dev/null)
-    while read -r act tty; do
+    out=$(tmux list-clients -F '#{client_activity} #{client_tty}' 2>/dev/null)
+    decisions_split_lines_preserve "$out"
+    for line in ${SPLIT_OUT[@]+"${SPLIT_OUT[@]}"}; do
+        act=""; tty=""
+        if [[ "$line" == *' '* ]]; then act="${line%% *}"; tty="${line#* }"; fi
         [[ -n "$tty" && "$tty" != "$mine" ]] || continue
         [[ "$act" =~ ^[0-9]+$ ]] || continue
         if (( act > bestact )); then bestact="$act"; best="$tty"; fi
-    done < <(tmux list-clients -F '#{client_activity} #{client_tty}' 2>/dev/null)
+    done
     printf '%s' "$best"
 }
 
@@ -322,11 +382,13 @@ store_newest_updated_iso=""
 # auto_order (answer.by=auto, unseen before seen, newest answer.at first
 # within each group), ans_order (answer.by=owner, newest answer.at first).
 load_data() {
-    local recs tsv i
+    local recs tsv i line
+    local -a tsv_lines=() cols=() sorted_lines=()
     local f_id f_repo f_pr f_branch f_title f_context f_recommend f_rec_label
     local f_session f_created f_updated f_state f_aopt f_anote f_aat f_aby
     local f_ans_label f_why f_opts
     local sortable_open="" sortable_auto="" sortable_ans=""
+    local sorted_open="" sorted_auto="" sorted_ans=""
     local newest_epoch=-1 newest_iso=""
 
     d_id=(); d_repo=(); d_pr=(); d_branch=(); d_title=(); d_context=()
@@ -364,10 +426,23 @@ load_data() {
         ] | map(if . == "" then "-" else . end) | join("\t")
     ')
 
+    decisions_split "$tsv" $'\n'
+    tsv_lines=(${SPLIT_OUT[@]+"${SPLIT_OUT[@]}"})
+
     i=0
-    while IFS=$'\t' read -r f_id f_repo f_pr f_branch f_title f_context \
-        f_recommend f_rec_label f_session f_created f_updated f_state \
-        f_aopt f_anote f_aat f_aby f_ans_label f_why f_opts; do
+    for line in ${tsv_lines[@]+"${tsv_lines[@]}"}; do
+        f_id=""; f_repo=""; f_pr=""; f_branch=""; f_title=""; f_context=""
+        f_recommend=""; f_rec_label=""; f_session=""; f_created=""; f_updated=""
+        f_state=""; f_aopt=""; f_anote=""; f_aat=""; f_aby=""; f_ans_label=""
+        f_why=""; f_opts=""
+        decisions_split "$line" $'\t'
+        cols=(${SPLIT_OUT[@]+"${SPLIT_OUT[@]}"})
+        f_id="${cols[0]-}"; f_repo="${cols[1]-}"; f_pr="${cols[2]-}"; f_branch="${cols[3]-}"
+        f_title="${cols[4]-}"; f_context="${cols[5]-}"; f_recommend="${cols[6]-}"
+        f_rec_label="${cols[7]-}"; f_session="${cols[8]-}"; f_created="${cols[9]-}"
+        f_updated="${cols[10]-}"; f_state="${cols[11]-}"; f_aopt="${cols[12]-}"
+        f_anote="${cols[13]-}"; f_aat="${cols[14]-}"; f_aby="${cols[15]-}"
+        f_ans_label="${cols[16]-}"; f_why="${cols[17]-}"; f_opts="${cols[18]-}"
         [[ -n "$f_id" ]] || continue
         [[ "$f_context" == "-" ]] && f_context=""
         f_context="${f_context//\\n/$'\n'}"
@@ -406,19 +481,34 @@ load_data() {
             n_answered=$(( n_answered + 1 ))
         fi
         i=$(( i + 1 ))
-    done <<< "$tsv"
+    done
     total_count="$i"
     store_newest_updated_iso="$newest_iso"
 
-    while IFS=$'\t' read -r _ i; do
+    sorted_open=$(printf '%s' "$sortable_open" | sort -t$'\t' -k1,1r)
+    sorted_auto=$(printf '%s' "$sortable_auto" | sort -t$'\t' -k1,1n -k2,2r)
+    sorted_ans=$(printf '%s' "$sortable_ans" | sort -t$'\t' -k1,1r)
+
+    decisions_split "$sorted_open" $'\n'
+    sorted_lines=(${SPLIT_OUT[@]+"${SPLIT_OUT[@]}"})
+    for line in ${sorted_lines[@]+"${sorted_lines[@]}"}; do
+        i="${line##*$'\t'}"
         [[ -n "$i" ]] && open_order+=("$i")
-    done < <(printf '%s' "$sortable_open" | sort -t$'\t' -k1,1r)
-    while IFS=$'\t' read -r _ _ i; do
+    done
+
+    decisions_split "$sorted_auto" $'\n'
+    sorted_lines=(${SPLIT_OUT[@]+"${SPLIT_OUT[@]}"})
+    for line in ${sorted_lines[@]+"${sorted_lines[@]}"}; do
+        i="${line##*$'\t'}"
         [[ -n "$i" ]] && auto_order+=("$i")
-    done < <(printf '%s' "$sortable_auto" | sort -t$'\t' -k1,1n -k2,2r)
-    while IFS=$'\t' read -r _ i; do
+    done
+
+    decisions_split "$sorted_ans" $'\n'
+    sorted_lines=(${SPLIT_OUT[@]+"${SPLIT_OUT[@]}"})
+    for line in ${sorted_lines[@]+"${sorted_lines[@]}"}; do
+        i="${line##*$'\t'}"
         [[ -n "$i" ]] && ans_order+=("$i")
-    done < <(printf '%s' "$sortable_ans" | sort -t$'\t' -k1,1r)
+    done
 }
 
 # decisions_signature — one `ls` fork over every record file's mtime, the
@@ -668,31 +758,35 @@ append_detail_option() {
     prefix="${mark_col}${o_id}  "
     prefix_w=${#prefix}
     rem_w=$(( dw - prefix_w )); (( rem_w < 1 )) && rem_w=1
-    while IFS= read -r wline || [[ -n "$wline" ]]; do
+    decisions_split_lines_preserve "$(wrap_text "${o_label}${suffix}" "$rem_w")"
+    for wline in "${SPLIT_OUT[@]}"; do
         if [[ "$first" == true ]]; then
             frame_rows+=("${head_color}${prefix}${wline}${RST}"); first=false
         else
             frame_rows+=("${head_color}$(printf '%*s' "$prefix_w" '')${wline}${RST}")
         fi
-    done <<< "$(wrap_text "${o_label}${suffix}" "$rem_w")"
+    done
 
     indent="$(printf '%*s' "$prefix_w" '')"
     local body_w=$(( dw - prefix_w )); (( body_w < 1 )) && body_w=1
     if [[ -n "$o_desc" && "$o_desc" != "-" ]]; then
-        while IFS= read -r wline || [[ -n "$wline" ]]; do
+        decisions_split_lines_preserve "$(wrap_text "$o_desc" "$body_w")"
+        for wline in "${SPLIT_OUT[@]}"; do
             frame_rows+=("${indent}$wline")
-        done <<< "$(wrap_text "$o_desc" "$body_w")"
+        done
     fi
     if [[ "$is_rec" == true && -n "${d_why[$idx]}" ]]; then
-        while IFS= read -r wline || [[ -n "$wline" ]]; do
+        decisions_split_lines_preserve "$(wrap_text "why: ${d_why[$idx]}" "$body_w")"
+        for wline in "${SPLIT_OUT[@]}"; do
             frame_rows+=("${indent}$wline")
-        done <<< "$(wrap_text "why: ${d_why[$idx]}" "$body_w")"
+        done
     fi
     if [[ "$is_chosen" == true ]]; then
         if [[ -n "${d_anote[$idx]}" ]]; then
-            while IFS= read -r wline || [[ -n "$wline" ]]; do
+            decisions_split_lines_preserve "$(wrap_text "note: ${d_anote[$idx]}" "$body_w")"
+            for wline in "${SPLIT_OUT[@]}"; do
                 frame_rows+=("${indent}$wline")
-            done <<< "$(wrap_text "note: ${d_anote[$idx]}" "$body_w")"
+            done
         fi
         local verb="answered"; [[ "$detail_section" == auto ]] && verb="taken"
         frame_rows+=("${indent}${verb} $(age_of "${d_aat[$idx]}") ago")
@@ -729,14 +823,15 @@ build_detail_bar() {
         wrap_w=$(( term_w - 1 )); (( wrap_w < 1 )) && wrap_w=1
     fi
     frame_tail=""
-    while IFS= read -r wline || [[ -n "$wline" ]]; do
+    decisions_split_lines_preserve "$(wrap_text "$full" "$wrap_w")"
+    for wline in "${SPLIT_OUT[@]}"; do
         if [[ "$first" == true && -n "$label" ]]; then
             frame_tail+="${DIM}${label}${RST}  ${wline:$(( ${#label} + 1 ))}"$'\n'
         else
             frame_tail+="${wline}"$'\n'
         fi
         first=false
-    done <<< "$(wrap_text "$full" "$wrap_w")"
+    done
 }
 
 build_detail_frame() {
@@ -792,31 +887,39 @@ build_detail_frame() {
     frame_rows=()
     frame_rows+=("")
     local wline
-    while IFS= read -r wline || [[ -n "$wline" ]]; do
+    decisions_split_lines_preserve "$(wrap_text "${d_title[$idx]}" "$term_w")"
+    for wline in "${SPLIT_OUT[@]}"; do
         frame_rows+=("${BOLD}${wline}${RST}")
-    done <<< "$(wrap_text "${d_title[$idx]}" "$term_w")"
+    done
 
     if [[ -n "${d_context[$idx]}" ]]; then
         frame_rows+=("")
         frame_rows+=("${DIM}CONTEXT${RST}")
-        while IFS= read -r wline || [[ -n "$wline" ]]; do
+        decisions_split_lines_preserve "$(wrap_text "${d_context[$idx]}" "$dw")"
+        for wline in "${SPLIT_OUT[@]}"; do
             frame_rows+=("$wline")
-        done <<< "$(wrap_text "${d_context[$idx]}" "$dw")"
+        done
     fi
 
     frame_rows+=("")
     frame_rows+=("${DIM}OPTIONS${RST}")
-    local opts o_id o_label o_desc first_block=true
+    local opts o_id o_label o_desc first_block=true oline
+    local -a opt_lines=() ofields=()
     opts=$(jq -nr --arg b64 "${d_opts_b64[$idx]}" '
         def flat: gsub("[\t\n]"; " ");
         $b64 | @base64d | fromjson | .[]
         | [(.id | flat), (.label | flat), (.description | flat)] | join("\t")
     ')
-    while IFS=$'\t' read -r o_id o_label o_desc || [[ -n "$o_id" ]]; do
+    decisions_split "$opts" $'\n'
+    opt_lines=(${SPLIT_OUT[@]+"${SPLIT_OUT[@]}"})
+    for oline in ${opt_lines[@]+"${opt_lines[@]}"}; do
+        decisions_split "$oline" $'\t'
+        ofields=(${SPLIT_OUT[@]+"${SPLIT_OUT[@]}"})
+        o_id="${ofields[0]-}"; o_label="${ofields[1]-}"; o_desc="${ofields[2]-}"
         [[ -n "$o_id" ]] || continue
         if [[ "$first_block" == true ]]; then first_block=false; else frame_rows+=(""); fi
         append_detail_option "$idx" "$o_id" "$o_label" "$o_desc" "$dw"
-    done <<< "$opts"
+    done
 
     build_detail_bar "$idx"
     frame_cursor_line=-1
@@ -968,9 +1071,15 @@ decisions_detail_step() {
 
 # Enter arrives as the empty string, space as " ". A read -t timeout ALSO
 # leaves the key empty — read's own exit status (> 128 on timeout) is the
-# only way to tell a timeout from Enter.
+# only way to tell a timeout from Enter. bash 3.2 actually returns 1 for
+# BOTH a timeout and a read failure (e.g. the fd exhaustion this file
+# guards against elsewhere), so a failure masquerades as an idle tick and
+# spins forever — fail_count below tells them apart by elapsed time: a
+# non-zero read that took under a second is a failure, one that took the
+# full ~2s is a real timeout. 3 fast failures in a row exit instead of
+# spinning.
 view() {
-    local key rc kind idx entry last_sig sig
+    local key rc kind idx entry last_sig sig fail_count=0 t0
     tput civis 2>/dev/null
     trap 'tput cnorm 2>/dev/null' EXIT
     decisions_read_seen_cutoff
@@ -981,11 +1090,21 @@ view() {
     last_sig=$(decisions_signature)
     while true; do
         key=""
+        t0=$SECONDS
         read -rsn1 -t 2 key
         rc=$?
         # bash 3.2 returns 1 on a read timeout, not >128; on a tty a non-zero
         # read is the idle tick, never EOF.
         if (( rc > 128 )) || (( rc != 0 )) && [[ -t 0 ]]; then
+            if (( rc != 0 )) && (( SECONDS - t0 < 1 )); then
+                fail_count=$(( fail_count + 1 ))
+                if (( fail_count >= 3 )); then
+                    echo "hq-decisions: reading keys keeps failing — exiting" >&2
+                    exit 1
+                fi
+            else
+                fail_count=0
+            fi
             sig=$(decisions_signature)
             if [[ "$sig" != "$last_sig" ]]; then
                 last_sig="$sig"
@@ -999,6 +1118,7 @@ view() {
         elif (( rc != 0 )); then
             exit 0
         fi
+        fail_count=0
         STATUS_NOTE=""
         if [[ "$view_mode" == list ]]; then
             entry=""
