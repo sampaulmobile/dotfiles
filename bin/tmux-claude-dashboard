@@ -24,7 +24,7 @@
 #            from the snapshot's pipelines source. Dropped, like any column,
 #            before the session name truncates.
 # Keys: j/k navigate · ⏎ switch to the row's exact pane · space mark/unmark
-# the row (✓) and move down · u clear marks · x kill the marked rows, or the
+# the row (✓), cursor stays put · u clear marks · x kill the marked rows, or the
 # cursor row when none is marked (a session goes whole when every agent row
 # of it is in the kill, else just those panes) · X prune gone rows · a toggle
 # agent trees · r refresh · R hard refresh (clears the token cache) · q quit.
@@ -997,7 +997,6 @@ while true; do
         " ")
             if (( session_count > 0 )); then
                 toggle_mark "${panes[$selected]}"
-                (( selected < session_count - 1 )) && (( selected++ ))
                 render
             fi
             ;;
