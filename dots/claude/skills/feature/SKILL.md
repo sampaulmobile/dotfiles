@@ -128,7 +128,7 @@ When it reports back, report per step 6 — the PR URL when the run committed, o
 
 **0. Branch**
 - Launch already named this worktree's branch by the repo's convention. Never attempt to check out the default branch from inside the worktree — it is checked out at the main checkout and git will refuse.
-- Check the base: `git merge-base HEAD <DEFAULT_BRANCH>` must equal `git rev-parse <DEFAULT_BRANCH>`. If it does not, the worktree was cut from a stale ref: `git rebase <DEFAULT_BRANCH>` now, before any commit, and record it in NOTES.md.
+- Check the base: `git merge-base HEAD <DEFAULT_BRANCH>` must equal `git rev-parse <DEFAULT_BRANCH>`. If it does not, the worktree was cut from a stale ref: `git merge <DEFAULT_BRANCH>` now, before any commit, and record it in NOTES.md.
 
 **0b. Runtime files (only when a step needs them)**
 - worktrunk's `pre-start` hook copies the repo's gitignored ENV/secrets/config into a new worktree but EXCLUDES the fat regenerable caches (`.venv`, `node_modules`, build dirs). So `.env.*`, certs and config are here already; a step that has to RUN the stack regenerates the caches inside this worktree (`uv sync` / `npm i` / `flutter pub get`), or runs a full `wt step copy-ignored` when it deliberately wants them copied. Tell any subagent that will run or test the same. Never hand-copy secrets or paste them into prompts.
@@ -168,7 +168,7 @@ When it reports back, report per step 6 — the PR URL when the run committed, o
 **2. Implement (round N)**
 Spawn a FRESH implementer subagent (`subagent_type: "<IMPL_EFFORT>"`, `model: "<IMPL_MODEL>"`, no extra isolation — it inherits this worktree). Its prompt must tell it to:
 - Read the workplan (`workplans/<SLUG>-plan.md`, or `.feature/plan.md` when workplans are disabled per step 1), `.feature/NOTES.md`, and (round > 1) `.feature/findings-round-<N-1>.md`.
-- Round 1: implement the plan. Later rounds: address every blocking finding, THEN rebase if the branch conflicts with <DEFAULT_BRANCH> — rebase first only when a conflict sits in code a finding touches.
+- Round 1: implement the plan. Later rounds: address every blocking finding, THEN merge <DEFAULT_BRANCH> in if the branch conflicts with it — merge first only when a conflict sits in code a finding touches.
 - Follow repo conventions/CLAUDE.md; run the tests and linters relevant to what it touches and get them passing. If a test or run needs gitignored caches absent from the worktree, regenerate them here (see step 0b) — never hand-copy or inline secrets.
 - When a cheap test path exists, write the failing test first, then the fix, then rerun. Keep the test PROPORTIONATE to what it protects: extend an existing test file rather than adding a new one, and skip the test entirely where its scaffolding (a mock rig, a synthetic construction path that dodges the real schema, a log-capture handler) would cost more than the change and catch only what the diff already makes obvious. A test earns its place by covering behaviour that could silently regress — not by existing for every line touched. The suite pays for every test on every run.
 - Verify on the surface, not just in the test suite: name the surface each change's consumer meets (test suite, local stack, CLI, dev warehouse, CI plan), verify there, and attach the observation — command plus output, row count, read-back of the stored value. Write "inconclusive" and why where it could not run.

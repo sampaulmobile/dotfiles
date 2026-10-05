@@ -35,7 +35,8 @@ it returns.
 ## 2. Launch a task session per piece
 
 Before dispatching anything that touches an EXISTING PR or branch (review
-fixes, rebases, follow-ups), check whether work on it is already in flight:
+fixes, branch catch-up merges, follow-ups), check whether work on it is
+already in flight:
 `bin/worktrees` lists a worktree for that branch with its PIPELINE column, and
 the user may be steering an agent there. If so, do NOT launch a second run —
 send the new direction to that session by name and ask it to fold the work in,
