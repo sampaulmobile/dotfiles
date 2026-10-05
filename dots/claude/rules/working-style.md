@@ -51,6 +51,10 @@
   branch, add a commit (`git revert`, or edit + commit) and push normally. If a
   force-push looks like the only way forward, stop and hand it to the user.
 
+- **Never rebase.** To bring a branch up to date with the default branch,
+  `git fetch` then `git merge origin/<default>`, resolve conflicts in the
+  merge commit, and push normally.
+
 - **Announce before writing or touching live systems.** Print the exact
   commands and wait when a command writes, deletes, deploys, or runs against
   a live/prod system — including anything that loops or polls against one.
