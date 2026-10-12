@@ -1431,6 +1431,25 @@ sweep_decide() {
     rows_add REMOVE "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "" "" "" "$detail"
 }
 
+# ROW_FIELDS — the row record's width, the `row` kind included. Bump it with
+# the record: rows of another width have fields that no longer line up with
+# the reader, and are unusable until the next bin/hq-snapshot tick.
+ROW_FIELDS=17
+
+# snapshot_rows_current — false when the stored rows are not ROW_FIELDS wide.
+# A snapshot holding no row record at all passes: there is nothing to misread.
+snapshot_rows_current() {
+    local line rest n
+    while IFS= read -r line; do
+        [[ "$line" == row$'\t'* ]] || continue
+        n=1; rest="$line"
+        while [[ "$rest" == *$'\t'* ]]; do rest="${rest#*$'\t'}"; n=$((n + 1)); done
+        (( n == ROW_FIELDS )) && return 0
+        return 1
+    done < <(snapshot_read worktrees)
+    return 0
+}
+
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 0
 fi
@@ -1492,25 +1511,6 @@ if [[ "$APPLY" == true ]] && ! command -v wt >/dev/null 2>&1; then
 fi
 
 prof_init worktrees "${WORKTREES_PROFILE:-}"
-
-# ROW_FIELDS — the row record's width, the `row` kind included. Bump it with
-# the record: rows of another width have fields that no longer line up with
-# the reader, and are unusable until the next bin/hq-snapshot tick.
-ROW_FIELDS=17
-
-# snapshot_rows_current — false when the stored rows are not ROW_FIELDS wide.
-# A snapshot holding no row record at all passes: there is nothing to misread.
-snapshot_rows_current() {
-    local line rest n
-    while IFS= read -r line; do
-        [[ "$line" == row$'\t'* ]] || continue
-        n=1; rest="$line"
-        while [[ "$rest" == *$'\t'* ]]; do rest="${rest#*$'\t'}"; n=$((n + 1)); done
-        (( n == ROW_FIELDS )) && return 0
-        return 1
-    done < <(snapshot_read worktrees)
-    return 0
-}
 
 # A dry run is the report's classification plus a removability test over facts
 # the record carries, so both render bin/hq-snapshot's worktrees source when
