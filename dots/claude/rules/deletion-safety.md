@@ -15,3 +15,10 @@
   apply), `git clean` inside the worktree, build outputs inside the worktree,
   and a test suite removing the one scratch directory it created itself under
   `mktemp -d` or the session scratchpad.
+- Docker volumes and other host-level docker state are outside the worktree
+  the same way: an agent never runs `docker volume rm`/`prune`, `docker
+  compose down`/`rm` with `-v`/`--volumes`, `docker rm -v`/`--volumes`, or
+  any other `docker ... prune`. A global PreToolUse(Bash) hook
+  (`bin/claude-guard-docker-delete`) enforces this; the enforcement is a
+  backstop, not a licence to lean on it — print the exact command and hand
+  it to the user.
