@@ -39,7 +39,7 @@ echo "── reap_decide: the decision table"
 
 # case_ <label> <want> <task> <tied> <attached> <busy> <pane_bad> <dirty> \
 #       <pr_state> <unpushed> <merged_local> <pr_head> <wt_head> <phase> \
-#       <pane_count> <has_transcript> <idle_secs> <park_secs>
+#       <pane_count> <has_transcript> <idle_secs> <park_secs> <parked>
 # <want> comes right after <label> (not last) so bash 3.2 needs no
 # negative-offset/last-element trick to pull it back out.
 case_() {
@@ -57,67 +57,70 @@ case_() {
 }
 
 case_ "not a task session" "keep not a task session" \
-    false true false "" "" false none false false - - "" 0 false 0 43200
+    false true false "" "" false none false false - - "" 0 false 0 43200 false
 
 case_ "no row (not tied to a worktree)" "keep not tied to a worktree" \
-    true false false "" "" false none false false - - "" 0 false 0 43200
+    true false false "" "" false none false false - - "" 0 false 0 43200 false
 
 case_ "attached" "keep attached" \
-    true true true "" "" false MERGED false true - - "" 0 false 0 43200
+    true true true "" "" false MERGED false true - - "" 0 false 0 43200 false
 
 case_ "busy pane" "keep busy pane: npm run dev" \
-    true true false "npm run dev" "" false none false false - - "" 0 false 0 43200
+    true true false "npm run dev" "" false none false false - - "" 0 false 0 43200 false
 
 case_ "agent pane working" "keep agent working" \
-    true true false "" working false none false false - - "" 0 false 0 43200
+    true true false "" working false none false false - - "" 0 false 0 43200 false
 
 case_ "agent pane permission" "keep agent permission" \
-    true true false "" permission false none false false - - "" 0 false 0 43200
+    true true false "" permission false none false false - - "" 0 false 0 43200 false
 
 case_ "agent pane unknown" "keep agent unknown" \
-    true true false "" unknown false none false false - - "" 0 false 0 43200
+    true true false "" unknown false none false false - - "" 0 false 0 43200 false
 
 case_ "MERGED, removable (merged_local) -> kill" "kill merged" \
-    true true false "" "" false MERGED false true - - "" 0 false 0 43200
+    true true false "" "" false MERGED false true - - "" 0 false 0 43200 false
 
 case_ "MERGED, unpushed, not merged_local -> keep" "keep merged, unpushed" \
-    true true false "" "" false MERGED true false aaa bbb "" 0 false 0 43200
+    true true false "" "" false MERGED true false aaa bbb "" 0 false 0 43200 false
 
 case_ "dirty beats everything past the never-candidate checks" "keep DIRTY" \
-    true true false "" "" true MERGED false true - - "" 0 false 0 43200
+    true true false "" "" true MERGED false true - - "" 0 false 0 43200 false
 
 case_ "CLOSED, pushed -> kill" "kill closed" \
-    true true false "" "" false CLOSED false false headsha headsha "" 0 false 0 43200
+    true true false "" "" false CLOSED false false headsha headsha "" 0 false 0 43200 false
 
 case_ "CLOSED, unpushed but PR head == worktree head -> kill" "kill closed" \
-    true true false "" "" false CLOSED true false samesha samesha "" 0 false 0 43200
+    true true false "" "" false CLOSED true false samesha samesha "" 0 false 0 43200 false
 
 case_ "CLOSED, unpushed, PR head != worktree head -> keep" "keep closed, unpushed" \
-    true true false "" "" false CLOSED true false aaa bbb "" 0 false 0 43200
+    true true false "" "" false CLOSED true false aaa bbb "" 0 false 0 43200 false
 
 case_ "OPEN, phase not done -> keep" "keep phase implement" \
-    true true false "" "" false OPEN false false - - implement 1 true 50000 43200
+    true true false "" "" false OPEN false false - - implement 1 true 50000 43200 false
 
 case_ "OPEN, no phase at all -> keep" "keep phase none" \
-    true true false "" "" false OPEN false false - - "" 1 true 50000 43200
+    true true false "" "" false OPEN false false - - "" 1 true 50000 43200 false
 
 case_ "OPEN, done, idle 11h < 12h park threshold -> keep" "keep idle 39600s < 43200s" \
-    true true false "" "" false OPEN false false - - done 1 true 39600 43200
+    true true false "" "" false OPEN false false - - done 1 true 39600 43200 false
 
 case_ "OPEN, done, idle 13h >= 12h park threshold -> park" "park idle 46800s" \
-    true true false "" "" false OPEN false false - - done 1 true 46800 43200
+    true true false "" "" false OPEN false false - - done 1 true 46800 43200 false
+
+case_ "OPEN, done, already parked -> keep (never re-signal)" "keep already parked" \
+    true true false "" "" false OPEN false false - - "done" 1 true 46800 43200 true
 
 case_ "OPEN, done, two agent panes -> keep" "keep 2 agent panes" \
-    true true false "" "" false OPEN false false - - done 2 true 46800 43200
+    true true false "" "" false OPEN false false - - done 2 true 46800 43200 false
 
 case_ "OPEN, done, no transcript -> keep" "keep no transcript" \
-    true true false "" "" false OPEN false false - - done 1 false 46800 43200
+    true true false "" "" false OPEN false false - - done 1 false 46800 43200 false
 
 case_ "no PR, pushed -> SHIPPED?" "keep SHIPPED?" \
-    true true false "" "" false none false false - - "" 0 false 0 43200
+    true true false "" "" false none false false - - "" 0 false 0 43200 false
 
 case_ "no PR, unpushed -> PARKED" "keep PARKED" \
-    true true false "" "" false none true false - - "" 0 false 0 43200
+    true true false "" "" false none true false - - "" 0 false 0 43200 false
 
 echo "── reap_is_task_args: /feature --run detection"
 

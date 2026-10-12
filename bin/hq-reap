@@ -32,7 +32,8 @@ source "$DOTFILES/bin/tmux-claude-lib"
 # shellcheck source=/dev/null
 source "$DOTFILES/bin/worktrees"
 
-REAP_DIR="${HQ_REAP_DIR:-$HOME/.local/state/hq/reap}"
+# REAP_DIR comes from bin/hq-snapshot (sourced via bin/worktrees above) —
+# its one home.
 REAP_PARK_SECS="${HQ_REAP_PARK_SECS:-43200}"
 
 # ---- pure halves: decision table, command builders, detectors ----
@@ -83,18 +84,20 @@ reap_pane_busy() {
 
 # reap_decide <task> <tied> <attached> <busy-cmd> <bad-pane-status> \
 #             <dirty> <pr_state> <unpushed> <merged_local> <pr_head> <wt_head> \
-#             <phase> <pane_count> <has_transcript> <idle_secs> <park_secs>
+#             <phase> <pane_count> <has_transcript> <idle_secs> <park_secs> <parked>
 #   The whole decision table into one line on stdout: "kill <reason>" /
 #   "park <reason>" / "keep <reason>". Tier 1's bucket/removability test is
 #   bin/worktrees' own classify_worktree/sweep_is_removable with live and
 #   prunable forced false — the task session IS the liveness signal here, not
-#   lsof. Tier 2 only ever runs past an IN-REVIEW (PR OPEN) bucket.
+#   lsof. Tier 2 only ever runs past an IN-REVIEW (PR OPEN) bucket, and never
+#   twice on the same park: a claude that ignored SIGTERM must not be
+#   resignalled every pass.
 reap_decide() {
     local task="$1" tied="$2" attached="$3" busy="$4" pane_bad="$5"
     local dirty="$6" pr_state="$7" unpushed="$8" merged_local="$9"
     local pr_head="${10}" wt_head="${11}"
     local phase="${12}" pane_count="${13}" has_transcript="${14}"
-    local idle_secs="${15}" park_secs="${16}"
+    local idle_secs="${15}" park_secs="${16}" parked="${17}"
     local bucket
 
     [[ "$task" == true ]] || { printf 'keep not a task session'; return; }
@@ -123,6 +126,7 @@ reap_decide() {
         *) printf 'keep %s' "$bucket"; return ;;
     esac
 
+    [[ "$parked" == true ]] && { printf 'keep already parked'; return; }
     [[ "$phase" == done ]] || { printf 'keep phase %s' "${phase:-none}"; return; }
     (( pane_count == 1 )) || { printf 'keep %s agent panes' "$pane_count"; return; }
     [[ "$has_transcript" == true ]] || { printf 'keep no transcript'; return; }
@@ -181,7 +185,7 @@ reap_session_is_task() {
         tty="${tty#/dev/}"
         args=$(printf '%s\n' "$_REAP_PS_DUMP" | awk -v t="$tty" -F'\t' '$1==t{ $1=""; print; exit }')
         [[ -n "$args" ]] && reap_is_task_args "$args" && return 0
-    done < <(tmux list-panes -t "$name" -F '#{pane_tty}' 2>/dev/null)
+    done < <(tmux list-panes -s -t "$name" -F '#{pane_tty}' 2>/dev/null)
     return 1
 }
 
@@ -196,7 +200,7 @@ reap_session_busy_pane() {
             printf '%s' "$cmd"
             return
         fi
-    done < <(tmux list-panes -t "$name" -F $'#{pane_id}\t#{pane_current_command}\t#{pane_tty}' 2>/dev/null)
+    done < <(tmux list-panes -s -t "$name" -F $'#{pane_id}\t#{pane_current_command}\t#{pane_tty}' 2>/dev/null)
 }
 
 # reap_session_agent_panes <session> — into $reap_pane_count_out and
@@ -220,14 +224,23 @@ reap_session_agent_panes() {
 
 # reap_claude_json <pane-id> — into $reap_pid_out/$reap_name_out/
 # $reap_sessionid_out/$reap_cwd_out, from ~/.claude/sessions/*.json whose
-# tmux field names this exact pane. Empty pid when no match.
+# tmux field names this exact pane. Several matches (a crash, or a resumed
+# session left its old json behind) prefer the one whose pid is still alive
+# over whichever glob sorts first; empty pid when no match at all.
 reap_claude_json() {
-    local pane="$1" line
+    local pane="$1" lines line pid first="" alive=""
     reap_pid_out=""; reap_name_out=""; reap_sessionid_out=""; reap_cwd_out=""
-    line=$(jq -r --arg pane "$pane" 'select((.tmux // "") | endswith("." + $pane)) | [.pid,.name,.sessionId,.cwd] | @tsv' \
-        "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null | head -1)
-    [[ -n "$line" ]] || return 0
-    IFS=$'\t' read -r reap_pid_out reap_name_out reap_sessionid_out reap_cwd_out <<< "$line"
+    lines=$(jq -r --arg pane "$pane" 'select((.tmux // "") | endswith("." + $pane)) | [.pid,.name,.sessionId,.cwd] | @tsv' \
+        "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null)
+    [[ -n "$lines" ]] || return 0
+    while IFS= read -r line; do
+        [[ -z "$first" ]] && first="$line"
+        pid="${line%%$'\t'*}"
+        if [[ -z "$alive" && -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            alive="$line"
+        fi
+    done <<< "$lines"
+    IFS=$'\t' read -r reap_pid_out reap_name_out reap_sessionid_out reap_cwd_out <<< "${alive:-$first}"
 }
 
 # reap_worktree_rows_load — the fresh worktrees snapshot's rows into
@@ -303,6 +316,7 @@ reap_pass() {
         [[ -n "$name" ]] || continue
         local task=false tied=false dirty=false pr_state="" unpushed=false merged_local=false
         local pr_head="-" wt_head="-" phase="" now attached_raw last_attached
+        local parked=false parked_raw
         pr_disp="-"
 
         reap_session_is_task "$name" && task=true
@@ -319,6 +333,9 @@ reap_pass() {
         attached_raw=$(tmux display-message -p -t "$name" '#{session_attached}' 2>/dev/null)
         attached=false
         [[ -n "$attached_raw" && "$attached_raw" != "0" ]] && attached=true
+
+        parked_raw=$(tmux show-options -qv -t "$name" @parked 2>/dev/null)
+        [[ -n "$parked_raw" ]] && parked=true
 
         busy=$(reap_session_busy_pane "$name")
         reap_session_agent_panes "$name"
@@ -351,7 +368,7 @@ reap_pass() {
         # the PIPELINE column's text); reap_decide only ever tests the word.
         verdict=$(reap_decide "$task" "$tied" "$attached" "$busy" "$pane_bad" \
             "$dirty" "$pr_state" "$unpushed" "$merged_local" "$pr_head" "$wt_head" \
-            "${phase%% *}" "$reap_pane_count_out" "$has_transcript" "$idle_secs" "$REAP_PARK_SECS")
+            "${phase%% *}" "$reap_pane_count_out" "$has_transcript" "$idle_secs" "$REAP_PARK_SECS" "$parked")
         verb="${verdict%% *}"
         reason="${verdict#* }"
         age_disp="-"
@@ -380,6 +397,7 @@ reap_apply_kill() {
     local name="$1" wt="$2" pr="$3" reason="$4"
     if tmux kill-session -t "=${name}" 2>/dev/null; then
         reap_log kill "$name" "${wt:--}" "${pr:--}" "$reason"
+        printf 'KILL %s: %s\n' "$name" "$reason"
     else
         echo "hq-reap: kill-session failed for $name" >&2
         REAP_FAIL=1
@@ -417,6 +435,7 @@ reap_apply_park() {
     tmux set-option -t "$name" @parked_pane "$pane"
     tmux set-option -t "$name" @parked_cmd "$reap_resume_cmd_out"
     reap_log park "$name" "${wt:--}" "${pr:--}" "$reason"
+    printf 'PARK %s: %s\n' "$name" "$reason"
 }
 
 # ---- args ----
