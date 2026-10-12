@@ -18,7 +18,9 @@
 #            live sessions rarely have one); ~$1.23 = price-sheet estimate
 #            over the main transcript only; - = neither.
 #   STATUS   idle/done/permission rows carry an age since the transcript's
-#            last write (⏳ perm 9m); a row whose cwd is gone shows ✗ gone.
+#            last write (⏳ perm 9m); a row whose cwd is gone shows ✗ gone;
+#            ◌ parked <age> is a session bin/hq-reap ended for idling too
+#            long — ⏎ wakes its claude back up by name before switching.
 #   SESSION  also carries the PIPELINE field — `· <phase> r<round> <seat>`
 #            for a row sitting in a /feature or /address-review worktree,
 #            from the snapshot's pipelines source. Dropped, like any column,
@@ -126,6 +128,7 @@ reload_sessions() {
     names=()
     agents=()
     cwds=()
+    parked_epochs=()
     local sess pid widx agent cwd name
     while IFS=$'\t' read -r sess pid widx agent cwd; do
         [[ -z "$pid" ]] && continue
@@ -133,6 +136,7 @@ reload_sessions() {
         panes+=("$pid")
         agents+=("${agent:-claude}")
         cwds+=("$cwd")
+        parked_epochs+=("")
         name="$sess"
         [[ "$widx" != "1" ]] && name="${name}:${widx}"
         # two claude panes in one window (split): disambiguate by pane id
@@ -141,6 +145,21 @@ reload_sessions() {
         done
         names+=("$name")
     done < <(get_claude_panes)
+
+    # Parked rows: no agent process lives on their pane any more, so
+    # get_claude_panes never finds them — list the sessions bin/hq-reap
+    # marked instead.
+    local psess pepoch ppane
+    while IFS=$'\t' read -r psess pepoch ppane; do
+        [[ -n "$psess" && -n "$pepoch" ]] || continue
+        sessions+=("$psess")
+        panes+=("$ppane")
+        agents+=("parked")
+        cwds+=("")
+        parked_epochs+=("$pepoch")
+        names+=("$psess")
+    done < <(tmux list-sessions -F $'#{session_name}\t#{@parked}\t#{@parked_pane}' 2>/dev/null | awk -F'\t' '$2 != ""')
+
     session_count=${#panes[@]}
     selected=0
     if [[ -n "$prev" ]]; then
@@ -544,7 +563,7 @@ build_frame() {
         # would always read ~0s. st_iconw is the extra display column Wide
         # glyphs need (✅ ⏳ are 2 columns but 1 char; ⚙ ● ✗ … are Narrow).
         local sage=""
-        if [[ "$st" == "idle" || "$st" == "done" || "$st" == "permission" ]] \
+        if [[ "$st" == "idle" || "$st" == "done" || "$st" == "permission" || "$st" == "parked" ]] \
             && [[ "${mtimes[$i]:-0}" =~ ^[0-9]+$ ]] && (( ${mtimes[$i]:-0} > 0 )); then
             format_age sage $(( now - mtimes[i] ))
             sage=" $sage"
@@ -559,6 +578,7 @@ build_frame() {
                         else
                             st_color="$BOLD_RED"; st_text="⏳ permission";  st_iconw=2
                         fi ;;
+            parked)     st_color="$DIM";        st_text="◌ parked${sage}" ;;
             gone)       st_color="$DIM_RED";    st_text="✗ gone" ;;
             loading)    st_color="$DIM";        st_text="… loading" ;;
             *)          st_color="$DIM";        st_text="? unknown" ;;
@@ -887,8 +907,16 @@ load_data() {
 
     for i in "${!sessions[@]}"; do
         (
-            pid="${panes[$i]}"
             agent="${agents[$i]:-claude}"
+            if [[ "$agent" == parked ]]; then
+                # No process lives on its pane: no status/transcript/stats to
+                # read. mt carries the park epoch, so render's age suffix
+                # shows time since parked, same as an idle/done row's mtime.
+                printf -- '-\t1\tparked\t0\t0\t0\t0\t-\t-\t%s\t0' "${parked_epochs[$i]:-0}" > "${parallel_dir}/${i}"
+                : > "${parallel_dir}/${i}.agents"
+                exit 0
+            fi
+            pid="${panes[$i]}"
             cwd="${cwds[$i]}"
             cwd_ok=1
             [[ -n "$cwd" && ! -d "$cwd" ]] && cwd_ok=0
@@ -974,6 +1002,7 @@ panes=()
 names=()
 agents=()
 cwds=()
+parked_epochs=()
 skip_row_cache=""
 statuses=()
 contexts=()
@@ -1134,6 +1163,7 @@ while true; do
                 _target="${sessions[$selected]}"
                 _pane="${panes[$selected]}"
                 if [[ -n "$_target" ]]; then
+                    [[ "${agents[$selected]:-}" == parked ]] && unpark_session "$_target"
                     tmux switch-client -t "=${_target}"
                     [[ -n "$_pane" ]] && tmux select-window -t "$_pane" 2>/dev/null \
                         && tmux select-pane -t "$_pane" 2>/dev/null
