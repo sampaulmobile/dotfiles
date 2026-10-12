@@ -142,6 +142,8 @@ task_main() {
     prompt_file=$(task_write_prompt "$path" "$prompt")
     task_claude_command "$name" "$prompt_file" "$model" "$effort" || return 2
     new_agent_session "$name" "$path" claude "$task_claude_command_out"
+    # bin/hq-reap's task-session marker.
+    tmux set-option -t "$name" @task 1
     printf '%s\n' "$name"
 }
 

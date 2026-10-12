@@ -311,7 +311,9 @@ else
     selected_name="$session_name"
 fi
 
-if ! tmux has-session -t="$selected_name" 2>/dev/null; then
+if tmux has-session -t="$selected_name" 2>/dev/null; then
+    unpark_session "$selected_name"
+else
     # Empty new_agent = the default agent (plain Enter, or the CLI form).
     new_hub_session "$selected_name" "$selected" "$new_agent"
 fi
