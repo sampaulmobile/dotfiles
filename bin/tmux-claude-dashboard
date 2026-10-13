@@ -16,7 +16,8 @@
 #   TURNS    user prompts handled, not API requests.
 #   COST     $1.23 = claude's own cost-state snapshot (subagents included;
 #            live sessions rarely have one); ~$1.23 = price-sheet estimate
-#            over the main transcript only; - = neither.
+#            over the main transcript only; 5h:42% = codex rate-limit usage;
+#            - = neither.
 #   STATUS   idle/done/permission rows carry an age since the transcript's
 #            last write (⏳ perm 9m); a row whose cwd is gone shows ✗ gone;
 #            ◌ parked <age> is a session bin/hq-reap ended for idling too
@@ -37,13 +38,7 @@
 # ·model half is dropped when unknown). A working agent's latest narration,
 # or its last tool call as `→ Tool: arg`, prints as a dim quoted line beneath
 # it. A +N badge marks sessions with N agents working; those auto-expand,
-# `a` forces every tree open.
-#
-# Per-agent differences all hang off the agent column get_claude_panes
-# reports: claude rows read ~/.claude transcripts and size CONTEXT from the
-# per-model table below; codex rows read ~/.codex rollouts, take their window
-# from the transcript itself, show rate-limit usage in COST, and have no
-# subagent tree.
+# `a` forces every tree open. Codex rows have no subagent tree.
 #
 # DASHBOARD_PROFILE=1 adds a stderr line per stage with its elapsed time. The
 # TUI owns stdout, so redirect stderr to read them:
@@ -89,8 +84,6 @@ format_window() {
 # realistic pane width (100 visibly cut snippets on wide screens)
 AGENT_SNIPPET_MAXLEN=300
 
-# ── colors ──────────────────────────────────────────────
-
 RST=$'\033[0m'
 BOLD=$'\033[1m'
 DIM=$'\033[2m'
@@ -106,8 +99,6 @@ MAGENTA=$'\033[35m'
 # dark grey (256-color) rather than ANSI bright-black, whose palette
 # mapping is too light under the dim fields. Assumes a dark theme.
 SEL=$'\033[48;5;236m'
-
-# ── helpers ─────────────────────────────────────────────
 
 # the cursor is preserved by pane id, not index: rows re-sort by activity
 # time, so index order changes between refreshes.
@@ -217,10 +208,9 @@ plan_kill() {
     done
 }
 
-# the dashboard's own host session is killed last: with detach-on-destroy
-# off, killing it moves the client to the last-killed session, so this
-# window must outlive every other kill. Every tmux refusal is collected
-# into kill_error.
+# the dashboard's own host session is killed last: this window dies with it
+# (detach-on-destroy off moves the client elsewhere), so every other kill
+# must already be done. Every tmux refusal is collected into kill_error.
 run_kill() {
     local myself="$1" s p err self=""
     kill_error=""
@@ -257,14 +247,14 @@ _row_key() {
     stat -f '%m %z' "$1" 2>/dev/null || stat -c '%Y %s' "$1" 2>/dev/null
 }
 
-#   Token/turn/cost stats for one row's transcript, tab-separated:
-#   context, output, total, turns, cost, model, mtime, context_window.
-#   The trailing window is 0 for claude rows (the per-model table sizes
-#   them) and the rollout's own model_context_window for codex rows.
-#   row-name only keys the caches (it's unique per pane, so two agents in one
-#   session can't share a cache file). The whole line is cached against the
-#   transcript's mtime+size, so an unchanged transcript costs one stat;
-#   a non-empty $skip_row_cache recomputes and rewrites it instead.
+# Token/turn/cost stats for one row's transcript, tab-separated:
+# context, output, total, turns, cost, model, mtime, context_window.
+# The trailing window is 0 for claude rows (the per-model table sizes
+# them) and the rollout's own model_context_window for codex rows.
+# row-name only keys the caches (it's unique per pane, so two agents in one
+# session can't share a cache file). The whole line is cached against the
+# transcript's mtime+size, so an unchanged transcript costs one stat;
+# a non-empty $skip_row_cache recomputes and rewrites it instead.
 get_row_stats() {
     local session="$1"
     local jsonl="$2"
@@ -308,13 +298,13 @@ get_row_stats() {
     printf '%s' "$cv"
 }
 
-#   Prints one line per live subagent under this row's transcript,
-#   tab-separated: agent_id, depth, parent_id, agentType, description,
-#   mtime, started, context, output, turns, model, snippet. Per-agent
-#   stats/snippet use mtime-keyed cache files under CACHE_DIR (keyed by
-#   row-name, unique per pane) so an idle agent's transcript isn't
-#   re-parsed every refresh. Prints nothing if the row has no agents (or
-#   no resolvable transcript) — never errors.
+# Prints one line per live subagent under this row's transcript,
+# tab-separated: agent_id, depth, parent_id, agentType, description,
+# mtime, started, context, output, turns, model, snippet. Per-agent
+# stats/snippet use mtime-keyed cache files under CACHE_DIR (keyed by
+# row-name, unique per pane) so an idle agent's transcript isn't
+# re-parsed every refresh. Prints nothing if the row has no agents (or
+# no resolvable transcript) — never errors.
 get_row_agent_tree() {
     local session="$1"
     local jsonl="$2"
@@ -344,8 +334,6 @@ get_row_agent_tree() {
             "$aid" "$depth" "$parent" "$atype" "$adesc" "$amtime" "$astarted" "$ctx" "$out" "${aturns:-0}" "$mdl" "$snippet"
     done < <(list_session_agents "$jsonl")
 }
-
-# ── render ──────────────────────────────────────────────
 
 # build_frame — fork-free per row, so it scales with the session count. A
 # row is cursor-neutral: two leading spaces where the marker goes, and the
@@ -379,8 +367,6 @@ build_frame() {
         return 0
     }
 
-    # Full names are preferred over columns: drop optional columns first,
-    # and only truncate names when even the smallest layout does not fit.
     local show_output=1 show_total=1 show_model=1 show_turns=1 show_cost=1
     local name_w=$max_name _drop
     for _drop in none turns cost model total output; do
@@ -396,8 +382,6 @@ build_frame() {
     done
     row_width $max_name $show_output $show_total $show_model $show_turns $show_cost
     if (( rw > cols )); then
-        # must truncate names — same drop cascade, judged at min_name; the
-        # name column then gets whatever the surviving columns leave over
         show_output=1; show_total=1; show_model=1; show_turns=1; show_cost=1
         for _drop in none turns cost model total output; do
             case "$_drop" in
@@ -418,10 +402,6 @@ build_frame() {
     row_width $name_w $show_output $show_total $show_model $show_turns $show_cost
     local spare=$(( cols - rw ))
 
-    # MODEL gets first claim on spare width (it's cheap and bounded): grow
-    # mdl_w up to the longest model/agent-type actually rendered, so
-    # "general-purpose" doesn't ellipsize on a wide terminal. Expanded trees
-    # only, same rule as the row loop below.
     if (( show_model && spare > 0 )); then
         local mdl_need=$mdl_w _i
         for _i in "${!sessions[@]}"; do
@@ -456,8 +436,6 @@ build_frame() {
     fi
     local name_gap=0
 
-    # full rendered row width — snippet lines truncate here, matching the
-    # table's right edge
     row_width $name_w $show_output $show_total $show_model $show_turns $show_cost
     local table_w=$(( rw + name_gap ))
     (( table_w > cols - 1 )) && table_w=$(( cols - 1 ))
@@ -497,8 +475,6 @@ build_frame() {
         (( avail_name_w < 1 )) && avail_name_w=1
 
         local name="${names[$i]}"
-        # PIPELINE rides in the same column, and is dropped rather than
-        # allowed to truncate the name it follows.
         local pipe="" pipe_field="${pipeline_fields[$i]:-}"
         if [[ -n "$pipe_field" ]]; then
             pipe=" · ${pipe_field}"
@@ -685,8 +661,6 @@ build_frame() {
                 local sess_pad=$(( hdr_name_w - ${#sess_plain} ))
                 (( sess_pad < 0 )) && sess_pad=0
 
-                # ── STATUS column: same fixed 15-visible-column field as
-                # session rows.
                 local st_label st_color
                 if (( aworking )); then
                     st_label="working ${aage_str}"
@@ -712,10 +686,6 @@ build_frame() {
                 printf -v _p '%*s' "$st_pad" ''
                 row+="${st_color}${st_label}${RST}${_p}"
                 if (( show_model )); then
-                    # "agentType·model": the subagent_type plus the model it
-                    # actually ran on, so a per-seat model override is
-                    # visible instead of every "high" row looking alike.
-                    # The model half is dropped when unknown.
                     local amdl_field="$atype"
                     [[ -n "$amdl" && "$amdl" != "unknown" ]] && amdl_field="${atype}·${amdl#claude-}"
                     if (( ${#amdl_field} > mdl_w )); then
@@ -752,8 +722,6 @@ build_frame() {
                 (( show_cost ))   && printf -v _p " %${cost_w}s" "-" && row+=$_p
                 out+="${row}"$'\n'
 
-                # snippet indents to the description's start column;
-                # working agents only.
                 if (( aworking )) && [[ -n "$asnip" ]]; then
                     local snip_indent
                     printf -v snip_indent '%*s' $(( 2 + ${#sess_prefix} + 2 )) ''
@@ -822,8 +790,6 @@ render() {
     printf '\033[H\033[2J%s' "$out"
 }
 
-# ── data collection ─────────────────────────────────────
-
 load_data() {
     frame_at=0
     statuses=()
@@ -840,7 +806,6 @@ load_data() {
     agent_total_counts=()
     pipeline_fields=()
 
-    # show names (computed by reload_sessions) immediately with placeholders
     for sess in "${sessions[@]}"; do
         statuses+=("loading")
         contexts+=("0")
@@ -860,9 +825,7 @@ load_data() {
     prof "placeholder frame"
 
     build_cwd_session_map
-    # The pipelines source is a pure filesystem scan; refreshing it here
-    # rather than reading a stale one keeps the PIPELINE field honest without
-    # a second implementation of where the state comes from.
+    # A pure filesystem scan, cheap enough to refresh on every load.
     [[ "$(snapshot_verdict "$(snapshot_age pipelines)" "$(snapshot_cadence pipelines)")" == fresh ]] \
         || ~/dotfiles/bin/hq-snapshot pipelines >/dev/null 2>&1
     pipeline_map_load
@@ -950,12 +913,9 @@ load_data() {
     prof "frame"
 }
 
-# Sourced by the test: hand back the helpers and stop.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 0
 fi
-
-# ── main loop ───────────────────────────────────────────
 
 tput civis 2>/dev/null
 trap 'tput cnorm 2>/dev/null; rm -f "$_CWD_MAP_FILE" 2>/dev/null' EXIT
@@ -1020,7 +980,6 @@ while true; do
             render
             ;;
         a)
-            # toggle forcing every session's agent tree open
             (( agents_forced = !agents_forced ))
             frame_at=0
             render
@@ -1091,7 +1050,6 @@ while true; do
             fi
             ;;
         X)
-            # prune gone rows — same session-vs-pane rule as x
             _rows=()
             for i in "${!sessions[@]}"; do
                 [[ "${statuses[$i]}" == "gone" ]] && _rows+=("$i")
