@@ -83,9 +83,7 @@ shorten() {
     printf '%s' "$p"
 }
 
-# github_slug <repo-dir> — owner/name from the origin remote, lowercased (the
-# API's casing can differ from the remote's); nothing when origin is not on
-# github.com.
+# Lowercased: the API's casing can differ from the remote's.
 github_slug() {
     local r
     r=$(git -C "$1" remote get-url origin 2>/dev/null) || return 0
@@ -199,8 +197,8 @@ if [[ "$FROM_SNAPSHOT" == false ]] && ! command -v gh >/dev/null 2>&1; then
     echo "prs: gh not installed" >&2; exit 2
 fi
 
-# gh_try <gh args...> — one retry; stderr lands in $GH_ERRF, one file per
-# background search so the two cannot clobber each other.
+# $GH_ERRF is one file per background search, so the two cannot clobber
+# each other.
 TMPD=$(mktemp -d) || exit 2
 trap 'rm -rf "$TMPD"' EXIT
 gh_try() {
@@ -214,9 +212,7 @@ gh_failed() {
     printf '%s' "${line:-gh failed}"
 }
 
-# search_prs <qualifiers> <row-jq> — every page of one GitHub search, rows as
-# TSV with the lowercased repo slug first. The jq emits a trailing
-# "NEXT\t<cursor>" line while pages remain.
+# Rows are TSV with the lowercased repo slug first.
 SEARCH_GQL='query($q:String!,$after:String){ search(query:$q, type:ISSUE, first:100, after:$after){
   pageInfo{hasNextPage endCursor}
   nodes{ ... on PullRequest{ number title url isDraft mergeable reviewDecision updatedAt mergedAt

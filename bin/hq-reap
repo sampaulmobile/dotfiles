@@ -30,7 +30,6 @@ reap_sq() {
     printf "'%s'" "${s//$q/$q\\$q$q}"
 }
 
-# reap_resume_cmd <session-name> [model] [effort] — into $reap_resume_cmd_out.
 reap_resume_cmd() {
     local name="$1" model="${2:-}" effort="${3:-}" cmd
     cmd="claude --resume $(reap_sq "$name")"
@@ -39,7 +38,6 @@ reap_resume_cmd() {
     reap_resume_cmd_out="$cmd"
 }
 
-# reap_parse_model_effort <ps-args> — into $reap_model_out/$reap_effort_out.
 reap_parse_model_effort() {
     local args="$1"
     reap_model_out=""
@@ -159,8 +157,7 @@ reap_session_is_task() {
     return 1
 }
 
-# reap_session_busy_pane <session> — first busy NON-agent pane command on
-# stdout, empty when none.
+# stdout: the first busy non-agent pane's command; empty when none.
 reap_session_busy_pane() {
     local name="$1" _pane cmd tty
     while IFS=$'\t' read -r _pane cmd tty; do
@@ -173,8 +170,6 @@ reap_session_busy_pane() {
     done < <(tmux list-panes -s -t "$name" -F $'#{pane_id}\t#{pane_current_command}\t#{pane_tty}' 2>/dev/null)
 }
 
-# reap_session_agent_panes <session> — into $reap_pane_count_out and
-# $reap_bad_status_out, empty when no pane is working/permission/unknown.
 reap_session_agent_panes() {
     local name="$1" s p _w _a st
     reap_pane_count_out=0
@@ -191,9 +186,8 @@ reap_session_agent_panes() {
     done <<< "$_REAP_AGENT_PANES"
 }
 
-# reap_claude_json <pane-id> — into $reap_pid_out/$reap_name_out/
-# $reap_sessionid_out/$reap_cwd_out. Several matches prefer the one whose
-# pid is still alive over whichever sorts first; empty pid when no match.
+# Several session files can name one pane: the one whose pid is still
+# alive wins over whichever sorts first.
 reap_claude_json() {
     local pane="$1" lines line pid first="" alive=""
     reap_pid_out=""; reap_name_out=""; reap_sessionid_out=""; reap_cwd_out=""
@@ -210,8 +204,8 @@ reap_claude_json() {
     IFS=$'\t' read -r reap_pid_out reap_name_out reap_sessionid_out reap_cwd_out <<< "${alive:-$first}"
 }
 
-# reap_worktree_rows_load — into $_REAP_ROWS. Exit 1 and nothing else on
-# failure: the caller must act on nothing, not stale facts.
+# Exit 1 and nothing else on failure: the caller must act on nothing, not
+# stale facts.
 reap_worktree_rows_load() {
     local sv
     sv=$(snapshot_verdict "$(snapshot_age worktrees)" "$(snapshot_cadence worktrees)")
@@ -226,8 +220,6 @@ reap_worktree_rows_load() {
     _REAP_ROWS=$(snapshot_read worktrees)
 }
 
-# reap_row_for_session <session-name> — fills the f_row_* globals; empty
-# $f_row_path on a miss.
 reap_row_for_session() {
     local target="$1" kind _repo _bucket _branch pr_disp flags _age _where _pipe _epoch path _locked _sweepable
     local pr_state pr_head wt_head merged_local
@@ -252,9 +244,8 @@ reap_row_for_session() {
     return 1
 }
 
-# reap_log <kind> <session> <worktree> <pr> <reason> — appends one line to
-# $REAP_DIR/log.tsv. Append-only. REAP_DIR comes from bin/hq-snapshot,
-# sourced transitively via bin/worktrees.
+# reap_log <kind> <session> <worktree> <pr> <reason>: REAP_DIR comes from
+# bin/hq-snapshot, sourced transitively via bin/worktrees.
 reap_log() {
     mkdir -p "$REAP_DIR" || return 1
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" "$3" "$4" "$5" \

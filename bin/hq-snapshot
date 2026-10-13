@@ -34,8 +34,7 @@ SNAPSHOT_SOURCES="inbox:5 sessions:5 pipelines:5 worktrees:15 prs:30 turns:5 pan
 
 snapshot_file() { printf '%s/%s.tsv' "$SNAPSHOT_DIR" "$1"; }
 
-# snapshot_cadence <source> — its cadence in seconds; 0 and exit 1 for a name
-# that is not a source.
+# 0 and exit 1 for a name that is not a source.
 snapshot_cadence() {
     local s
     for s in $SNAPSHOT_SOURCES; do
@@ -45,9 +44,8 @@ snapshot_cadence() {
     return 1
 }
 
-# snapshot_write <source> — stdin is the body. The file gets a
-# `# generated <ISO time>` first line and lands with one mv, so a reader
-# never sees a half-written snapshot.
+# stdin is the body; it lands with one mv, so a reader never sees a
+# half-written snapshot.
 snapshot_write() {
     local name="$1" f tmp
     f=$(snapshot_file "$name")
@@ -57,13 +55,13 @@ snapshot_write() {
     mv -f "$tmp" "$f"
 }
 
-# file_mtime <path> — its mtime in epoch seconds; exit 1 when absent.
+# Exit 1 when absent.
 file_mtime() {
     [[ -e "$1" ]] || return 1
     stat -f '%m' "$1" 2>/dev/null || stat -c '%Y' "$1" 2>/dev/null
 }
 
-# snapshot_mtime <source> — its mtime in epoch seconds; exit 1 when absent.
+# Exit 1 when absent.
 snapshot_mtime() {
     local f
     f=$(snapshot_file "$1")
@@ -71,7 +69,7 @@ snapshot_mtime() {
     file_mtime "$f"
 }
 
-# snapshot_age <source> — seconds since it was written, -1 when absent.
+# -1 when absent.
 snapshot_age() {
     local m
     m=$(snapshot_mtime "$1") || { printf '%s' -1; return 0; }
@@ -79,7 +77,7 @@ snapshot_age() {
     printf '%s' "$(( $(date +%s) - m ))"
 }
 
-# snapshot_verdict <age-seconds> <cadence-seconds> — fresh | stale | missing.
+# fresh | stale | missing.
 snapshot_verdict() {
     local age="$1" cadence="${2:-0}"
     [[ -n "$age" ]] || { printf 'missing'; return 0; }
@@ -98,8 +96,7 @@ fmt_secs() {
     fi
 }
 
-# snapshot_read <source> — the body, without the generated-at line. Exit 1
-# when the file is not there to read.
+# Exit 1 when the file is not there to read.
 snapshot_read() {
     local f line first=true
     f=$(snapshot_file "$1")
@@ -114,10 +111,9 @@ snapshot_read() {
     return 0
 }
 
-# inbox_slug <branch> — into $inbox_slug_out: / -> -, the same mapping
-# session_name_for_branch uses, so a branch, its worktree and its thread
-# agree. A thread's ONLY identity that survives
-# a sweep — once the worktree is gone only the file name remains — so
+# / -> -, the same mapping session_name_for_branch uses, so a branch, its
+# worktree and its thread agree. A thread's ONLY identity that survives a
+# sweep — once the worktree is gone only the file name remains — so
 # anything keyed per thread (inbox archive and seen marks included) keys by
 # this, never by the real branch.
 inbox_slug_out=""
@@ -131,8 +127,7 @@ inbox_thread_file() {
     inbox_thread_file_out="$INBOX_DIR/$1/$inbox_slug_out.md"
 }
 
-# jsonl_last_line <file> — the last non-empty line, empty if absent or
-# unreadable. Status records are append-only, so the last line is current.
+# Status records are append-only, so the last line is current.
 jsonl_last_line() {
     local f="$1" l last=""
     [[ -r "$f" ]] || return 0
@@ -142,10 +137,9 @@ jsonl_last_line() {
     printf '%s' "$last"
 }
 
-# json_field <json-line> <key> — a quoted string without its quotes, or a
-# bare token as written; empty for an absent key and for null, which status
-# records use for "not yet". Records are flat, one line, pipeline-written —
-# a pattern match is the whole parser this needs.
+# Empty for an absent key and for null, which status records use for "not
+# yet". Records are flat, one line, pipeline-written — a pattern match is
+# the whole parser this needs.
 json_field() {
     local line="$1" key="$2" re v
     re="\"$key\"[[:space:]]*:[[:space:]]*\"([^\"]*)\""
@@ -158,9 +152,8 @@ json_field() {
     return 0
 }
 
-# pipeline_map_load — the pipelines source into the global $pipeline_map,
-# one `<worktree>\t<state>` line per run in flight. Empty when never
-# written; the CALLER decides whether a stale one is worth refreshing first.
+# Empty when never written; the CALLER decides whether a stale one is
+# worth refreshing first.
 pipeline_map=""
 pipeline_map_load() {
     local path state
@@ -291,9 +284,8 @@ turns_rows() {
     done
 }
 
-# snapshot_lines_preserve <text> — every line of <text>, including empty
-# ones, into the global SPLIT_OUT array. No `<<<`/`< <(...)` on the result:
-# bash 3.2 leaks their fd in the long-lived viewers that source this file.
+# SPLIT_OUT spares callers `<<<`/`< <(...)`: bash 3.2 leaks their fd in the
+# long-lived viewers that source this file.
 snapshot_lines_preserve() {
     local text="$1" rest line
     SPLIT_OUT=()
@@ -379,10 +371,8 @@ collect_panes() {
     scan_agent_panes
 }
 
-# collect_turns — joins the panes snapshot (or a live scan_agent_panes when
-# stale/missing — never get_claude_panes or a second scan_agent_panes: both
-# measured well over the 5s tick's ~50ms budget) to one tmux list-panes
-# call for window_index/cwd.
+# Never get_claude_panes or a second scan_agent_panes here: both measured
+# well over the 5s tick's ~50ms budget.
 #
 # find_pane_jsonl's pane-exact lookup needs _CWD_MAP_FILE primed, else it
 # falls through to a tmux display-message plus a jq scan PER CLAUDE PANE
@@ -418,8 +408,6 @@ collect_turns() {
 # collect_pipelines — one row per worktree running a /feature or
 # /address-review pipeline:
 #   <path> <session> <repo> <branch> <state> <pr> <updated>
-# <state> is `<phase> r<round> <seat>`, from the LAST line of
-# <path>/.feature/status.jsonl.
 collect_pipelines() {
     local dir last state repo branch pr updated
     # shellcheck source=/dev/null
@@ -453,10 +441,7 @@ collect_prs() {
     "$DOTFILES/bin/prs" --snapshot
 }
 
-# thread_facts <file> — one pass over a thread log into $thread_mtime,
-# $thread_entries and $thread_headline; all three empty/0 when the file is
-# not there. The headline is the first non-blank line after the LAST `## `
-# header.
+# The headline is the first non-blank line after the LAST `## ` header.
 thread_mtime=""; thread_entries=0; thread_headline=""
 thread_facts() {
     local f="$1" l want=0
@@ -480,8 +465,6 @@ thread_facts() {
     thread_headline="${thread_headline//$'\t'/ }"
 }
 
-# pr_row_tag <repo> <pr-field> <prs-map> — the bin/prs tag for the PR a
-# pipelines row names, empty when the prs snapshot does not hold it.
 # status.jsonl's `pr` is a URL by contract but a bare PR number in real
 # data, so a number is matched too, scoped to its own repo.
 pr_row_tag() {
@@ -575,9 +558,7 @@ due() {
     (( age >= cadence ))
 }
 
-# already_running <source> — true when another hq-snapshot is collecting it.
-# A process check, not a lock file: a lock under ~/.local/state/hq would have
-# to be removed to be released, and nothing there is ever removed.
+# A process check, not a lock file: nothing there is ever removed.
 already_running() {
     pgrep -f "hq-snapshot $1\$" >/dev/null 2>&1
 }
