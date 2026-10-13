@@ -7,19 +7,15 @@
 CLAUDE_SESSIONS_DIR="$HOME/.claude/sessions"
 CLAUDE_PROJECTS_DIR="$HOME/.claude/projects"
 
-# Agent liveness thresholds (tunable). An agent transcript with mtime within
+# Agent liveness thresholds. An agent transcript with mtime within
 # LIVE_AGENT_SECS renders as working (●); older renders as done/idle (◯)
 # with its age; older than STALE_AGENT_SECS is hidden entirely. Rationale:
 # workplans/tmux-claude-dashboard-agent-trees-plan.md.
 LIVE_AGENT_SECS=120
 STALE_AGENT_SECS=1800
 
-# A session's agent (`claude` or `codex`) is pinned as the tmux session
-# option @agent when the session is built, so every later lookup asks the
-# session rather than guessing from what is running in it.
-
 # other/tmux-agent-default: one line, `claude` or `codex` (private,
-# untracked). Missing/garbage → claude.
+# untracked).
 AGENT_DEFAULT_FILE="$HOME/dotfiles/other/tmux-agent-default"
 
 agent_default() {
@@ -41,6 +37,7 @@ agent_other() {
 
 session_agent() {
     local a
+    # Pinned at creation (@agent); never infer the agent from what is running.
     # plain name: the "=" exact-match prefix that most target-session
     # arguments accept makes show-options/set-option come back empty
     a=$(tmux show-options -qv -t "$1" @agent 2>/dev/null)
@@ -54,10 +51,10 @@ agent_window_name() {
     printf '%s' "$1"
 }
 
-# Builds the standard layout every launcher here uses: window 1 <agent>
-# (warm), 2 nvim, 3 zsh, landing on the agent. Only the agent window's name
-# is pinned; nvim's stays on automatic-rename so it tracks whatever runs
-# there after nvim exits. <agent-command> is TYPED into an initialized shell
+# Builds the standard layout every launcher here uses: window 1 <agent>, 2
+# nvim, 3 zsh. Only the agent window's name is pinned; nvim's stays on
+# automatic-rename so it tracks whatever runs there after nvim exits.
+# <agent-command> is TYPED into an initialized shell
 # rather than passed as the tmux session command: a session command skips
 # the zsh rc files, so other/zshrc.local env (ANTHROPIC_MODEL, TLS, ...)
 # would be missing and the agent would come up on the wrong model.
@@ -82,11 +79,10 @@ new_agent_session() {
 }
 
 # Claude peer name: `claude -n` sets the display name AND the cross-session
-# address (ListAgents/SendMessage), stable across --resume. A main checkout
-# (.git is a directory) gets "<session>-hub"; a worktree session (.git is a
-# file) keeps the bare session name. Only this front-door window is named;
-# extra claude windows (tmux-claude-window) stay unnamed (<dir>-NN) so the
-# session has exactly one peer address. codex: no equivalent.
+# address (ListAgents/SendMessage), stable across --resume. Only this
+# front-door window is named; extra claude windows (tmux-claude-window) stay
+# unnamed (<dir>-NN) so the session has exactly one peer address. codex: no
+# equivalent.
 new_hub_session() {
     local name="$1" dir="$2" agent="${3:-}"
     local peer
@@ -102,11 +98,9 @@ new_hub_session() {
     fi
 }
 
-# Wakes a session bin/hq-reap parked: types the saved @parked_cmd into the
-# saved @parked_pane only if that pane has no agent on its tty already, then
-# clears @parked/@parked_pane/@parked_cmd either way. A non-parked session (the
-# common case, paid on every sessionizer/wt-tmux-jump/dashboard visit)
-# costs exactly one display -p and returns. CREATION-only per
+# Wakes a session bin/hq-reap parked. A non-parked session (the common
+# case, paid on every sessionizer/wt-tmux-jump/dashboard visit) costs
+# exactly one display -p and returns. CREATION-only per
 # tmux-task-session's rule: display-message, send-keys, set-option.
 unpark_session() {
     local session="$1" pane cmd tty
@@ -161,9 +155,6 @@ claude_ttys() {
 # for the fork-free lookup its callers use:
 #   rest="${map#*$'\n'"$tty"$'\t'}"
 #   [[ "$rest" != "$map" ]] && agent="${rest%%$'\n'*}"
-# (a miss leaves the string untouched; on a hit the agent is everything up
-# to the next newline — the last entry has none, so ${..%%} returns it
-# whole. No trailing newline: command substitution would eat it anyway.)
 # Prefix stripping, not a subshell per pane: the statusbar scan has a ~200ms
 # budget covering every pane on the machine.
 # Returns 1 (and prints nothing) when no agent is running.
@@ -194,8 +185,7 @@ get_claude_sessions() {
 # session_name, pane_id, window_index, agent, cwd (last, so a path holding a
 # tab still reads whole). Most recently active session first, window order
 # within a session. Per-pane rather than per-session, so an agent outside
-# window 1 gets its own row; the agent column tells each row which telemetry
-# to read, claude transcripts or codex rollouts.
+# window 1 gets its own row.
 get_claude_panes() {
     local map rest
     map=$(_agent_tty_map) || return 0
@@ -309,7 +299,6 @@ classify_pane_status() {
         fi
     fi
 
-    # Idle: the ❯ input prompt is visible.
     if [[ "$content" == *"❯"* ]]; then
         echo "idle"
         return
@@ -319,8 +308,7 @@ classify_pane_status() {
 }
 
 # Prints: working | idle | permission | unknown. The agent defaults to the
-# session's own @agent, so a codex session classifies by codex's rules
-# without the caller having to know.
+# session's own @agent.
 get_session_status() {
     local session="$1"
     local agent="${2:-}"
@@ -413,8 +401,7 @@ scan_agent_panes() {
 # current window while the prompt blocks in another.
 aggregate_session_status() {
     # Delimited strings and a first-seen order array (bash 3.2 has no
-    # associative arrays). Each status set holds "session\tpane" so the pane
-    # behind a session's worst status survives.
+    # associative arrays).
     local perm_s=$'\n' work_s=$'\n' idle_s=$'\n' seen=$'\n'
     local -a order=()
     local name pane _w _a st rest
@@ -431,8 +418,8 @@ aggregate_session_status() {
         fi
     done <<< "$1"
 
-    # First "session\t" entry in each set wins. Prefix stripping rather than
-    # command substitution: the statusbar runs this whole scan in ~200ms.
+    # Prefix stripping rather than command substitution: the statusbar runs
+    # this whole scan in ~200ms.
     for name in "${order[@]}"; do
         st="unknown"
         pane="-"
@@ -760,15 +747,15 @@ _agent_cache_set() {
     printf '%s\n%s' "$2" "$3" > "$1" 2>/dev/null
 }
 
-#   Prints one line per live subagent under that session's transcript,
-#   sorted for tree rendering (parents before children, siblings in spawn
-#   order). Tab-separated: agent_id, spawn_depth, parent_id, agentType,
-#   description, mtime, started. mtime is the transcript's last write, i.e.
-#   recency; started is the meta.json mtime, written once at spawn, and is
-#   what a "working Ns" age must count from — jsonl mtime resets on every
-#   write, so counting from it shows a perpetual "working 2s". Agents whose
-#   jsonl mtime is older than STALE_AGENT_SECS are hidden. Missing meta
-#   fields degrade to blank rather than erroring.
+# Prints one line per live subagent under the given transcript's subagents
+# dir, sorted for tree rendering (parents before children, siblings in spawn
+# order). Tab-separated: agent_id, spawn_depth, parent_id, agentType,
+# description, mtime, started. mtime is the transcript's last write, i.e.
+# recency; started is the meta.json mtime, written once at spawn, and is
+# what a "working Ns" age must count from — jsonl mtime resets on every
+# write, so counting from it shows a perpetual "working 2s". Agents whose
+# jsonl mtime is older than STALE_AGENT_SECS are hidden. Missing meta
+# fields degrade to blank rather than erroring.
 list_session_agents() {
     local sid_jsonl="$1"
     [[ -z "$sid_jsonl" || ! -f "$sid_jsonl" ]] && return
@@ -889,7 +876,7 @@ get_agent_stats() {
 
 # A `def tool_line: ...;` shared by get_agent_snippet and get_last_exchange:
 # given a tool_use object as `.`, renders "Name: arg" (no arrow — each
-# caller prefixes its own), kept in one place so the two cannot drift.
+# caller prefixes its own).
 # Concatenate as a separate single-quoted segment ahead of a caller's own jq
 # program (bash does not expand $-vars inside single quotes, and this
 # string is full of jq's own $vars).
