@@ -53,7 +53,7 @@ file_mtime() {
 
 cmd_flag_done() {
     # The Stop hook runs as a child of the agent process, so $TMUX_PANE is
-    # the pane that finished. Nothing to flag without one.
+    # the pane that finished.
     [[ -z "${TMUX_PANE:-}" ]] && exit 0
 
     local session wactive cur
@@ -235,7 +235,8 @@ cmd_codex_session_start() {
     local out="$CODEX_MAP_DIR/${TMUX_PANE#%}.tsv"
     local tmp="${out}.$$.tmp"
     # Atomic (the dashboard reads this while codex writes it) and replaced,
-    # not appended, so a pane's /new threads stay mapped to one entry.
+    # not appended, so the reader (which takes only line 1) always sees a
+    # pane's latest /new thread.
     if printf '%s\t%s\t%s\n' "$sid" "$tpath" "$cwd" > "$tmp" 2>/dev/null; then
         mv -f "$tmp" "$out"
     else
