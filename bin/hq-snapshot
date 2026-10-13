@@ -255,6 +255,8 @@ turns_rows() {
             widx="${rest%%$'\t'*}"
             cwd="${rest#*$'\t'}"
             cwd="${cwd%%$'\n'*}"
+            [[ -n "$widx" ]] || widx="-"
+            [[ -n "$cwd" ]] || cwd="-"
         fi
 
         name="-"
@@ -304,7 +306,7 @@ turns_rows() {
         }
     ' <(printf '%s\n' "$prev_body") <(printf '%s\n' "${claude_lines[@]}"))
 
-    feed_lines_preserve "$gated"
+    snapshot_lines_preserve "$gated"
     local line
     for line in "${SPLIT_OUT[@]}"; do
         [[ -n "$line" ]] || continue
@@ -329,11 +331,11 @@ turns_rows() {
     done
 }
 
-# feed_lines_preserve <text> — every line of <text> including empty ones,
+# snapshot_lines_preserve <text> — every line of <text> including empty ones,
 # into the global SPLIT_OUT array, with no `<<<`/`< <(…)` on the result (the
 # bash 3.2 fd-safety concern is the long-lived VIEWER loop, not this
 # short-lived collector, but the split itself still needs no subshell).
-feed_lines_preserve() {
+snapshot_lines_preserve() {
     local text="$1" rest line
     SPLIT_OUT=()
     rest="$text"
@@ -435,11 +437,7 @@ collect_panes() {
 # find_pane_jsonl's pane-exact lookup needs _CWD_MAP_FILE primed (else it
 # falls through to a tmux display-message PLUS a jq scan PER CLAUDE PANE,
 # measured ~150ms/pane live — the dominant cost, not get_last_exchange).
-# build_cwd_session_map's own mktemp, cleaned up by removing it afterward,
-# would be a deletion in an append-only, removes-nothing script, so this
-# primes the same global at
-# a FIXED path instead: overwritten every call, like the tick lockfile
-# beside it, never created-then-removed.
+# Primed at a fixed path, replaced by mv, never removed.
 collect_turns() {
     # shellcheck source=/dev/null
     source "$DOTFILES/bin/tmux-claude-lib" || return 1
@@ -455,7 +453,8 @@ collect_turns() {
 
     _CWD_MAP_FILE="${TMPDIR:-/tmp}/hq-snapshot-cwd-map.tsv"
     jq -r '[((.tmux // "") | [scan("%[0-9]+$")] | .[0] // "-"), .cwd, .sessionId] | @tsv' \
-        "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null > "$_CWD_MAP_FILE"
+        "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null > "${_CWD_MAP_FILE}.tmp.$$"
+    mv -f "${_CWD_MAP_FILE}.tmp.$$" "$_CWD_MAP_FILE"
 
     local pane_meta name_map prev_body
     pane_meta=$'\n'"$(tmux list-panes -a -F $'#{pane_id}\t#{window_index}\t#{pane_current_path}' 2>/dev/null)"
