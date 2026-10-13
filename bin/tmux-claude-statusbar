@@ -17,7 +17,6 @@ status_lines=$(aggregate_session_status "$pane_lines")
 permission_count=0
 working_count=0
 if [[ -n "$status_lines" ]]; then
-    # 3rd scan field (worst-status pane, for C-y's jump) is unused here
     while IFS=$'\t' read -r _name _status _; do
         case "$_status" in
             permission) (( permission_count++ )) ;;
@@ -26,7 +25,7 @@ if [[ -n "$status_lines" ]]; then
     done <<< "$status_lines"
 fi
 
-# Written even when empty, so a consumer never sees a stale session as live.
+# Written even when empty, so a consumer never sees sessions that no longer run an agent.
 { [[ -z "$status_lines" ]] || printf '%s\n' "$status_lines"; } | snapshot_write sessions
 { [[ -z "$pane_lines" ]] || printf '%s\n' "$pane_lines"; } | snapshot_write panes
 ~/dotfiles/bin/hq-snapshot tick >/dev/null 2>&1 &
