@@ -635,11 +635,11 @@ repo_fact_age() {
 # Writes the globals f_live f_dirty f_untracked_only f_unpushed
 # f_merged_local f_pr_state f_pr_head f_pr_disp f_age f_age_epoch. f_pr_head
 # is the merged/open PR's head commit ("" when unknown). Reads $repo,
-# $default_ref and $GH_OK from the caller (a prunable block's gitdir is
-# gone).
+# $default_ref and $GH_OK from the caller.
 derive_worktree_facts() {
     local path="$1" branch="$2" prunable="$3" wt_head="$4"
 
+    # A prunable block's gitdir is gone: nothing to inspect.
     if [[ "$prunable" == true ]]; then
         f_live=false; f_dirty=false; f_untracked_only=false; f_unpushed=false; f_merged_local=false
         f_pr_state="unknown"; f_pr_head=""; f_pr_disp="pr:unknown"; f_age="-"
@@ -866,7 +866,7 @@ _dir_is_cache() {
 #               across every such file by the caller
 #   recurse     ignored directory, not a cache and not .feature/ — the
 #               caller lists its files and classifies each
-#   at-risk     worktree-unique (the hub has no regular file there)
+#   at-risk     not a regular file in both trees, so nothing to compare
 classify_ignored_file() {
     local rel="$1" wt="$2" hub="$3"
     if _seg_is_cache "$rel"; then
@@ -1184,7 +1184,7 @@ sweep_snapshot_row() {
     sweep_decide "$path" "$branch" "$locked" "$bucket" "$dirty_untracked" "${10}"
 }
 
-# Reads the f_* globals its two callers fill.
+# Reads $repo and the f_* globals its two callers fill.
 sweep_decide() {
     local path="$1" branch="$2" locked="$3" bucket="$4" dirty_untracked="$5" wt_head="$6"
     local at_risk detail listing reason nl=$'\n'
@@ -1519,8 +1519,8 @@ render_snapshot_rows() {
     return 0
 }
 
-# The guard and the own-session check inside sweep_decide still read the
-# disk.
+# The guard and the own-session check inside sweep_decide still read live
+# state.
 sweep_snapshot_rows() {
     local kind r_repo bucket branch pr_disp flags age where pipe epoch path locked sweepable
     local pr_state pr_head wt_head merged_local

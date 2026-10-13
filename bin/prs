@@ -197,10 +197,10 @@ if [[ "$FROM_SNAPSHOT" == false ]] && ! command -v gh >/dev/null 2>&1; then
     echo "prs: gh not installed" >&2; exit 2
 fi
 
-# $GH_ERRF is one file per background search, so the two cannot clobber
-# each other.
 TMPD=$(mktemp -d) || exit 2
 trap 'rm -rf "$TMPD"' EXIT
+# $GH_ERRF is one file per background search, so the two cannot clobber
+# each other.
 gh_try() {
     gh "$@" 2>"$GH_ERRF" && return 0
     sleep 3
@@ -212,11 +212,11 @@ gh_failed() {
     printf '%s' "${line:-gh failed}"
 }
 
-# Rows are TSV with the lowercased repo slug first.
 SEARCH_GQL='query($q:String!,$after:String){ search(query:$q, type:ISSUE, first:100, after:$after){
   pageInfo{hasNextPage endCursor}
   nodes{ ... on PullRequest{ number title url isDraft mergeable reviewDecision updatedAt mergedAt
     repository{nameWithOwner} commits(last:1){nodes{commit{statusCheckRollup{state}}}} } } } }'
+# Rows are TSV with the lowercased repo slug first.
 search_prs() {
     local q="$1" jq="$2" after="" out line
     local -a cursor=()
