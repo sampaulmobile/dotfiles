@@ -136,7 +136,7 @@ check "an unchanged jsonl+mtime reuses the record (0 more parses)" "$calls_after
 check "the reused record is byte-identical" "$rec2" "$rec1"
 touch -t 203001010000.00 "$work/transcript.jsonl"
 prev_body=$'\n'"$rec2"
-rec3=$(turns_rows "$pane_body" "$pane_meta" "$name_map" "$prev_body")
+turns_rows "$pane_body" "$pane_meta" "$name_map" "$prev_body" >/dev/null
 calls_after_third=$(wc -c < "$countfile" | tr -d ' ')
 check "a changed mtime on the same jsonl re-parses (1 more call)" "$calls_after_third" "2"
 # unset -f cannot "undo" a shadow (bash's function table is flat, not
