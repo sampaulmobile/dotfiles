@@ -22,7 +22,6 @@ STALE_AGENT_SECS=1800
 # untracked). Missing/garbage → claude.
 AGENT_DEFAULT_FILE="$HOME/dotfiles/other/tmux-agent-default"
 
-# Prints the agent new sessions get when nothing overrides it.
 agent_default() {
     local a=""
     # `read` returns 1 on a last line with no newline, which errexit in bash
@@ -36,13 +35,10 @@ agent_default() {
     esac
 }
 
-# The other backend — what the sessionizer's ctrl-x / Option+Enter starts.
 agent_other() {
     if [[ "$1" == "codex" ]]; then printf 'claude'; else printf 'codex'; fi
 }
 
-# Which agent a session runs: its @agent option, falling back to the
-# default (sessions created before this option existed, or by hand).
 session_agent() {
     local a
     # plain name: the "=" exact-match prefix that most target-session
@@ -54,8 +50,6 @@ session_agent() {
     esac
 }
 
-# The name of the agent's front-door window, which tmux-claude-window finds
-# it by.
 agent_window_name() {
     printf '%s' "$1"
 }
@@ -180,7 +174,7 @@ _agent_tty_map() {
     printf '%s' $'\n'"$m"
 }
 
-# Prints every tmux session (any name) with a claude process on one of its
+# Prints every tmux session (any name) with an agent process on one of its
 # pane ttys, most recently active first.
 get_claude_sessions() {
     local ttys
@@ -227,7 +221,6 @@ get_claude_panes() {
 classify_pane_status() {
     local raw="$1"
 
-    # codex screens look nothing like claude's.
     if [[ "${2:-claude}" == "codex" ]]; then
         classify_codex_pane_status "$raw"
         return
@@ -267,7 +260,6 @@ classify_pane_status() {
         return
     fi
 
-    # Last 10 non-blank lines.
     local start=0
     (( total > 10 )) && start=$(( total - 10 ))
     local -a window=("${filtered[@]:start}")
@@ -369,7 +361,6 @@ scan_agent_panes() {
     pane_list=$(tmux list-panes -a -F $'#{session_name}\t#{pane_id}\t#{window_id}\t#{pane_tty}' 2>/dev/null)
     [[ -z "$pane_list" ]] && return 0
 
-    # agent panes only, as "session\tpane_id\twindow_id\tagent"
     local -a targets=()
     local sname pid wid ptty
     while IFS=$'\t' read -r sname pid wid ptty; do
@@ -566,8 +557,6 @@ find_session_jsonl() {
     _cwd_lookup_jsonl "$(get_pane_cwd "$session")"
 }
 
-# CWD-based transcript lookup, overridden by the most recently modified
-# JSONL in the project dir.
 _cwd_lookup_jsonl() {
     local cwd="$1"
     [[ -z "$cwd" ]] && return
@@ -619,7 +608,6 @@ get_context_and_model() {
     ' 2>/dev/null || printf '0\tunknown'
 }
 
-# Parses only the bytes added since the last call.
 # Cache: output\tall\tturns\tstate_cost\test_cost\tbyte_offset.
 # Prints tab-separated: total_output total_all turns cost
 # - assistant records are deduped per requestId within each parsed chunk:
@@ -772,7 +760,7 @@ _agent_cache_set() {
     printf '%s\n%s' "$2" "$3" > "$1" 2>/dev/null
 }
 
-# Prints one line per live subagent under that session's transcript,
+#   Prints one line per live subagent under that session's transcript,
 #   sorted for tree rendering (parents before children, siblings in spawn
 #   order). Tab-separated: agent_id, spawn_depth, parent_id, agentType,
 #   description, mtime, started. mtime is the transcript's last write, i.e.
