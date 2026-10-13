@@ -405,8 +405,8 @@ aggregate_session_status() {
     # associative arrays), searched by prefix stripping, never command
     # substitution: this runs inside the statusbar's ~200ms scan.
     local perm_s=$'\n' work_s=$'\n' idle_s=$'\n' seen=$'\n'
-    local -a order=()
-    local name pane _w _a st ag rest
+    local -a order=() sums=()
+    local name pane _w _a st ag rest n idx
     while IFS=$'\t' read -r name pane _w _a st ag; do
         [[ -z "$name" ]] && continue
         case "$st" in
@@ -414,20 +414,25 @@ aggregate_session_status() {
             working)    work_s+="${name}"$'\t'"${pane}"$'\n' ;;
             idle)       idle_s+="${name}"$'\t'"${pane}"$'\n' ;;
         esac
+        n="$ag"
+        [[ "$n" == "-" || -z "$n" ]] && n=0
         if [[ "$seen" != *$'\n'"${name}"$'\n'* ]]; then
             seen+="${name}"$'\n'
             order+=("$name")
+            sums+=("$n")
+        else
+            for idx in "${!order[@]}"; do
+                if [[ "${order[idx]}" == "$name" ]]; then
+                    sums[idx]=$(( sums[idx] + n ))
+                    break
+                fi
+            done
         fi
     done <<< "$1"
 
-    # One awk pass sums agents per session (bash 3.2 has no associative
-    # arrays to accumulate into across repeated lines for one key).
-    local agent_sums=$'\n'
-    agent_sums+=$(awk -F'\t' '{n=($6=="-"?0:$6)+0; a[$1]+=n} END{for (k in a) print k "\t" a[k]}' <<< "$1")
-    agent_sums+=$'\n'
-
     local agents
-    for name in "${order[@]}"; do
+    for idx in "${!order[@]}"; do
+        name="${order[idx]}"
         st="unknown"
         pane="-"
         if rest="${perm_s#*$'\n'"$name"$'\t'}"; [[ "$rest" != "$perm_s" ]]; then
@@ -438,11 +443,7 @@ aggregate_session_status() {
             st="idle"; pane="${rest%%$'\n'*}"
         fi
         agents="-"
-        rest="${agent_sums#*$'\n'"$name"$'\t'}"
-        if [[ "$rest" != "$agent_sums" ]]; then
-            agents="${rest%%$'\n'*}"
-            (( agents == 0 )) && agents="-"
-        fi
+        (( sums[idx] > 0 )) && agents="${sums[idx]}"
         printf '%s\t%s\t%s\t%s\n' "$name" "$st" "$pane" "$agents"
     done
 }
