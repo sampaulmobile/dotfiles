@@ -239,3 +239,34 @@ real-machine run in step 7.
 
 Codex exchange extraction; a key binding; seen state; session-end/clear hooks;
 dashboard behaviour.
+
+## Amendment (gate, 2026-10-12)
+
+Approved with two notes from the requester, both folded in here.
+
+1. **Fixture the origin kinds.** The test fixtures carry a human prompt, a
+   `peer` + `name` cross-session message, a `peer` + `senderTaskId` subagent
+   hand-back that must be skipped, and a `task-notification` record that
+   must not render as `you ›`.
+2. **No second scan in the tick.** Measured on this machine under
+   `/bin/bash` with 12 agent panes: `scan_agent_panes` takes 211–227 ms
+   and `get_claude_panes` 95 ms, 91 ms of which is `agent_ttys`' `ps`. Both
+   are far over the ~50 ms budget, so `turns` runs neither:
+   - A new `panes` source (5s), written by `bin/tmux-claude-statusbar` from the
+     `pane_lines` it already holds before folding, exactly as it writes
+     `sessions`. Format is `scan_agent_panes`' own line:
+     `session pane window_id agent status`. `hq-snapshot panes` is the
+     standalone path (`collect_panes` = `scan_agent_panes`), for a machine
+     whose status bar is not ticking. `tick` does not collect it.
+   - `collect_turns` reads the `panes` snapshot when fresh. When it is stale
+     or missing, it falls back to `scan_agent_panes` itself. It joins window
+     index and cwd from ONE `tmux list-panes -a -F
+     '#{pane_id}\t#{window_index}\t#{pane_current_path}'`, which needs no `ps`
+     and no capture. It does not call `get_claude_panes`.
+   - `--check` covers `panes` through the registry, like `sessions`.
+   - `usage()` and the CLAUDE.md registry sentence list `panes`.
+   Touches gains `bin/tmux-claude-statusbar` (one `snapshot_write panes`
+   line).
+3. **The `cmd_jump` hoist must not change behaviour.** `cmd_jump` behaves
+   exactly as before after the refactor. The implementer says so in NOTES.md,
+   and the reviewer checks that path specifically.
