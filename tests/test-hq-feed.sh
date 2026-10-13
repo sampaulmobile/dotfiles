@@ -115,7 +115,8 @@ pane_body="alpha	%1	1	claude	working"
 pane_meta=$'\n'"%1	1	/home/user/proj"
 name_map=$'\n'
 prev_body=$'\n'
-find_pane_jsonl() { printf '%s' "$fx/working.jsonl"; }
+cp "$fx/working.jsonl" "$work/transcript.jsonl"
+find_pane_jsonl() { printf '%s' "$work/transcript.jsonl"; }
 countfile="$work/get_last_exchange.count"
 : > "$countfile"
 get_last_exchange() {
@@ -133,6 +134,11 @@ rec2=$(turns_rows "$pane_body" "$pane_meta" "$name_map" "$prev_body")
 calls_after_second=$(wc -c < "$countfile" | tr -d ' ')
 check "an unchanged jsonl+mtime reuses the record (0 more parses)" "$calls_after_second" "1"
 check "the reused record is byte-identical" "$rec2" "$rec1"
+touch -t 203001010000.00 "$work/transcript.jsonl"
+prev_body=$'\n'"$rec2"
+rec3=$(turns_rows "$pane_body" "$pane_meta" "$name_map" "$prev_body")
+calls_after_third=$(wc -c < "$countfile" | tr -d ' ')
+check "a changed mtime on the same jsonl re-parses (1 more call)" "$calls_after_third" "2"
 # unset -f cannot "undo" a shadow (bash's function table is flat, not
 # stacked) — re-source to get the real find_pane_jsonl/get_last_exchange back.
 unset -f find_pane_jsonl get_last_exchange
@@ -241,6 +247,67 @@ detail_out=$("$repo/bin/hq-feed" --dump --detail %4 2>&1)
 if [[ "$detail_out" == *'idlepane'* ]]; then ok "--dump --detail renders the named pane"; else bad "--dump --detail" "$detail_out"; fi
 bad_detail=$("$repo/bin/hq-feed" --dump --detail %999 2>&1; echo "rc=$?")
 if [[ "$bad_detail" == *'rc=1'* ]]; then ok "--dump --detail on an unknown pane exits 1"; else bad "unknown pane" "$bad_detail"; fi
+
+echo "── LIST caps a long multi-line prompt instead of bash \${var//} over it"
+biglines=()
+for i in $(seq 1 600); do
+    biglines+=("line $i of a long multi-line prompt padded out with filler words to add length")
+done
+bigprompt=$(printf '%s\n' "${biglines[@]}")
+bigsize=${#bigprompt}
+if (( bigsize >= 30000 )); then
+    ok "long-prompt fixture is >= 30 KB ($bigsize bytes)"
+else
+    bad "long-prompt fixture size" "$bigsize bytes"
+fi
+big_json=$(jq -Rn --arg t "$bigprompt" '$t | tojson')
+{
+    printf '# generated 2026-01-01T00:00:00Z\n'
+    printf '%s\t%%8\t1\tclaude\tworking\t-\t%s\t-\tyou\t%s\t-\t-\t-\t-\t/home/user/big\n' \
+        "bigpromptpane" "$mtime_now" "$big_json"
+} > "$work/snapshot/turns.tsv"
+t0=$SECONDS
+load_data
+elapsed_load=$(( SECONDS - t0 ))
+idx=-1
+for i in "${!p_session[@]}"; do [[ "${p_session[$i]}" == bigpromptpane ]] && idx="$i"; done
+if (( idx >= 0 )); then
+    frame_rows=()
+    append_block_body "$idx" 80 false
+    you_lines=0
+    for l in "${frame_rows[@]}"; do [[ "$l" == *'you ›'* ]] && you_lines=$(( you_lines + 1 )); done
+    check "a >=30KB multi-line prompt renders as exactly one you › line in LIST" "$you_lines" "1"
+    if (( ${#frame_rows[0]} < 200 )); then
+        ok "the LIST line is clipped, not the raw 30+ KB prompt (${#frame_rows[0]} chars)"
+    else
+        bad "LIST line length" "${#frame_rows[0]} chars"
+    fi
+else
+    bad "long-prompt fixture pane not loaded" "-"
+fi
+# The pre-fix bug ran bash's quadratic ${var//$'\n'/ } over the UNCAPPED
+# prompt on every LIST repaint: 29 KB measured at 28.3s (see
+# .feature/findings-round-1.md). 5s is generous slack for a correct,
+# jq-capped pass over 35+ KB and still catches that regression outright.
+if (( elapsed_load <= 5 )); then
+    ok "load_data over the long prompt completes in <=5s (was ~28s/29KB pre-fix)"
+else
+    bad "load_data elapsed" "${elapsed_load}s"
+fi
+
+t0=$SECONDS
+dump_big=$("$repo/bin/hq-feed" --dump 2>&1)
+elapsed_dump=$(( SECONDS - t0 ))
+if [[ "$dump_big" == *'bigpromptpane'* ]]; then
+    ok "--dump renders the long-prompt pane"
+else
+    bad "--dump long-prompt pane" "$dump_big"
+fi
+if (( elapsed_dump <= 5 )); then
+    ok "--dump over the long-prompt snapshot completes in <=5s"
+else
+    bad "--dump elapsed" "${elapsed_dump}s"
+fi
 
 echo
 if (( fail )); then

@@ -16,8 +16,7 @@
 #
 # UTF-8/width discipline, fd safety and the view loop's timeout-vs-key
 # distinction are the same bash 3.2 gotchas as bin/hq-decisions (see its own
-# header) — this file keeps its own copies of the small helpers rather than
-# sharing them, the existing convention among these view scripts.
+# header).
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 SELF="$DOTFILES/bin/hq-feed"
@@ -233,7 +232,7 @@ other_client() {
 
 p_session=(); p_pane=(); p_window=(); p_agent=(); p_status=(); p_name=()
 p_mtime=(); p_jsonl=(); p_kind=(); p_cwd=()
-p_prompt=(); p_from=(); p_reply=(); p_tool=(); p_pending=()
+p_prompt=(); p_prompt_list=(); p_from=(); p_reply=(); p_tool=(); p_pending=()
 p_label=(); p_pipe=(); p_bucket=(); p_age=()
 order=()
 n_needs=0; n_done=0; n_working=0; n_idle=0
@@ -309,7 +308,7 @@ load_data() {
     local body sep out
     p_session=(); p_pane=(); p_window=(); p_agent=(); p_status=(); p_name=()
     p_mtime=(); p_jsonl=(); p_kind=(); p_cwd=()
-    p_prompt=(); p_from=(); p_reply=(); p_tool=(); p_pending=()
+    p_prompt=(); p_prompt_list=(); p_from=(); p_reply=(); p_tool=(); p_pending=()
     p_label=(); p_pipe=(); p_bucket=(); p_age=()
     order=()
     n_needs=0; n_done=0; n_working=0; n_idle=0
@@ -333,8 +332,11 @@ load_data() {
         | ($f[12] | dec) as $tool
         | ($f[13] | dec) as $pending
         | ($reply_raw | if . == "-" then "-" else strip_md end) as $reply
+        | ($prompt | if . == "-" then "-"
+                     else gsub("[\\n\\t\\x00-\\x1f\\x7f]"; " ") | .[0:1024] end) as $prompt_list
         | $sep + "H", ([$f[0],$f[1],$f[2],$f[3],$f[4],$f[5],$f[6],$f[7],$f[8],$f[14]] | join("\t")),
           $sep + "P", $prompt,
+          $sep + "L", $prompt_list,
           $sep + "F", $from,
           $sep + "R", $reply,
           $sep + "T", $tool,
@@ -346,6 +348,7 @@ load_data() {
     flush_field() {
         case "$cur_field" in
             P) p_prompt+=("$cur_buf") ;;
+            L) p_prompt_list+=("$cur_buf") ;;
             F) p_from+=("$cur_buf") ;;
             R) p_reply+=("$cur_buf") ;;
             T) p_tool+=("$cur_buf") ;;
@@ -360,6 +363,7 @@ load_data() {
                 cur_field="HDR"; cur_buf=""; first_in_field=true
                 continue ;;
             "${sep}P") flush_field; cur_field=P; cur_buf=""; first_in_field=true; continue ;;
+            "${sep}L") flush_field; cur_field=L; cur_buf=""; first_in_field=true; continue ;;
             "${sep}F") flush_field; cur_field=F; cur_buf=""; first_in_field=true; continue ;;
             "${sep}R") flush_field; cur_field=R; cur_buf=""; first_in_field=true; continue ;;
             "${sep}T") flush_field; cur_field=T; cur_buf=""; first_in_field=true; continue ;;
@@ -458,10 +462,10 @@ append_block_body() {
     local kind="${p_kind[$idx]}" prefix_w=7
 
     if [[ "$kind" == you || "$kind" == msg ]]; then
-        local label="you ›" p="${p_prompt[$idx]}"
-        if [[ "$kind" == msg ]]; then label="msg ›"; p="${p_from[$idx]}: ${p}"; fi
+        local label="you ›"
         if [[ "$full" == true ]]; then
-            local wline first=true
+            local p="${p_prompt[$idx]}" wline first=true
+            if [[ "$kind" == msg ]]; then label="msg ›"; p="${p_from[$idx]}: ${p}"; fi
             feed_split_lines_preserve "$(wrap_text "$p" $(( width - prefix_w )))"
             for wline in "${SPLIT_OUT[@]}"; do
                 if [[ "$first" == true ]]; then frame_rows+=("  ${DIM}${label}${RST} ${wline}"); first=false
@@ -469,7 +473,8 @@ append_block_body() {
                 fi
             done
         else
-            p="${p//$'\n'/ }"
+            local p="${p_prompt_list[$idx]}"
+            if [[ "$kind" == msg ]]; then label="msg ›"; p="${p_from[$idx]}: ${p}"; fi
             frame_rows+=("  ${DIM}${label}${RST} $(clip "$p" $(( width - prefix_w )))")
         fi
     fi
@@ -697,8 +702,7 @@ list_move() {
 feed_signature() {
     snapshot_mtime turns 2>/dev/null
     printf ' '
-    local f="$FLAG_DIR"
-    [[ -d "$f" ]] && find "$f" -maxdepth 1 -name '*.done' -newer "$f" 2>/dev/null | wc -l
+    file_mtime "$FLAG_DIR" 2>/dev/null
 }
 
 # ── actions ─────────────────────────────────────────────
