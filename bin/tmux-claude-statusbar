@@ -8,16 +8,8 @@
 #   ✅ done       — panes finished but unseen (bin/tmux-claude-attention)
 #   ●  working    — sessions actively streaming output
 #
-# The scan is tmux-claude-lib's scan_agent_panes. 🔴/● count per session (a
-# session with two working claudes is one ●); ✅ counts per pane, since each
-# flag is an independent "go look at this".
-#
-# Side effects, every tick: the snapshot's sessions source (per-session
-# "<session>\t<status>\t<pane>", the pane being the one exhibiting the worst
-# status) for the sessionizer, a bin/hq-snapshot tick for the other sources,
-# and the @agent_status window option for the tab tint in dots/tmux.conf. The
-# source and the tick are written every tick; the option is set only on the
-# windows whose status changed.
+# 🔴/● count per session (two working claudes in one session is one ●); ✅
+# counts per pane, since each flag is an independent "go look at this".
 
 source ~/dotfiles/bin/tmux-claude-lib
 source ~/dotfiles/bin/hq-snapshot
@@ -37,14 +29,11 @@ if [[ -n "$status_lines" ]]; then
     done <<< "$status_lines"
 fi
 
-# Written even when empty, so a consumer never acts on sessions that no
-# longer run an agent; the reader additionally ignores it once it is stale.
-# This tick is the only producer that already holds the scan, so it publishes
-# the source itself rather than making `hq-snapshot tick` scan a second time.
+# Written even when empty, so a consumer never sees a stale session as live.
+# Written here (not by hq-snapshot tick) since this tick already has the scan.
 { [[ -z "$status_lines" ]] || printf '%s\n' "$status_lines"; } | snapshot_write sessions
-# Same reasoning for panes — bin/hq-snapshot's collect_turns joins against
-# this instead of its own scan_agent_panes/get_claude_panes (measured well
-# over the tick's budget; see workplans/hq-feed-plan.md's amendment).
+# Same reasoning for panes; collect_turns joins this instead of re-scanning
+# (measured within the tick's budget — workplans/hq-feed-plan.md).
 { [[ -z "$pane_lines" ]] || printf '%s\n' "$pane_lines"; } | snapshot_write panes
 ~/dotfiles/bin/hq-snapshot tick >/dev/null 2>&1 &
 
