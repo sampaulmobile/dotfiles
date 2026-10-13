@@ -91,6 +91,8 @@ check "peer: reply is still the assistant's last text" "$(get_last_exchange "$fx
 check "tasknotif: a task-notification record is not shown as you ›" \
     "$(get_last_exchange "$fx/tasknotif.jsonl" | cut -f1)" "you"
 check "tasknotif: the prompt is unaffected" "$(get_last_exchange "$fx/tasknotif.jsonl" | cut -f2)" '"check the build"'
+check "slash command: name + args join regardless of tag order (command-message first, as Claude Code actually writes it)" \
+    "$(get_last_exchange "$fx/slashcmd.jsonl" | cut -f2)" '"/feature add a widget"'
 
 echo "── the far-back prompt: a typed prompt behind > 200 KB of tool results"
 fb=$(mktemp -d "${TMPDIR:-/tmp}/hq-feed-farback.XXXXXX")

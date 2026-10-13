@@ -1041,7 +1041,16 @@ get_last_exchange() {
         line=$(tail -c +"$(( human_off + 1 ))" "$jsonl" 2>/dev/null | head -1) || true
         prompt=$(printf '%s' "$line" | jq -r '
             def clean:
-                gsub("<command-name>(?<n>[^<]*)</command-name>\\s*<command-message>[^<]*</command-message>\\s*<command-args>(?<a>[^<]*)</command-args>"; "\(.n) \(.a)")
+                # command-name/-message/-args appear in either order across
+                # Claude Code versions (observed both ways live), so each is
+                # matched independently rather than as one fixed sequence.
+                (if test("<command-name>") then
+                    (capture("<command-name>(?<n>[^<]*)</command-name>").n) as $n
+                    | (if test("<command-args>")
+                       then capture("<command-args>(?<a>[^<]*)</command-args>").a
+                       else "" end) as $a
+                    | $n + (if ($a | length) > 0 then " " + $a else "" end)
+                 else . end)
                 | gsub("<pasted_content[^>]*>.*?</pasted_content>"; "[pasted]"; "m");
             (.message.content
              | if type == "string" then .
