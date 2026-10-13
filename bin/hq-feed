@@ -59,17 +59,23 @@ what it needs from the owner, newest transcript first within a bucket:
               that pane since it finished (Ctrl+Y's own rule); cleared by `g`
               landing on it, by Ctrl+Y, or by visiting the pane, which drops
               it out of this bucket on the next load
-  WORKING     pane status working
+  WORKING     pane status working, OR live background subagents (agents > 0,
+              the dashboard's own "+N") — outranks DONE, so a parent whose
+              turn ended but whose subagents are still running shows WORKING
+              even though no flag can surface for it yet (see
+              bin/tmux-claude-attention's deferred-flag rule)
   IDLE        everything else; shown by default, `a` collapses it to a count line
 
 Glyphs: permission, done, working (the statusbar's own 🔴/✅/●); IDLE rows
 carry none.
 
 Block, LIST view (a blank line separates blocks):
-  <label>      [<pipeline tag> ·] [#<pr> ·] <glyph> <word> <age>   (right-aligned
-                                                                  to the text width)
+  <label>      [<pipeline tag> ·] [#<pr> ·] <glyph> <word> [+N] <age>
+               (right-aligned to the text width)
                #<pr> is the pipeline's PR from the pipelines source: a
                clickable OSC 8 link on a terminal when its URL is known.
+               +N is the live background-subagent count, shown whenever
+               it is nonzero.
   you › <prompt>              — kind "you": the owner's last typed prompt
   msg › <from>: <prompt>      — kind "msg": a cross-session message instead
   now → <tool>                — WORKING only: the tool_use in flight
@@ -246,7 +252,7 @@ other_client() {
     printf '%s' "$best"
 }
 
-p_session=(); p_pane=(); p_window=(); p_agent=(); p_status=(); p_name=()
+p_session=(); p_pane=(); p_window=(); p_agent=(); p_status=(); p_agents=(); p_name=()
 p_mtime=(); p_jsonl=(); p_kind=(); p_cwd=()
 p_prompt=(); p_prompt_list=(); p_from=(); p_reply=(); p_tool=(); p_pending=(); p_links=()
 p_label=(); p_pipe=(); p_pr=(); p_pr_url=(); p_bucket=(); p_age=()
@@ -256,10 +262,14 @@ TURNS_AGE=-1; TURNS_VERDICT=missing
 STATUS_NOTE=""
 
 # First match wins. <done?> is the already-resolved flag-file test, not a
-# path.
+# path. <agents> (live background-subagent count, "-" for 0) outranks a
+# done flag and a working status: a parent pane whose subagents are still
+# running is WORKING even once its own turn has ended and even if the
+# (deferred, per bin/tmux-claude-attention's cmd_list) flag never arrives.
 feed_bucket() {
-    local status="$1" done="$2"
+    local status="$1" done="$2" agents="${3:--}"
     if [[ "$status" == permission ]]; then printf 'NEEDS YOU'
+    elif [[ "$agents" != "-" ]] && (( agents > 0 )); then printf 'WORKING'
     elif [[ "$done" == true ]]; then printf 'DONE'
     elif [[ "$status" == working ]]; then printf 'WORKING'
     else printf 'IDLE'
@@ -319,7 +329,7 @@ def strip_md:
 # bin/tmux-claude-lib's get_agent_snippet header).
 load_data() {
     local body sep out
-    p_session=(); p_pane=(); p_window=(); p_agent=(); p_status=(); p_name=()
+    p_session=(); p_pane=(); p_window=(); p_agent=(); p_status=(); p_agents=(); p_name=()
     p_mtime=(); p_jsonl=(); p_kind=(); p_cwd=()
     p_prompt=(); p_prompt_list=(); p_from=(); p_reply=(); p_tool=(); p_pending=(); p_links=()
     p_label=(); p_pipe=(); p_pr=(); p_pr_url=(); p_bucket=(); p_age=()
@@ -341,11 +351,11 @@ load_data() {
         [inputs | select(length > 0) | split("\t")] as $rows
         | $rows[]
         | . as $f
-        | ($f[9]  | dec) as $prompt_raw
-        | ($f[10] | dec) as $from
-        | ($f[11] | dec) as $reply_raw
-        | ($f[12] | dec) as $tool
-        | ($f[13] | dec) as $pending
+        | ($f[10] | dec) as $prompt_raw
+        | ($f[11] | dec) as $from
+        | ($f[12] | dec) as $reply_raw
+        | ($f[13] | dec) as $tool
+        | ($f[14] | dec) as $pending
         | ($reply_raw | if . == "-" then "-" else strip_md end
            | if . == "-" then "-" else gsub($pr_url; "\u0001" + .n + "\u0002") end) as $reply
         | ($reply_raw | if . == "-" then "-"
@@ -354,7 +364,7 @@ load_data() {
         | ($prompt_raw | if . == "-" then "-" else .[0:32768] end) as $prompt
         | ($prompt | if . == "-" then "-"
                      else .[0:1024] | gsub("[\\n\\t\\x00-\\x1f\\x7f]"; " ") end) as $prompt_list
-        | $sep + "H", ([$f[0],$f[1],$f[2],$f[3],$f[4],$f[5],$f[6],$f[7],$f[8],$f[14]] | join("\t")),
+        | $sep + "H", ([$f[0],$f[1],$f[2],$f[3],$f[4],$f[5],$f[6],$f[7],$f[8],$f[9],$f[15]] | join("\t")),
           $sep + "P", $prompt,
           $sep + "L", $prompt_list,
           $sep + "F", $from,
@@ -365,7 +375,7 @@ load_data() {
     ' 2>/dev/null)
 
     local cur_field="" cur_buf="" first_in_field=true line
-    local session pane window agent status name mtime jsonl kind cwd
+    local session pane window agent status agents name mtime jsonl kind cwd
     flush_field() {
         case "$cur_field" in
             P) p_prompt+=("$cur_buf") ;;
@@ -395,10 +405,11 @@ load_data() {
         if [[ "$cur_field" == HDR ]]; then
             feed_split "$line" $'\t'
             session="${SPLIT_OUT[0]-}"; pane="${SPLIT_OUT[1]-}"; window="${SPLIT_OUT[2]-}"
-            agent="${SPLIT_OUT[3]-}"; status="${SPLIT_OUT[4]-}"; name="${SPLIT_OUT[5]-}"
-            mtime="${SPLIT_OUT[6]-}"; jsonl="${SPLIT_OUT[7]-}"; kind="${SPLIT_OUT[8]-}"; cwd="${SPLIT_OUT[9]-}"
+            agent="${SPLIT_OUT[3]-}"; status="${SPLIT_OUT[4]-}"; agents="${SPLIT_OUT[5]-}"
+            name="${SPLIT_OUT[6]-}"
+            mtime="${SPLIT_OUT[7]-}"; jsonl="${SPLIT_OUT[8]-}"; kind="${SPLIT_OUT[9]-}"; cwd="${SPLIT_OUT[10]-}"
             p_session+=("$session"); p_pane+=("$pane"); p_window+=("$window")
-            p_agent+=("$agent"); p_status+=("$status"); p_name+=("$name")
+            p_agent+=("$agent"); p_status+=("$status"); p_agents+=("$agents"); p_name+=("$name")
             p_mtime+=("$mtime"); p_jsonl+=("$jsonl"); p_kind+=("$kind"); p_cwd+=("$cwd")
             cur_field=""
             continue
@@ -415,7 +426,7 @@ load_data() {
         flag_file="$FLAG_DIR/${p_session[$i]}@${p_pane[$i]#%}.done"
         done_flag=false
         [[ -e "$flag_file" ]] && done_flag=true
-        p_bucket+=("$(feed_bucket "${p_status[$i]}" "$done_flag")")
+        p_bucket+=("$(feed_bucket "${p_status[$i]}" "$done_flag" "${p_agents[$i]}")")
         p_label+=("$(feed_label "${p_session[$i]}" "${p_window[$i]}" "${p_name[$i]}")")
         p_pipe+=("$(pipeline_for_cwd "${p_cwd[$i]}")")
         pipeline_pr_for_cwd "${p_cwd[$i]}"
@@ -672,7 +683,11 @@ build_list_frame() {
         # Column 0 is a one-char gutter paint() overwrites with the cursor
         # mark, so the row must start with a plain space, never a color code.
         # ✅/🔴 take two cells but count as one in ${#}, hence gw.
-        status_plain="${glyph} ${word} ${agestr}"
+        status_plain="${glyph} ${word}"
+        if [[ "${p_agents[$idx]}" != "-" ]] && (( p_agents[idx] > 0 )); then
+            status_plain+=" +${p_agents[$idx]}"
+        fi
+        status_plain+=" ${agestr}"
         gw=1; case "$glyph" in ✅|🔴) gw=2 ;; esac
         rw=$(( ${#status_plain} + gw - 1 ))
         [[ -n "$pipe" ]] && rw=$(( rw + ${#pipe} + 3 ))
@@ -730,8 +745,12 @@ build_detail_frame() {
     word=$(feed_word "$bucket")
     format_age agestr "${p_age[$idx]}"
     local pipe="${p_pipe[$idx]}"
+    local badge=""
+    if [[ "${p_agents[$idx]}" != "-" ]] && (( p_agents[idx] > 0 )); then
+        badge=" +${p_agents[$idx]}"
+    fi
     local line1="‹ q  back to list"
-    local right1="${p_label[$idx]} · ${word} ${agestr}"
+    local right1="${p_label[$idx]} · ${word}${badge} ${agestr}"
     [[ -n "$pipe" ]] && right1+=" · ${pipe}"
     [[ -n "${p_pr[$idx]}" ]] && right1+=" · #${p_pr[$idx]}"
     local pad1=$(( term_w - ${#line1} - ${#right1} ))

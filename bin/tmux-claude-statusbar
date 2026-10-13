@@ -3,7 +3,8 @@
 # Called by tmux every status-interval (~5s) — must stay fast (<200ms).
 #   🔴 permission — sessions waiting on a permission/plan prompt
 #   ✅ done       — panes finished but unseen (bin/tmux-claude-attention)
-#   ●  working    — sessions actively streaming output
+#   ●  working    — sessions actively streaming output, OR idle/unknown
+#                   with live background subagents (the dashboard's "+N")
 #
 # 🔴/● count per session (two working claudes in one session is one ●); ✅
 # counts per pane, since each flag is an independent "go look at this".
@@ -17,11 +18,14 @@ status_lines=$(aggregate_session_status "$pane_lines")
 permission_count=0
 working_count=0
 if [[ -n "$status_lines" ]]; then
-    while IFS=$'\t' read -r _name _status _; do
-        case "$_status" in
-            permission) (( permission_count++ )) ;;
-            working)    (( working_count++ )) ;;
-        esac
+    while IFS=$'\t' read -r _name _status _pane _agents; do
+        if [[ "$_status" == permission ]]; then
+            (( permission_count++ ))
+        elif [[ "$_status" == working ]]; then
+            (( working_count++ ))
+        elif [[ "$_agents" != "-" ]] && (( _agents > 0 )); then
+            (( working_count++ ))
+        fi
     done <<< "$status_lines"
 fi
 

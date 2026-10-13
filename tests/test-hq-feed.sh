@@ -111,7 +111,7 @@ check "far-back: the reply is unaffected" "$(get_last_exchange "$fb/t.jsonl" | c
 rm -rf "$fb"
 
 echo "── turns_rows: record format and the mtime gate"
-pane_body="alpha	%1	1	claude	working"
+pane_body="alpha	%1	1	claude	working	-"
 pane_meta=$'\n'"%1	1	/home/user/proj"
 name_map=$'\n'
 prev_body=$'\n'
@@ -125,8 +125,8 @@ get_last_exchange() {
 }
 rec1=$(turns_rows "$pane_body" "$pane_meta" "$name_map" "$prev_body")
 n_fields=$(awk -F'\t' '{print NF}' <<< "$rec1")
-check "one record, 15 tab-separated fields" "$n_fields" "15"
-check "leading fields are never empty" "$(cut -f1-5 <<< "$rec1")" $'alpha\t%1\t1\tclaude\tworking'
+check "one record, 16 tab-separated fields" "$n_fields" "16"
+check "leading fields are never empty" "$(cut -f1-6 <<< "$rec1")" $'alpha\t%1\t1\tclaude\tworking\t-'
 calls_after_first=$(wc -c < "$countfile" | tr -d ' ')
 check "first call parses once" "$calls_after_first" "1"
 prev_body=$'\n'"$rec1"
@@ -136,9 +136,18 @@ check "an unchanged jsonl+mtime reuses the record (0 more parses)" "$calls_after
 check "the reused record is byte-identical" "$rec2" "$rec1"
 touch -t 203001010000.00 "$work/transcript.jsonl"
 prev_body=$'\n'"$rec2"
-turns_rows "$pane_body" "$pane_meta" "$name_map" "$prev_body" >/dev/null
+rec_touched=$(turns_rows "$pane_body" "$pane_meta" "$name_map" "$prev_body")
 calls_after_third=$(wc -c < "$countfile" | tr -d ' ')
 check "a changed mtime on the same jsonl re-parses (1 more call)" "$calls_after_third" "2"
+
+echo "── turns_rows: agents always comes from the CURRENT pane body, never a reused record"
+prev_body=$'\n'"$rec_touched"
+pane_body_busy="alpha	%1	1	claude	working	4"
+rec3=$(turns_rows "$pane_body_busy" "$pane_meta" "$name_map" "$prev_body")
+calls_after_fourth=$(wc -c < "$countfile" | tr -d ' ')
+check "the REUSE path (mtime+jsonl unchanged) takes agents from the current pane body" \
+    "$(cut -f6 <<< "$rec3")" "4"
+check "REUSE did not re-call get_last_exchange" "$calls_after_fourth" "2"
 # unset -f cannot "undo" a shadow (bash's function table is flat, not
 # stacked) — re-source to get the real find_pane_jsonl/get_last_exchange back.
 unset -f find_pane_jsonl get_last_exchange
@@ -166,6 +175,10 @@ check "a done flag outranks a working status -> DONE" "$(feed_bucket working tru
 check "working status, no flag -> WORKING" "$(feed_bucket working false)" "WORKING"
 check "idle status, no flag -> IDLE" "$(feed_bucket idle false)" "IDLE"
 check "permission outranks a done flag too" "$(feed_bucket permission true)" "NEEDS YOU"
+check "idle + live agents -> WORKING" "$(feed_bucket idle false 2)" "WORKING"
+check "agents outranks a done flag -> WORKING, not DONE" "$(feed_bucket idle true 2)" "WORKING"
+check "permission still outranks live agents" "$(feed_bucket permission false 2)" "NEEDS YOU"
+check "agents=\"-\" behaves like no agents" "$(feed_bucket idle false -)" "IDLE"
 check "label: window 1, no name -> the session" "$(feed_label alpha 1 -)" "alpha"
 check "label: window 3, no name -> session:3" "$(feed_label alpha 3 -)" "alpha:3"
 check "label: a name replaces the computed label outright" "$(feed_label alpha 3 alpha-hub)" "alpha-hub"
@@ -220,7 +233,7 @@ long_reply=$(printf '%s\n\n' "${long_reply_lines[@]}")
 mkdir -p "$work/snapshot" "$work/flags"
 mtime_now=$(date +%s)
 long_reply_json=$(jq -Rn --arg t "$long_reply" '$t | tojson')
-printf '%s\t%%9\t1\tclaude\tidle\t-\t%s\t-\tyou\t"long reply pane"\t-\t%s\t-\t-\t/home/user/long\n' \
+printf '%s\t%%9\t1\tclaude\tidle\t-\t-\t%s\t-\tyou\t"long reply pane"\t-\t%s\t-\t-\t/home/user/long\n' \
     "longpane" "$mtime_now" "$long_reply_json" > "$work/snapshot/turns.tsv.body"
 { printf '# generated 2026-01-01T00:00:00Z\n'; cat "$work/snapshot/turns.tsv.body"; } > "$work/snapshot/turns.tsv"
 load_data
@@ -248,10 +261,10 @@ mtime_b=$(( mtime_now - 20 ))
 mtime_c=$(( mtime_now - 5 ))
 {
     printf '# generated 2026-01-01T00:00:00Z\n'
-    printf 'needsyou\t%%1\t1\tclaude\tpermission\t-\t%s\t-\tyou\t"-"\t-\t-\t-\t"-"\t-\n' "$mtime_a"
-    printf 'doneflag\t%%2\t1\tclaude\tidle\t-\t%s\t-\tyou\t"-"\t-\t-\t-\t-\t-\n' "$mtime_b"
-    printf 'working1\t%%3\t1\tclaude\tworking\t-\t%s\t-\t-\t-\t-\t-\t-\t-\t-\n' "$mtime_c"
-    printf 'idlepane\t%%4\t1\tclaude\tidle\t-\t%s\t-\t-\t-\t-\t-\t-\t-\t-\n' "$mtime_now"
+    printf 'needsyou\t%%1\t1\tclaude\tpermission\t-\t-\t%s\t-\tyou\t"-"\t-\t-\t-\t"-"\t-\n' "$mtime_a"
+    printf 'doneflag\t%%2\t1\tclaude\tidle\t-\t-\t%s\t-\tyou\t"-"\t-\t-\t-\t-\t-\n' "$mtime_b"
+    printf 'working1\t%%3\t1\tclaude\tworking\t-\t-\t%s\t-\t-\t-\t-\t-\t-\t-\t-\n' "$mtime_c"
+    printf 'idlepane\t%%4\t1\tclaude\tidle\t-\t-\t%s\t-\t-\t-\t-\t-\t-\t-\t-\n' "$mtime_now"
 } > "$work/snapshot/turns.tsv"
 touch "$work/flags/doneflag@2.done"
 load_data
@@ -315,6 +328,35 @@ if [[ "$detail_out" == *'idlepane'* ]]; then ok "--dump --detail renders the nam
 bad_detail=$("$repo/bin/hq-feed" --dump --detail %999 2>&1; echo "rc=$?")
 if [[ "$bad_detail" == *'rc=1'* ]]; then ok "--dump --detail on an unknown pane exits 1"; else bad "unknown pane" "$bad_detail"; fi
 
+echo "── live subagents (agents > 0) outrank DONE and IDLE, and show a +N badge"
+{
+    printf '# generated 2026-01-01T00:00:00Z\n'
+    printf 'subagentpane\t%%5\t1\tclaude\tidle\t3\t-\t%s\t-\t-\t-\t-\t-\t-\t-\t-\n' "$mtime_now"
+} > "$work/snapshot/turns.tsv"
+load_data
+idx=-1
+for i in "${!p_session[@]}"; do [[ "${p_session[$i]}" == subagentpane ]] && idx="$i"; done
+if (( idx >= 0 )); then
+    check "idle status + agents=3 buckets as WORKING, not IDLE" "${p_bucket[$idx]}" "WORKING"
+    check "counts: 1 working, 0 idle" "$n_working $n_idle" "1 0"
+    build_frame
+    badge_seen=false
+    for l in "${frame_rows[@]}"; do [[ "$l" == *'subagentpane'*'+3'* ]] && badge_seen=true; done
+    if [[ "$badge_seen" == true ]]; then ok "the LIST header shows the +3 badge"; else bad "+N badge" "not found in: ${frame_rows[*]}"; fi
+else
+    bad "subagentpane fixture not loaded" "-"
+fi
+touch "$work/flags/subagentpane@5.done"
+load_data
+idx=-1
+for i in "${!p_session[@]}"; do [[ "${p_session[$i]}" == subagentpane ]] && idx="$i"; done
+if (( idx >= 0 )); then
+    check "agents > 0 outranks a done flag too -> still WORKING" "${p_bucket[$idx]}" "WORKING"
+else
+    bad "subagentpane fixture not loaded" "-"
+fi
+rm -f "$work/flags/subagentpane@5.done"
+
 echo "── LIST caps a long multi-line prompt instead of bash \${var//} over it"
 biglines=()
 for i in $(seq 1 700); do
@@ -330,7 +372,7 @@ fi
 big_json=$(jq -Rnr --arg t "$bigprompt" '$t | tojson')
 {
     printf '# generated 2026-01-01T00:00:00Z\n'
-    printf '%s\t%%8\t1\tclaude\tworking\t-\t%s\t-\tyou\t%s\t-\t-\t-\t-\t/home/user/big\n' \
+    printf '%s\t%%8\t1\tclaude\tworking\t-\t-\t%s\t-\tyou\t%s\t-\t-\t-\t-\t/home/user/big\n' \
         "bigpromptpane" "$mtime_now" "$big_json"
 } > "$work/snapshot/turns.tsv"
 t0=$SECONDS
@@ -402,7 +444,7 @@ echo "── the highlight fills edge-to-edge: SEL survives a row's own resets"
 link_json=$(jq -Rn --arg t 'see https://github.com/acme/widgets/pull/42 for details' '$t | tojson')
 {
     printf '# generated 2026-01-01T00:00:00Z\n'
-    printf 'linkpane\t%%5\t1\tclaude\tidle\t-\t%s\t-\tyou\t"-"\t-\t%s\t-\t-\t-\n' "$mtime_now" "$link_json"
+    printf 'linkpane\t%%5\t1\tclaude\tidle\t-\t-\t%s\t-\tyou\t"-"\t-\t%s\t-\t-\t-\n' "$mtime_now" "$link_json"
 } > "$work/snapshot/turns.tsv"
 RST=$'\033[0m'; SEL=$'\033[48;5;236m'; DIM=$'\033[2m'
 LINK=$'\033[34;4m'; LINKS=true

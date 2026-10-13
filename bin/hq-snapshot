@@ -181,9 +181,9 @@ pipeline_for_cwd() {
 #   Relies on tmux-claude-lib's find_pane_jsonl, codex_find_pane_jsonl,
 #   _agent_file_mtime and get_last_exchange already being sourced (done by
 #   collect_turns). <pane-body> is scan_agent_panes' line format: session,
-#   pane, window_id, agent, status. Output, one line per input line:
-#     session pane window agent status name mtime jsonl kind prompt from
-#     reply tool pending cwd
+#   pane, window_id, agent, status, agents. Output, one line per input line:
+#     session pane window agent status agents name mtime jsonl kind prompt
+#     from reply tool pending cwd
 #   (- for empty; leading fields never empty). <pane-meta> is
 #   "pane_id\twindow_index\tcwd", <name-map> is "pane_num\tname" (no %),
 #   <prev-body> is the previous turns snapshot's own body — all three
@@ -193,13 +193,16 @@ pipeline_for_cwd() {
 #   pane's jsonl and mtime both match it, as ONE awk pass over <prev-body>:
 #   a bash `${var#*pattern}` strip against a pane's up-to-32KB reply
 #   measured SLOWER than re-parsing every transcript (same cost
-#   get_agent_snippet documents for `${var//x/y}`).
+#   get_agent_snippet documents for `${var//x/y}`). The agents value always
+#   comes from the CURRENT pane body, never from a reused record — a parent
+#   pane's live subagent count is a per-tick fact, not an exchange field.
 turns_rows() {
     local pane_body="$1" pane_meta="$2" name_map="$3" prev_body="$4"
-    local session pane _wid agent status
+    local session pane _wid agent status agents
     local -a claude_lines=()
-    while IFS=$'\t' read -r session pane _wid agent status; do
+    while IFS=$'\t' read -r session pane _wid agent status agents; do
         [[ -n "$pane" ]] || continue
+        [[ -n "$agents" ]] || agents="-"
 
         local rest widx cwd name
         widx="-"; cwd="-"
@@ -224,38 +227,42 @@ turns_rows() {
             jsonl=$(codex_find_pane_jsonl "$pane" 2>/dev/null)
             [[ -n "$jsonl" ]] || jsonl="-"
             [[ "$jsonl" != "-" ]] && { mtime=$(_agent_file_mtime "$jsonl"); [[ -n "$mtime" ]] || mtime="-"; }
-            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t-\t-\t-\t-\t-\t-\t%s\n' \
+            printf '%s\t%s\t%s\t%s\t%s\t-\t%s\t%s\t%s\t-\t-\t-\t-\t-\t-\t%s\n' \
                 "$session" "$pane" "$widx" "$agent" "$status" "$name" "$mtime" "$jsonl" "$cwd"
         else
             local jsonl mtime="-"
             jsonl=$(find_pane_jsonl "$pane" 2>/dev/null)
             [[ -n "$jsonl" ]] || jsonl="-"
             if [[ "$jsonl" == "-" ]]; then
-                printf '%s\t%s\t%s\t%s\t%s\t%s\t-\t-\t-\t-\t-\t-\t-\t-\t%s\n' \
-                    "$session" "$pane" "$widx" "$agent" "$status" "$name" "$cwd"
+                printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t-\t-\t-\t-\t-\t-\t-\t-\t%s\n' \
+                    "$session" "$pane" "$widx" "$agent" "$status" "$agents" "$name" "$cwd"
             else
                 mtime=$(_agent_file_mtime "$jsonl")
                 [[ -n "$mtime" ]] || mtime="-"
-                claude_lines+=("${session}"$'\t'"${pane}"$'\t'"${widx}"$'\t'"${agent}"$'\t'"${status}"$'\t'"${name}"$'\t'"${mtime}"$'\t'"${jsonl}"$'\t'"${cwd}")
+                claude_lines+=("${session}"$'\t'"${pane}"$'\t'"${widx}"$'\t'"${agent}"$'\t'"${status}"$'\t'"${agents}"$'\t'"${name}"$'\t'"${mtime}"$'\t'"${jsonl}"$'\t'"${cwd}")
             fi
         fi
     done <<< "$pane_body"
 
     (( ${#claude_lines[@]} == 0 )) && return 0
 
-    local gated f1 rest15
+    # claude_lines fields (1-indexed, awk): 1 session 2 pane 3 window
+    # 4 agent 5 status 6 agents 7 name 8 mtime 9 jsonl 10 cwd. A previous
+    # (gated) record's own fields 10-15 are kind/prompt/from/reply/tool/
+    # pending, reused when mtime(8)/jsonl(9) both still match.
+    local gated f1 rest16
     gated=$(awk -F'\t' -v OFS='\t' '
         FNR == NR { if ($0 != "") { prev[$1 SUBSEP $2] = $0 }; next }
         {
             key = $1 SUBSEP $2
             if ((key in prev)) {
                 split(prev[key], pf, "\t")
-                if (pf[7] == $7 && pf[8] == $8) {
-                    print "REUSE", $1,$2,$3,$4,$5,$6,$7,$8,$9, pf[9],pf[10],pf[11],pf[12],pf[13],pf[14]
+                if (pf[8] == $8 && pf[9] == $9) {
+                    print "REUSE", $1,$2,$3,$4,$5,$6,$7,$8,$9,$10, pf[10],pf[11],pf[12],pf[13],pf[14],pf[15]
                     next
                 }
             }
-            print "PARSE", $1,$2,$3,$4,$5,$6,$7,$8,$9
+            print "PARSE", $1,$2,$3,$4,$5,$6,$7,$8,$9,$10
         }
     ' <(printf '%s\n' "$prev_body") <(printf '%s\n' "${claude_lines[@]}"))
 
@@ -264,21 +271,22 @@ turns_rows() {
     for line in "${SPLIT_OUT[@]}"; do
         [[ -n "$line" ]] || continue
         f1="${line%%$'\t'*}"
-        rest15="${line#*$'\t'}"
+        rest16="${line#*$'\t'}"
         if [[ "$f1" == REUSE ]]; then
-            local session2 pane2 widx2 agent2 status2 name2 mtime2 jsonl2 cwd2 kind2 prompt2 from2 reply2 tool2 pending2
-            IFS=$'\t' read -r session2 pane2 widx2 agent2 status2 name2 mtime2 jsonl2 cwd2 \
-                kind2 prompt2 from2 reply2 tool2 pending2 <<< "$rest15"
-            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-                "$session2" "$pane2" "$widx2" "$agent2" "$status2" "$name2" "$mtime2" "$jsonl2" \
+            local session2 pane2 widx2 agent2 status2 agents2 name2 mtime2 jsonl2 cwd2
+            local kind2 prompt2 from2 reply2 tool2 pending2
+            IFS=$'\t' read -r session2 pane2 widx2 agent2 status2 agents2 name2 mtime2 jsonl2 cwd2 \
+                kind2 prompt2 from2 reply2 tool2 pending2 <<< "$rest16"
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                "$session2" "$pane2" "$widx2" "$agent2" "$status2" "$agents2" "$name2" "$mtime2" "$jsonl2" \
                 "$kind2" "$prompt2" "$from2" "$reply2" "$tool2" "$pending2" "$cwd2"
         else
-            local session3 pane3 widx3 agent3 status3 name3 mtime3 jsonl3 cwd3
-            IFS=$'\t' read -r session3 pane3 widx3 agent3 status3 name3 mtime3 jsonl3 cwd3 <<< "$rest15"
+            local session3 pane3 widx3 agent3 status3 agents3 name3 mtime3 jsonl3 cwd3
+            IFS=$'\t' read -r session3 pane3 widx3 agent3 status3 agents3 name3 mtime3 jsonl3 cwd3 <<< "$rest16"
             local kind3 prompt3 from3 reply3 tool3 pending3
             IFS=$'\t' read -r kind3 prompt3 from3 reply3 tool3 pending3 < <(get_last_exchange "$jsonl3")
-            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-                "$session3" "$pane3" "$widx3" "$agent3" "$status3" "$name3" "$mtime3" "$jsonl3" \
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                "$session3" "$pane3" "$widx3" "$agent3" "$status3" "$agents3" "$name3" "$mtime3" "$jsonl3" \
                 "$kind3" "$prompt3" "$from3" "$reply3" "$tool3" "$pending3" "$cwd3"
         fi
     done
@@ -355,8 +363,8 @@ the deletion yourself.
 EOF
 }
 
-# collect_sessions — "<session>\t<status>\t<pane>" per session with an
-# agent in it.
+# collect_sessions — "<session>\t<status>\t<pane>\t<agents>" per session
+# with an agent in it.
 collect_sessions() {
     # shellcheck source=/dev/null
     source "$DOTFILES/bin/tmux-claude-lib" || return 1
@@ -364,7 +372,7 @@ collect_sessions() {
 }
 
 # collect_panes — scan_agent_panes' own line, "<session>\t<pane>\t
-# <window_id>\t<agent>\t<status>" per agent pane.
+# <window_id>\t<agent>\t<status>\t<agents>" per agent pane.
 collect_panes() {
     # shellcheck source=/dev/null
     source "$DOTFILES/bin/tmux-claude-lib" || return 1
@@ -392,8 +400,7 @@ collect_turns() {
     [[ -n "$pane_body" ]] || return 0
 
     _CWD_MAP_FILE="${TMPDIR:-/tmp}/hq-snapshot-cwd-map.tsv"
-    jq -r '[((.tmux // "") | [scan("%[0-9]+$")] | .[0] // "-"), .cwd, .sessionId] | @tsv' \
-        "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null > "${_CWD_MAP_FILE}.tmp.$$"
+    jq -r "$_CWD_MAP_JQ" "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null > "${_CWD_MAP_FILE}.tmp.$$"
     mv -f "${_CWD_MAP_FILE}.tmp.$$" "$_CWD_MAP_FILE"
 
     local pane_meta name_map prev_body

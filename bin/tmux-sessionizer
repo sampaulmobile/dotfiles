@@ -8,8 +8,11 @@
 # sessions — see order_sessions_hub_first), then project dirs with no session
 # yet.
 #   red        session waiting on a permission prompt
-#   green      finished-but-unseen agent
-#   blue       working; dim blue = idle agent
+#   green      finished-but-unseen agent (a pane whose background subagents
+#              are still live defers this — see "blue" below — until they
+#              finish too)
+#   blue       working, OR live background subagents ("+N" badge, the
+#              dashboard's own count); dim blue = idle agent with none
 #   dim        dir with no session (~-shortened path)
 #   cyan       linked worktree, shown as "<~repo-path>  <origin>  ⎇ <branch>":
 #              origin `agent` = harness-made under .claude/worktrees/, `wt` =
@@ -21,7 +24,7 @@
 #   for dirs).
 #
 # Invariant: nothing is scanned at keypress time. Row status comes only from
-# caches — the snapshot's sessions source, published every ~5s by
+# caches — the snapshot's sessions and panes sources, published every ~5s by
 # bin/tmux-claude-statusbar and ignored when stale, plus the attention layer's
 # .done flags — and rows stream into fzf as they are produced, so the picker
 # draws immediately. Anything added here that forks per project dir breaks it.
@@ -92,6 +95,67 @@ order_sessions_hub_first() {
     '
 }
 
+# sessionizer_row_lists <sessions-body> <flag-keys> <panes-body>
+#   sessions-body: aggregate_session_status's own line, per session
+#   ("<session>\t<status>\t<pane>\t<agents>"); pass "" when the sessions
+#   snapshot is stale (the caller decides that, this function does not).
+#   flag-keys: newline-separated "<session>@<pane>" (the attention
+#   directory's flag filenames, ".done" suffix stripped, pane WITHOUT "%" —
+#   bin/tmux-claude-attention's flag_path encoding).
+#   panes-body: scan_agent_panes's own 6-field line, for per-pane deferral;
+#   pass "" when the panes snapshot is not fresh (every flag then shows
+#   green — fail open, same rule as tmux-claude-lib's drop_deferred_flags).
+#   Sets PERM_LIST/WORK_LIST/DONE_LIST/IDLE_LIST (session names,
+#   leading-newlined) and BADGE_LIST ("<session>\t<agents>", sessions with
+#   agents > 0 only).
+#   Rules: permission -> red; a flag whose pane has no live agents -> green
+#   (one still carrying live agents is dropped, same as
+#   bin/tmux-claude-attention's read-time deferral); status working OR
+#   agents > 0 -> blue; else idle/unknown -> dim blue.
+sessionizer_row_lists() {
+    local sessions_body="$1" flag_keys="$2" panes_body="$3"
+    PERM_LIST=$'\n'; WORK_LIST=$'\n'; DONE_LIST=$'\n'; IDLE_LIST=$'\n'; BADGE_LIST=$'\n'
+
+    local pane_agents=$'\n'
+    local _s p _w _a _st ag
+    while IFS=$'\t' read -r _s p _w _a _st ag; do
+        [[ -n "$p" ]] || continue
+        pane_agents+="${p}"$'\t'"${ag:--}"$'\n'
+    done <<< "$panes_body"
+
+    local name status pane agents rest
+    while IFS=$'\t' read -r name status pane agents; do
+        [[ -n "$name" ]] || continue
+        case "$status" in
+            permission) PERM_LIST+="${name}"$'\n' ;;
+            working)    WORK_LIST+="${name}"$'\n' ;;
+            idle|unknown)
+                if [[ "$agents" != "-" ]] && (( agents > 0 )); then
+                    WORK_LIST+="${name}"$'\n'
+                else
+                    IDLE_LIST+="${name}"$'\n'
+                fi
+                ;;
+        esac
+        if [[ "$agents" != "-" ]] && (( agents > 0 )); then
+            BADGE_LIST+="${name}"$'\t'"${agents}"$'\n'
+        fi
+    done <<< "$sessions_body"
+
+    local key sess pane2
+    while IFS= read -r key; do
+        [[ -n "$key" ]] || continue
+        sess="${key%@*}"
+        pane2="${key##*@}"
+        rest="${pane_agents#*$'\n'"%${pane2}"$'\t'}"
+        if [[ "$rest" != "$pane_agents" ]]; then
+            ag="${rest%%$'\n'*}"
+            [[ "$ag" != "-" ]] && (( ag > 0 )) && continue
+        fi
+        DONE_LIST+="${sess}"$'\n'
+    done <<< "$flag_keys"
+}
+
 # Sourced (tests/test-fzf-expect.sh, tests/test-session-order.sh) rather than
 # executed: hand back the helpers above and run none of the picker below.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
@@ -158,36 +222,32 @@ else
         awk -v skip="$current_session" '$2 != skip {print $2}' |
         order_sessions_hub_first)
 
-    # The sessions snapshot is ignored when stale (statusbar not ticking);
-    # the .done flags are event-driven (Stop hook), so they need no
-    # freshness test.
+    # The sessions/panes snapshots are ignored when stale (statusbar not
+    # ticking); the .done flags are event-driven (Stop hook), so they need
+    # no freshness test themselves — only the panes lookup used to defer
+    # one needs the snapshot to be fresh.
     perm_list=$'\n'
     work_list=$'\n'
     done_list=$'\n'
     idle_list=$'\n'
+    badge_list=$'\n'
     if [[ "$SHOW_STATUS_INDICATORS" == true ]]; then
+        sessions_body="" panes_body="" flag_keys=""
         if [[ "$(snapshot_verdict "$(snapshot_age sessions)" "$(snapshot_cadence sessions)")" == fresh ]]; then
-            # 3rd field (worst-status pane) is for C-y's jump, not rows
-            while IFS=$'\t' read -r _name _status _; do
-                [[ -z "$_name" ]] && continue
-                case "$_status" in
-                    permission)   perm_list+="${_name}"$'\n' ;;
-                    working)      work_list+="${_name}"$'\n' ;;
-                    # unknown = an agent pane that didn't classify; still
-                    # "has an agent in it" as far as the tint cares
-                    idle|unknown) idle_list+="${_name}"$'\n' ;;
-                esac
-            done < <(snapshot_read sessions)
+            sessions_body=$(snapshot_read sessions)
+        fi
+        if [[ "$(snapshot_verdict "$(snapshot_age panes)" "$(snapshot_cadence panes)")" == fresh ]]; then
+            panes_body=$(snapshot_read panes)
         fi
         shopt -s nullglob
         for _f in "$ATTN_DIR"/*.done; do
             _name="${_f##*/}"
-            _name="${_name%.done}"
-            # flags are per pane, "<session>@<pane>.done"; rows are per
-            # session, so strip the pane suffix
-            done_list+="${_name%@*}"$'\n'
+            flag_keys+="${_name%.done}"$'\n'
         done
         shopt -u nullglob
+        sessionizer_row_lists "$sessions_body" "$flag_keys" "$panes_body"
+        perm_list="$PERM_LIST"; work_list="$WORK_LIST"; done_list="$DONE_LIST"
+        idle_list="$IDLE_LIST"; badge_list="$BADGE_LIST"
     fi
 
     # Rows are two tab-separated fields, "<key>\t<display>": fzf shows and
@@ -197,19 +257,25 @@ else
     # slicing it back out needs no ANSI stripping.
     emit_rows() {
         # Existing sessions first, in MRU order.
-        local sess
+        local sess disp badge
         while IFS= read -r sess; do
             [[ -z "$sess" ]] && continue
+            disp="$sess"
+            badge="${badge_list#*$'\n'"${sess}"$'\t'}"
+            # The badge rides the DISPLAY field only, never the key: fzf
+            # returns the whole "key\tdisplay" line, and everything past
+            # fzf slices on the key.
+            [[ "$badge" != "$badge_list" ]] && disp+=" +${badge%%$'\n'*}"
             if [[ "$perm_list" == *$'\n'"$sess"$'\n'* ]]; then
-                printf '%s\t%s%s%s\n' "$sess" "$C_RED" "$sess" "$C_RST"
+                printf '%s\t%s%s%s\n' "$sess" "$C_RED" "$disp" "$C_RST"
             elif [[ "$done_list" == *$'\n'"$sess"$'\n'* ]]; then
-                printf '%s\t%s%s%s\n' "$sess" "$C_GRN" "$sess" "$C_RST"
+                printf '%s\t%s%s%s\n' "$sess" "$C_GRN" "$disp" "$C_RST"
             elif [[ "$work_list" == *$'\n'"$sess"$'\n'* ]]; then
-                printf '%s\t%s%s%s\n' "$sess" "$C_BLU" "$sess" "$C_RST"
+                printf '%s\t%s%s%s\n' "$sess" "$C_BLU" "$disp" "$C_RST"
             elif [[ "$idle_list" == *$'\n'"$sess"$'\n'* ]]; then
-                printf '%s\t%s%s%s\n' "$sess" "$C_IBL" "$sess" "$C_RST"
+                printf '%s\t%s%s%s\n' "$sess" "$C_IBL" "$disp" "$C_RST"
             else
-                printf '%s\t%s\n' "$sess" "$sess"
+                printf '%s\t%s\n' "$sess" "$disp"
             fi
         done <<< "$existing"
 
