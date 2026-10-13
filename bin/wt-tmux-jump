@@ -24,8 +24,10 @@ source "$HOME/dotfiles/bin/project-dirs-lib"
 session_name_for "$path"
 name="$session_name"
 
-if ! tmux has-session -t="$name" 2>/dev/null; then
-    source "$HOME/dotfiles/bin/tmux-claude-lib"
+source "$HOME/dotfiles/bin/tmux-claude-lib"
+if tmux has-session -t="$name" 2>/dev/null; then
+    unpark_session "$name"
+else
     new_hub_session "$name" "$path"
 fi
 tmux switch-client -t "$name"

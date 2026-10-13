@@ -122,6 +122,29 @@ new_hub_session() {
     fi
 }
 
+# unpark_session <session-name>
+#   Wakes a session bin/hq-reap parked: types its saved @parked_cmd into the
+#   saved @parked_pane if that pane has no agent on its tty, then clears
+#   @parked/@parked_pane/@parked_cmd either way. A non-parked session (the
+#   common case, paid on every sessionizer/wt-tmux-jump/dashboard visit)
+#   costs exactly one display -p and returns. CREATION-only per
+#   tmux-task-session's rule: display-message, send-keys, set-option.
+unpark_session() {
+    local session="$1" pane cmd tty
+    IFS=$'\t' read -r pane cmd < <(tmux display -p -t "$session" $'#{@parked_pane}\t#{@parked_cmd}' 2>/dev/null)
+    [[ -n "$pane" || -n "$cmd" ]] || return 0
+    if [[ -n "$pane" ]] && tmux display-message -p -t "$pane" '#{pane_id}' >/dev/null 2>&1; then
+        tty=$(tmux display-message -p -t "$pane" '#{pane_tty}' 2>/dev/null)
+        tty="${tty#/dev/}"
+        if [[ -z "$(agent_ttys | awk -v t="$tty" -F'\t' '$1==t{print; exit}')" ]]; then
+            tmux send-keys -t "$pane" "$cmd" Enter
+        fi
+    fi
+    tmux set-option -u -t "$session" @parked 2>/dev/null
+    tmux set-option -u -t "$session" @parked_pane 2>/dev/null
+    tmux set-option -u -t "$session" @parked_cmd 2>/dev/null
+}
+
 # agent_ttys
 #   Prints "<tty>\t<agent>" for every live agent process, one line per tty
 #   (no /dev/ prefix). Panes are identified by TTY, never by

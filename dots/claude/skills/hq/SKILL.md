@@ -124,3 +124,9 @@ ask the user, before dispatching.
   in the run's `pipelines.tsv` row — the same name Launch reported and Ctrl+F
   lists. If the user wants hands-on control, name that session to jump
   to (Ctrl+F).
+- `bin/hq-reap` ends finished task sessions on its own: a merged/closed one
+  is killed within a few minutes, worktree untouched; a phase-`done` one
+  with the PR still open gets its claude ended ("parked") after 12h idle,
+  session kept. A message to a parked session sits unread until someone
+  visits it or runs `~/dotfiles/bin/hq-reap resume <session>` — if a
+  steering message seems to go nowhere, check that before escalating.
