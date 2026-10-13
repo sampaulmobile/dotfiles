@@ -95,6 +95,47 @@ else
     fail=$((fail + 1))
 fi
 
+echo "── sessionizer_row_lists: the status-list build behind row colors"
+T=$'\t'
+expect2() {
+    local label="$1" got="$2" want="$3"
+    if [[ "$got" == "$want" ]]; then
+        printf '  ok   %s\n' "$label"
+        pass=$((pass + 1))
+    else
+        printf '  FAIL %s\n       got  [%s]\n       want [%s]\n' "$label" "${got//$'\n'/\\n}" "${want//$'\n'/\\n}"
+        fail=$((fail + 1))
+    fi
+}
+
+# session status pane agents (aggregate_session_status's own line)
+sessions_body="app${T}idle${T}%1${T}3
+web${T}working${T}%4${T}-
+ghost${T}permission${T}%6${T}-"
+sessionizer_row_lists "$sessions_body" "" ""
+expect2 "idle + agents > 0 -> blue (WORK_LIST), badge carries the count" \
+    "$WORK_LIST$BADGE_LIST" $'\napp\nweb\n'$'\n'"app${T}3"$'\n'
+expect2 "permission -> red, not promoted by agents" "$PERM_LIST" $'\nghost\n'
+expect2 "idle with no agents never lands in IDLE_LIST here (only app/web/ghost given)" \
+    "$IDLE_LIST" $'\n'
+
+panes_body="app${T}%1${T}@1${T}claude${T}idle${T}3
+app${T}%2${T}@1${T}claude${T}idle${T}-"
+flag_keys="app@1
+app@2"
+sessionizer_row_lists "" "$flag_keys" "$panes_body"
+expect2 "a flag on the live-agent pane is dropped, the other pane's flag still shows green" \
+    "$DONE_LIST" $'\napp\n'
+
+flag_keys_single="app@1"
+sessionizer_row_lists "" "$flag_keys_single" "$panes_body"
+expect2 "deferred flag: the session's only flagged pane has live agents -> no green" \
+    "$DONE_LIST" $'\n'
+
+sessionizer_row_lists "" "$flag_keys_single" ""
+expect2 "stale/missing panes snapshot -> fail open, a would-be-deferred flag still shows green" \
+    "$DONE_LIST" $'\napp\n'
+
 echo
 if (( fail )); then
     printf 'FAILED: %d failed, %d passed\n' "$fail" "$pass"
