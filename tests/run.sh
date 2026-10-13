@@ -18,7 +18,7 @@ suites=(test-classify.sh test-notify.sh test-codex-rollout.sh test-agent-ttys.sh
         test-check-prose-only.sh test-agent-snippet.sh test-task-session.sh
         test-hq-snapshot.sh test-dashboard.sh test-session-order.sh
         test-runners.sh test-hq-inbox.sh test-hq-make-decision.sh test-hq-decisions.sh
-        test-hq-reap.sh)
+        test-hq-reap.sh test-hq-feed.sh)
 shells=(/bin/bash bash)
 
 failed=0

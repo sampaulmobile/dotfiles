@@ -1,0 +1,1 @@
+{"type":"user","message":{"role":"user","content":"<command-message>feature</command-message>\n<command-name>/feature</command-name>\n<command-args>add a widget</command-args>"},"origin":{"kind":"human"}}

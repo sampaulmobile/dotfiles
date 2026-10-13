@@ -36,12 +36,18 @@
 #                          session-window-changed hooks.
 #   list                   Flagged live panes, newest first.
 #   jump [client-tty]      C-y. Permission prompt first, else newest flag.
+#   jump-to <client-tty> <session> <pane>
+#                          bin/hq-feed's `g` — one named pane, no search.
 #   codex-session-start    codex SessionStart hook (dots/codex/hooks.json).
 #   codex-session-end      codex SessionEnd hook.
 
 source ~/dotfiles/bin/tmux-claude-lib
 
 FLAG_DIR="$HOME/.cache/claude-attention"
+
+usage() {
+    echo "usage: $(basename "$0") {flag-done|clear <session>|list|jump [client-tty]|jump-to <client-tty> <session> <pane>|codex-session-start|codex-session-end}" >&2
+}
 
 # Pane -> codex rollout map. Claude Code records its own tmux pane in
 # ~/.claude/sessions/*.json; codex records nothing of the sort, so its
@@ -161,39 +167,44 @@ cmd_list() {
     done | sort -rn | cut -f2,3
 }
 
+# do_switch <client-tty> <target-session> [pane]
+#   Switches <client-tty> (unscoped when empty) to <target-session>, and
+#   when a pane is given, lands on its window/pane and consumes its
+#   attention flag if it has one. Scoping rationale: dots/tmux.conf's C-y
+#   binding always passes #{client_tty}; run-shell spawns a plain shell
+#   whose tmux invocations are fresh clients with no attached-client
+#   identity, so an unscoped `switch-client -t` falls back to tmux's
+#   most-recently-active attached client and can yank a DIFFERENT real
+#   client to the target session — seen live. Unscoped is only for ad hoc
+#   CLI use with no argument.
+do_switch() {
+    local client="$1" target="$2" pane="$3"
+    local -a cflag=()
+    [[ -n "$client" ]] && cflag=(-c "$client")
+    tmux switch-client "${cflag[@]}" -t "=$target"
+    if [[ -n "$pane" ]]; then
+        # Land on the flagged pane's window (a pane id resolves to its
+        # window) and consume the flag here: the tmux hooks only clear
+        # what a client is looking at, and a server whose loaded config
+        # predates the session-window-changed hook would clear nothing
+        # after this select-window.
+        tmux select-window -t "$pane" 2>/dev/null \
+            && tmux select-pane -t "$pane" 2>/dev/null
+        local f
+        f=$(flag_path "$target" "$pane")
+        if [[ -e "$f" ]]; then
+            rm -f "$f"
+            tmux set-option -wq -t "$pane" @agent_status idle 2>/dev/null
+        fi
+    fi
+}
+
 cmd_jump() {
     local client="$1"
     local session
 
-    # Scope switch-client/display-message to the invoking client whenever
-    # it is known (dots/tmux.conf's binding always passes #{client_tty}).
-    # run-shell spawns a plain shell, whose tmux invocations are fresh
-    # clients with no attached-client identity, so an unscoped
-    # `switch-client -t` falls back to tmux's most-recently-active attached
-    # client and can yank a DIFFERENT real client to the target session —
-    # seen live. Unscoped is only for ad hoc CLI use with no argument.
     local -a cflag=()
     [[ -n "$client" ]] && cflag=(-c "$client")
-
-    do_switch() {
-        local target="$1" pane="$2"
-        tmux switch-client "${cflag[@]}" -t "=$target"
-        if [[ -n "$pane" ]]; then
-            # Land on the flagged pane's window (a pane id resolves to its
-            # window) and consume the flag here: the tmux hooks only clear
-            # what a client is looking at, and a server whose loaded config
-            # predates the session-window-changed hook would clear nothing
-            # after this select-window.
-            tmux select-window -t "$pane" 2>/dev/null \
-                && tmux select-pane -t "$pane" 2>/dev/null
-            local f
-            f=$(flag_path "$target" "$pane")
-            if [[ -e "$f" ]]; then
-                rm -f "$f"
-                tmux set-option -wq -t "$pane" @agent_status idle 2>/dev/null
-            fi
-        fi
-    }
 
     # Priority 1: a pane waiting on a permission prompt, most recently
     # active session first. Via the shared scan_claude_sessions, which is
@@ -212,7 +223,7 @@ cmd_jump() {
             [[ -z "$session" ]] && continue
             rest="${perm_s#*$'\n'"$session"$'\t'}"
             if [[ "$rest" != "$perm_s" ]]; then
-                do_switch "$session" "${rest%%$'\n'*}"
+                do_switch "$client" "$session" "${rest%%$'\n'*}"
                 return
             fi
         done < <(tmux list-sessions -F '#{session_activity} #{session_name}' 2>/dev/null | sort -rn | awk '{print $2}')
@@ -222,11 +233,20 @@ cmd_jump() {
     local pane=""
     IFS=$'\t' read -r session pane < <(cmd_list | head -1)
     if [[ -n "$session" ]]; then
-        do_switch "$session" "$pane"
+        do_switch "$client" "$session" "$pane"
         return
     fi
 
     tmux display-message "${cflag[@]}" "nothing needs attention"
+}
+
+# cmd_jump_to <client-tty> <session> <pane>
+#   bin/hq-feed's `g`: do_switch for one named pane, no permission-prompt or
+#   unseen-flag search — the caller already knows exactly where to land.
+cmd_jump_to() {
+    local client="$1" session="$2" pane="$3"
+    [[ -n "$session" && -n "$pane" ]] || { usage; exit 1; }
+    do_switch "$client" "$session" "$pane"
 }
 
 cmd_codex_session_start() {
@@ -273,10 +293,11 @@ case "${1:-}" in
     clear)               cmd_clear "${2:-}" ;;
     list)                cmd_list ;;
     jump)                cmd_jump "${2:-}" ;;
+    jump-to)             cmd_jump_to "${2:-}" "${3:-}" "${4:-}" ;;
     codex-session-start) cmd_codex_session_start ;;
     codex-session-end)   cmd_codex_session_end ;;
     *)
-        echo "usage: $(basename "$0") {flag-done|clear <session>|list|jump [client-tty]|codex-session-start|codex-session-end}" >&2
+        usage
         exit 1
         ;;
 esac
