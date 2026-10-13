@@ -1,39 +1,16 @@
 #!/usr/bin/env bash
-# hq-decisions — read-only over bin/hq-make-decision's records; its one write is
-# _state/seen, interactive viewer only (see below). Two views: a flat LIST
-# (one line per decision, sections OPEN / AUTO-TAKEN / ANSWERED) and a
-# full-screen DETAIL of one decision (⏎ on a row). Columns, keys and formats
-# are usage() below, the reference a user reads; CLAUDE.md points here
-# rather than restating it.
-#
 # tmux: only `g` (go_to_hub/other_client) touches tmux, read-only otherwise.
-# Terminal size never uses tmux: $COLUMNS/$LINES, then `stty size </dev/tty`,
-# then `tput` — see term_size. `o` shells out to
+# Terminal size never uses tmux (see term_size). `o` shells out to
 # `git -C <repo> remote get-url origin` (read-only) and `open <url>`.
 #
 # The screen's ONE write: the interactive viewer stamps
 # $HQ_DECISIONS_DIR/_state/seen (tmp+mv); `--dump` never writes it.
 #
-# The view loop ticks on `read -rsn1 -t 2` — bash 3.2 rejects a fractional
-# -t, so the tick is a whole 2 seconds; see view() for how a timeout is told
-# apart from a key. LIST and DETAIL share one scrolling `paint()`:
-# frame_head/frame_tail/frame_foot are fixed, frame_rows scrolls, and the
-# one line between frame_tail and frame_foot is either a status note or an
-# "N more" scroll indicator.
-#
-# Width/padding discipline (bash 3.2 gotcha): `printf '%-Ns'` pads by BYTES
-# and `${#x}` counts bytes under a non-UTF-8 locale, so every multi-byte
-# glyph (● ✓ › …) breaks column math. decisions_ensure_utf8_locale forces a
-# UTF-8 LC_CTYPE so `${#x}` is character-based, and `pad`/`clip` are the only
-# places width is measured — always on PLAIN text, with color codes spliced
-# in afterward so they never count toward a width.
-#
 # fd safety (bash 3.2 gotcha): this bash does not reliably close the fd a
 # `< <(…)` process substitution or a `<<<` here-string opens inside a
 # function on a path that runs every tick, so a pane left open long enough
-# hits "Too many open files". load_data/build_frame/paint and everything
-# they call split text with decisions_split/decisions_split_lines_preserve
-# (below) instead, which capture with `$(…)` and index into an array.
+# hits "Too many open files". decisions_split/decisions_split_lines_preserve
+# (below) avoid both, capturing with `$(…)` and indexing into an array.
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 # shellcheck source=/dev/null
@@ -41,6 +18,9 @@ source "$DOTFILES/bin/hq-make-decision"
 # shellcheck source=/dev/null
 source "$DOTFILES/bin/project-dirs-lib"
 
+# `${#x}` counts bytes under a non-UTF-8 locale and every multi-byte glyph
+# (● ✓ › …) breaks column math; forcing UTF-8 LC_CTYPE here makes it
+# character-based for pad/clip downstream.
 decisions_ensure_utf8_locale() {
     case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
         *UTF-8*|*utf8*|*UTF8*) return 0 ;;
@@ -104,17 +84,15 @@ Zero decisions still prints the header and an empty NEEDS YOU.
 EOF
 }
 
-# ── paint ───────────────────────────────────────────────
-
 RST=""; BOLD=""; DIM=""; SEL=""; C_AMBER=""; C_TEAL=""; C_GREEN=""
 if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; then
     RST=$'\033[0m'; BOLD=$'\033[1m'; DIM=$'\033[2m'; SEL=$'\033[48;5;236m'
     C_AMBER=$'\033[33m'; C_TEAL=$'\033[36m'; C_GREEN=$'\033[32m'
 fi
 
-# term_size — sets term_w and term_h with no tmux call, ever: $COLUMNS/
-# $LINES, then stty on the controlling tty, then tput, then a default.
-# Called bare (never inside $( )) so the globals survive.
+# No tmux call, ever: $COLUMNS/$LINES, then stty on the controlling tty,
+# then tput, then a default. Called bare (never inside $( )) so the globals
+# survive.
 term_size() {
     local w="${COLUMNS:-}" h="${LINES:-}" sz
     if ! [[ "$w" =~ ^[1-9][0-9]*$ && "$h" =~ ^[1-9][0-9]*$ ]] \
@@ -136,9 +114,9 @@ clip() {
     if (( ${#t} > w )); then printf '%s…' "${t:0:w-1}"; else printf '%s' "$t"; fi
 }
 
-# pad <text> <width> [right] — space-pads PLAIN text to <width> by character
-# count (never `printf '%-Ns'`, which pads by bytes). Never call this on
-# text that already carries color escapes — splice color in after padding.
+# Pads PLAIN text to <width> by character count, never bytes (`printf
+# '%-Ns'` pads bytes). Never call this on text that already carries color
+# escapes — splice color in after padding.
 pad() {
     local t="$1" w="$2" align="${3:-left}" n
     n=$(( w - ${#t} ))
@@ -148,25 +126,23 @@ pad() {
     fi
 }
 
-# count_lines <text> — number of newlines in <text>, pure bash (no fork).
-# frame_head/frame_tail/frame_foot each end every line, including the last,
-# in a literal newline, so this is exactly how many screen lines they take.
+# Pure bash (no fork). frame_head/frame_tail/frame_foot each end every line,
+# including the last, in a literal newline — this is exactly how many
+# screen lines they take.
 count_lines() {
     local s="$1" nl
     nl="${s//[^$'\n']/}"
     printf '%s' "${#nl}"
 }
 
-# decisions_split <text> <seps> — splits <text> on any char in <seps> into
-# the global array SPLIT_OUT, with no `read`, no `<<<`, no `< <(…)` (see the
-# fd-safety note above). A run of IFS-whitespace separators (space/tab/
-# newline) collapses and strips at the ends, exactly like `read`'s default
-# splitting — every string this file splits this way is either never empty
-# (an id) or already has its empty fields replaced with "-" by the TSV layer,
-# so collapsing never drops real data. bash 3.2 has no `declare -n`, so the
-# result comes back in this global rather than a caller-named one — copy it
-# into a local array before calling this again, since the next call
-# overwrites it.
+# Splits on any char in <seps> into the global array SPLIT_OUT, with no
+# `read`, no `<<<`, no `< <(…)` (fd safety, above). A run of IFS-whitespace
+# separators collapses and strips at the ends like `read`'s default
+# splitting; safe here because every string this file splits this way is
+# either never empty (an id) or already has empty fields written as "-" by
+# the TSV layer. bash 3.2 has no `declare -n`, so the result lands in this
+# global, not a caller-named one — copy it to a local array before calling
+# this again, since the next call overwrites it.
 decisions_split() {
     local text="$1" seps="$2" oIFS="$IFS" had_f=0
     case "$-" in *f*) had_f=1 ;; esac
@@ -177,11 +153,10 @@ decisions_split() {
     (( had_f )) || set +f
 }
 
-# decisions_split_lines_preserve <text> — like decisions_split "$text" $'\n'
-# but keeps every line INCLUDING empty ones (wrap_text emits a blank line
-# for a paragraph break, which plain IFS splitting would collapse away).
-# Matches `while read -r l || [[ -n "$l" ]]; done <<< "$text"` with no
-# here-string.
+# Like decisions_split on $'\n' but keeps every line INCLUDING empty ones:
+# wrap_text emits a blank line for a paragraph break, which plain IFS
+# splitting would collapse away. Matches `while read -r l || [[ -n "$l" ]];
+# done <<< "$text"` with no here-string.
 decisions_split_lines_preserve() {
     local text="$1" rest line
     SPLIT_OUT=()
@@ -199,9 +174,8 @@ decisions_split_lines_preserve() {
     done
 }
 
-# wrap_text <text> <width> — pure bash word wrap, no fork: honors embedded
-# newlines as paragraph breaks and hard-splits a word longer than width.
-# Prints the wrapped lines, one per line, to stdout.
+# Pure bash, no fork: honors embedded newlines as paragraph breaks and
+# hard-splits a word longer than width.
 wrap_text() {
     local text="$1" width="$2" para rest line word out="" first_para=true
     (( width < 1 )) && width=1
@@ -241,8 +215,8 @@ wrap_text() {
     printf '%s' "$out"
 }
 
-# age_of <ISO> — age formatted like bin/hq-make-decision's own table; "-" for a
-# timestamp that does not parse.
+# Formatted like bin/hq-make-decision's own table; "-" for a timestamp that
+# does not parse.
 age_of() {
     local epoch
     epoch=$(decision_epoch "$1")
@@ -250,23 +224,20 @@ age_of() {
     decision_fmt_secs $(( $(date +%s) - epoch ))
 }
 
-# session_text <session> — "-"/empty (no session on the record) renders as
-# "the hub" everywhere a session name is shown.
+# "-"/empty (no session on the record) renders as "the hub" everywhere a
+# session name is shown.
 session_text() {
     local s="$1"
     [[ -z "$s" || "$s" == "-" ]] && printf 'the hub' || printf '%s' "$s"
 }
 
-# ── seen cutoff ─────────────────────────────────────────
-
-# decisions_seen_file — path to the one-line seen stamp.
 decisions_seen_file() { printf '%s/_state/seen' "$DECISIONS_DIR"; }
 
-# decisions_read_seen_cutoff — sets SEEN_CUTOFF_EPOCH from the seen file's
-# ISO line, or 0 (every auto answer unseen) when the file is absent or its
-# line does not parse. Called once per run, before the first load_data —
-# never re-read mid-loop, so a reload during the same view still measures
-# "since you last looked" against the moment this run started.
+# Sets SEEN_CUTOFF_EPOCH from the seen file's ISO line, or 0 (every auto
+# answer unseen) when the file is absent or doesn't parse. Called once per
+# run, before the first load_data — never re-read mid-loop, so a reload
+# during the same view still measures "since you last looked" against the
+# moment this run started.
 SEEN_CUTOFF_EPOCH=0
 decisions_read_seen_cutoff() {
     local f line e
@@ -278,7 +249,7 @@ decisions_read_seen_cutoff() {
     [[ -n "$e" ]] && SEEN_CUTOFF_EPOCH="$e"
 }
 
-# decisions_write_seen — stamps now into the seen file, tmp+mv, mkdir -p.
+# Stamps now into the seen file: tmp+mv, mkdir -p.
 decisions_write_seen() {
     local f tmp
     f=$(decisions_seen_file)
@@ -288,11 +259,9 @@ decisions_write_seen() {
     mv -f "$tmp" "$f"
 }
 
-# ── PR / hub lookups (read-only) ───────────────────────
-
-# decisions_repo_dir <repo> — the first project_dirs() entry whose basename
-# is <repo> and whose .git is a directory (the repo's main checkout, never a
-# linked worktree). Empty/failure when none matches.
+# The first project_dirs() entry whose basename is <repo> and whose .git is
+# a directory — the repo's main checkout, never a linked worktree. Empty on
+# no match.
 decisions_repo_dir() {
     local repo="$1" d base
     project_dirs
@@ -306,8 +275,8 @@ decisions_repo_dir() {
     return 1
 }
 
-# decisions_pr_url <origin> <pr> — pure: maps a github.com origin (ssh,
-# ssh://, or https, .git optional) to its PR URL; empty for anything else.
+# Pure: maps a github.com origin (ssh, ssh://, or https, .git optional) to
+# its PR URL; empty for anything else.
 decisions_pr_url() {
     local origin="$1" pr="$2" rest
     case "$origin" in
@@ -334,8 +303,8 @@ decisions_open_pr() {
 
 # other_client/go_to_hub are the only tmux callers in this file: display,
 # list-clients, has-session, switch-client -c.
-# other_client — the tty of the most recently active attached client that is
-# not this one; empty when this screen is the only client.
+# The tty of the most recently active attached client that is not this one;
+# empty when this screen is the only client.
 other_client() {
     local mine out line act tty best="" bestact=-1
     mine=$(tmux display -p '#{client_tty}' 2>/dev/null)
@@ -376,8 +345,6 @@ go_to_hub() {
     STATUS_NOTE="sent $tty to $session"
 }
 
-# ── data ────────────────────────────────────────────────
-
 d_id=(); d_repo=(); d_pr=(); d_branch=(); d_title=(); d_context=()
 d_recommend=(); d_rec_label=(); d_session=(); d_created=(); d_updated=()
 d_state=(); d_aopt=(); d_anote=(); d_aat=(); d_aby=(); d_ans_label=()
@@ -386,10 +353,9 @@ open_order=(); ans_order=()
 n_open=0; n_auto=0; n_answered=0; n_unseen_auto=0; total_count=0
 store_newest_updated_iso=""
 
-# load_data — one decision_records call, one jq pass to TSV (recommend and
-# answer labels resolved here so no per-row jq at LIST paint time), then
-# two ordered index arrays: open_order (open, newest created first) and
-# ans_order (auto-taken and owner-answered together, newest answer.at first).
+# One decision_records call, one jq pass to TSV — recommend/answer labels
+# resolved here so no per-row jq at LIST paint time. open_order sorts
+# newest created first; ans_order sorts newest answer.at first.
 load_data() {
     local recs tsv i line
     local -a tsv_lines=() cols=() sorted_lines=()
@@ -516,14 +482,14 @@ load_data() {
     done
 }
 
-# decisions_signature — one `ls` fork over every record file's mtime, the
-# cheap check the view loop uses to notice a write between ticks.
+# One `ls` fork over every record file's mtime — the cheap check the view
+# loop uses to notice a write between ticks.
 decisions_signature() {
     ls -lnT "$DECISIONS_DIR"/*/*.json 2>/dev/null
 }
 
-# decisions_locate_id <id> — sets LOCATE_IDX/LOCATE_SECTION/LOCATE_POS for
-# the record with this id; fails when no such record is loaded.
+# Sets LOCATE_IDX/LOCATE_SECTION/LOCATE_POS for the record with this id;
+# fails when no such record is loaded.
 decisions_locate_id() {
     local id="$1" i j
     for i in "${!d_id[@]}"; do
@@ -544,17 +510,15 @@ decisions_locate_id() {
     return 1
 }
 
-# decisions_other_option <idx> <chosen-id> — the first option id of record
-# <idx> that is not <chosen-id>, for the TO REVERSE bar.
+# The first option id of the record that is not <chosen-id>, for the TO
+# REVERSE bar.
 decisions_other_option() {
     local idx="$1" chosen="$2"
     jq -nr --arg b64 "${d_opts_b64[$idx]}" --arg c "$chosen" \
         '$b64 | @base64d | fromjson | map(select(.id != $c)) | (.[0].id // empty)'
 }
 
-# ── LIST frame ──────────────────────────────────────────
-
-# list_where <idx> — "<repo> #<pr>" or "<repo> <branch>", plain text.
+# Returns "<repo> #<pr>" or "<repo> <branch>", plain text.
 list_where() {
     local idx="$1" s
     s="${d_repo[$idx]}"
@@ -564,9 +528,9 @@ list_where() {
     printf '%s' "$s"
 }
 
-# render_list_row — one row's display string. Widths are pre-computed by
-# build_list_frame; every field is clipped (plain) and padded (plain)
-# before any color is spliced in, so color escapes never skew a width.
+# Widths are pre-computed by build_list_frame; every field is clipped and
+# padded in PLAIN text before color is spliced in, so escapes never skew a
+# width.
 render_list_row() {
     local idx="$1" kind="$2" where="$3" asked="$4" last="$5" age="$6"
     local where_w="$7" title_w="$8" asked_w="$9" last_w="${10}" narrow="${11}"
@@ -724,12 +688,6 @@ build_list_frame() {
     frame_foot="${DIM}$(clip "$foot_plain" "$term_w")${RST}"$'\n'
 }
 
-# ── DETAIL frame ────────────────────────────────────────
-
-# append_detail_option <idx> <o_id> <o_label> <o_desc> <width> — one
-# OPTIONS block: head line(s), wrapped description, `why` on the
-# recommended option, and (for an answered record) the chosen option's note
-# and answer age.
 append_detail_option() {
     local idx="$1" o_id="$2" o_label="$3" o_desc="$4" dw="$5"
     local is_rec=false is_chosen=false
@@ -794,12 +752,11 @@ append_detail_option() {
     fi
 }
 
-# build_detail_bar <idx> — the fixed TO ANSWER / TO REVERSE / answered-by
-# bar. wrap_text re-joins words with single spaces, so it cannot wrap "label
+# wrap_text re-joins words with single spaces, so it can't wrap "label
 # message" and keep the label's deliberate 2-space gap: wrap "label message"
-# (one space, same word boundaries wrap_text would use anyway) at
-# (term_w - 1), then splice the second space back into the first line — the
-# reserved column keeps the result within term_w either way.
+# (one space) at (term_w - 1), then splice the second space back into the
+# first line — the reserved column keeps the result within term_w either
+# way.
 build_detail_bar() {
     local idx="$1" label="" message full wrap_w first=true wline
     local kind="${d_state[$idx]}"
@@ -926,8 +883,6 @@ build_detail_frame() {
     frame_foot="${DIM}$(clip "$foot_plain" "$term_w")${RST}"$'\n'
 }
 
-# ── loop-shared frame/paint ─────────────────────────────
-
 frame_rows=()
 frame_row_line=()
 frame_head=""
@@ -959,11 +914,11 @@ build_frame() {
     fi
 }
 
-# paint — composes the screen into `screen_out` and prints it with the
-# clear prefix, so a test can source the script and inspect `screen_out`
-# with no terminal. frame_head/frame_tail/frame_foot are fixed; frame_rows
-# is the only part that scrolls, and the one line between frame_tail and
-# frame_foot is either STATUS_NOTE or an "N more" scroll indicator.
+# Composes the screen into `screen_out` (not just stdout) so a test can
+# source the script and inspect it with no terminal. frame_head/frame_tail/
+# frame_foot are fixed; frame_rows is the only part that scrolls, and the
+# one line between frame_tail and frame_foot is either STATUS_NOTE or an
+# "N more" scroll indicator.
 paint() {
     term_size
     local head_lines tail_lines foot_lines body total sel last i out
@@ -1023,8 +978,6 @@ dump() {
     printf '%s' "$frame_foot"
 }
 
-# ── cursor / navigation ─────────────────────────────────
-
 list_move() {
     local dir="$1" entry idx
     (( selected += dir ))
@@ -1065,8 +1018,6 @@ decisions_detail_step() {
     frame_top=0
 }
 
-# ── entry ───────────────────────────────────────────────
-
 # Enter arrives as the empty string, space as " ". A read -t timeout ALSO
 # leaves the key empty — read's own exit status (> 128 on timeout) is the
 # only way to tell a timeout from Enter. bash 3.2 actually returns 1 for
@@ -1092,8 +1043,7 @@ view() {
         t0=$SECONDS
         read -rsn1 -t 2 key
         rc=$?
-        # bash 3.2 returns 1 on a read timeout, not >128; on a tty a non-zero
-        # read is the idle tick, never EOF.
+        # On a tty, a non-zero read is the idle tick, never EOF.
         if (( rc > 128 )) || (( rc != 0 )) && [[ -t 0 ]]; then
             if (( rc != 0 )) && (( SECONDS - t0 < 1 )); then
                 fail_count=$(( fail_count + 1 ))
@@ -1161,8 +1111,8 @@ view() {
     done
 }
 
-# Sourced by tests/test-hq-decisions.sh: hand back wrap_text and the other
-# pure functions, running no loop and reading no directory.
+# Hands back wrap_text and the other pure functions; sourcing runs no loop
+# and reads no directory.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 0 2>/dev/null || true
 fi
