@@ -457,24 +457,21 @@ append_block_body() {
     local idx="$1" width="$2" bucket="${p_bucket[$1]}" full="$3"
     local kind="${p_kind[$idx]}" prefix_w=7
 
-    if [[ "$kind" == you ]]; then
-        local p="${p_prompt[$idx]}"
+    if [[ "$kind" == you || "$kind" == msg ]]; then
+        local label="you ›" p="${p_prompt[$idx]}"
+        if [[ "$kind" == msg ]]; then label="msg ›"; p="${p_from[$idx]}: ${p}"; fi
         if [[ "$full" == true ]]; then
             local wline first=true
             feed_split_lines_preserve "$(wrap_text "$p" $(( width - prefix_w )))"
             for wline in "${SPLIT_OUT[@]}"; do
-                if [[ "$first" == true ]]; then frame_rows+=("  ${DIM}you ›${RST} ${wline}"); first=false
+                if [[ "$first" == true ]]; then frame_rows+=("  ${DIM}${label}${RST} ${wline}"); first=false
                 else frame_rows+=("       ${wline}")
                 fi
             done
         else
             p="${p//$'\n'/ }"
-            frame_rows+=("  ${DIM}you ›${RST} $(clip "$p" $(( width - prefix_w )))")
+            frame_rows+=("  ${DIM}${label}${RST} $(clip "$p" $(( width - prefix_w )))")
         fi
-    elif [[ "$kind" == msg ]]; then
-        local p="${p_prompt[$idx]}" from="${p_from[$idx]}"
-        p="${p//$'\n'/ }"
-        frame_rows+=("  ${DIM}msg ›${RST} $(clip "${from}: ${p}" $(( width - prefix_w )))")
     fi
 
     if [[ "$bucket" == WORKING && "${p_tool[$idx]}" != "-" ]]; then
