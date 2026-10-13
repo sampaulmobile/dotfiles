@@ -17,8 +17,6 @@ classify_codex_pane_status() {
         return
     fi
 
-    # Same windowing as the claude classifier, duplicated on purpose — do
-    # not merge the two.
     local -a all filtered
     IFS=$'\n' read -rd '' -a all <<< "$raw"
     local line
@@ -186,11 +184,8 @@ codex_get_context_and_model() {
 # Prints tab-separated: total_output total_all turns cost. No incremental
 # accumulation, unlike get_totals_incremental: codex's token_count carries
 # CUMULATIVE thread totals, so the last one wins. Turns are task_started
-# events, counted with a plain grep and cached against the file's mtime when
-# a cache path is given — a long rollout is a few MB and the dashboard
-# re-reads it every refresh. cost: codex plans bill by rate limit, not per
-# token, so COST shows the primary rate-limit window's usage ("5h:42%") when
-# present, else "-".
+# events. cost: codex plans bill by rate limit, not per token, so COST shows
+# the primary rate-limit window's usage ("5h:42%") when present, else "-".
 codex_get_totals() {
     local jsonl="$1" cache="$2"
     [[ ! -f "$jsonl" ]] && printf '0\t0\t0\t-' && return
