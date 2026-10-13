@@ -7,15 +7,13 @@
 CLAUDE_SESSIONS_DIR="$HOME/.claude/sessions"
 CLAUDE_PROJECTS_DIR="$HOME/.claude/projects"
 
-# Agent liveness thresholds. An agent transcript with mtime within
-# LIVE_AGENT_SECS renders as working (●); older renders as done/idle (◯)
-# with its age; older than STALE_AGENT_SECS is hidden entirely. Rationale:
+# An agent transcript with mtime within LIVE_AGENT_SECS renders as working
+# (●); older renders as done/idle (◯) with its age; older than
+# STALE_AGENT_SECS is hidden entirely. Rationale:
 # workplans/tmux-claude-dashboard-agent-trees-plan.md.
 LIVE_AGENT_SECS=120
 STALE_AGENT_SECS=1800
 
-# other/tmux-agent-default: one line, `claude` or `codex` (private,
-# untracked).
 AGENT_DEFAULT_FILE="$HOME/dotfiles/other/tmux-agent-default"
 
 agent_default() {
@@ -51,9 +49,8 @@ agent_window_name() {
     printf '%s' "$1"
 }
 
-# Builds the standard layout every launcher here uses: window 1 <agent>, 2
-# nvim, 3 zsh. Only the agent window's name is pinned; nvim's stays on
-# automatic-rename so it tracks whatever runs there after nvim exits.
+# Only the agent window's name is pinned; nvim's stays on automatic-rename
+# so it tracks whatever runs there after nvim exits.
 # <agent-command> is TYPED into an initialized shell rather than passed as
 # the tmux session command: a session command skips the zsh rc files, so
 # other/zshrc.local env (ANTHROPIC_MODEL, TLS, ...) would be missing and the
@@ -78,10 +75,10 @@ new_agent_session() {
     tmux select-window -t "${name}:1"
 }
 
-# Claude peer name: `claude -n` sets the display name AND the cross-session
-# address (ListAgents/SendMessage), stable across --resume. Only this
-# front-door window is named; extra claude windows (tmux-claude-window) stay
-# unnamed (<dir>-NN) so the session has exactly one peer address. codex: no
+# `claude -n` sets the display name AND the cross-session address
+# (ListAgents/SendMessage), stable across --resume. Only this front-door
+# window is named; extra claude windows (tmux-claude-window) stay unnamed
+# (<dir>-NN) so the session has exactly one peer address. codex: no
 # equivalent.
 new_hub_session() {
     local name="$1" dir="$2" agent="${3:-}"
@@ -98,10 +95,10 @@ new_hub_session() {
     fi
 }
 
-# Wakes a session bin/hq-reap parked. A non-parked session (the common
-# case, paid on every sessionizer/wt-tmux-jump/dashboard visit) costs
-# exactly one display -p and returns. CREATION-only per
-# tmux-task-session's rule: display-message, send-keys, set-option.
+# A non-parked session (the common case, paid on every
+# sessionizer/wt-tmux-jump/dashboard visit) costs exactly one display -p and
+# returns. CREATION-only per tmux-task-session's rule: display-message,
+# send-keys, set-option.
 unpark_session() {
     local session="$1" pane cmd tty
     IFS=$'\t' read -r pane cmd < <(tmux display -p -t "$session" $'#{@parked_pane}\t#{@parked_cmd}' 2>/dev/null)
@@ -165,8 +162,6 @@ _agent_tty_map() {
     printf '%s' $'\n'"$m"
 }
 
-# Prints every tmux session (any name) with an agent process on one of its
-# pane ttys, most recently active first.
 get_claude_sessions() {
     local ttys
     ttys=$(claude_ttys)
@@ -184,8 +179,7 @@ get_claude_sessions() {
 # Prints one line per agent PANE — any window of any session — tab-separated:
 # session_name, pane_id, window_index, agent, cwd (last, so a path holding a
 # tab still reads whole). Most recently active session first, window order
-# within a session. Per-pane rather than per-session, so an agent outside
-# window 1 gets its own row.
+# within a session; an agent outside window 1 still gets its own row.
 get_claude_panes() {
     local map rest
     map=$(_agent_tty_map) || return 0
@@ -287,7 +281,7 @@ classify_pane_status() {
         return
     fi
 
-    # Plan-mode question: "Enter to select" on either of the last 2 lines.
+    # Plan-mode question: "Enter to select".
     local wn=${#window[@]}
     if (( wn > 0 )); then
         local last="${window[$(( wn - 1 ))]}"
@@ -307,8 +301,6 @@ classify_pane_status() {
     echo "unknown"
 }
 
-# Prints: working | idle | permission | unknown. The agent defaults to the
-# session's own @agent.
 get_session_status() {
     local session="$1"
     local agent="${2:-}"
@@ -318,15 +310,13 @@ get_session_status() {
     classify_pane_status "$raw" "$agent"
 }
 
-# Prints: working | idle | permission | unknown
 get_pane_status() {
     local raw
     raw=$(tmux capture-pane -t "$1" -p -S -30 2>/dev/null)
     classify_pane_status "$raw" "${2:-claude}"
 }
 
-# Scans every pane owned by a live agent process — any window of any
-# session — and prints one line per such pane:
+# One line per agent pane, any window of any session:
 # "<session>\t<pane>\t<window>\t<agent>\t<status>", status being
 # classify_pane_status's permission | working | idle | unknown.
 #
@@ -393,12 +383,11 @@ scan_agent_panes() {
     done <<< "$combined"
 }
 
-# Folds scan_agent_panes output into one line per session:
-# "<session>\t<status>\t<pane>". Status is the worst across the session's
-# agent panes (permission > working > idle > unknown) and pane is the id of
-# the one exhibiting it ("-" when unknown, first-seen wins on a tie), which
-# is what lets C-y land on the prompt itself rather than on the session's
-# current window while the prompt blocks in another.
+# One line per session: "<session>\t<status>\t<pane>". Status is the worst
+# across the session's agent panes (permission > working > idle > unknown)
+# and pane is the id of the one exhibiting it ("-" when unknown, first-seen
+# wins on a tie), which is what lets C-y land on the prompt itself rather
+# than on the session's current window while the prompt blocks in another.
 aggregate_session_status() {
     # Delimited strings and a first-seen order array (bash 3.2 has no
     # associative arrays).
@@ -418,8 +407,6 @@ aggregate_session_status() {
         fi
     done <<< "$1"
 
-    # Prefix stripping rather than command substitution: the statusbar runs
-    # this whole scan in ~200ms.
     for name in "${order[@]}"; do
         st="unknown"
         pane="-"
@@ -438,10 +425,8 @@ scan_claude_sessions() {
     aggregate_session_status "$(scan_agent_panes)"
 }
 
-# Folds scan_agent_panes output per window, merging the attention layer's
-# flagged panes (one "%N" per line): "<window>\t<status>", status being
-# permission > working > done > idle. Unknown counts as idle: an agent
-# process does live there.
+# "<window>\t<status>", status being permission > working > done > idle.
+# Unknown counts as idle: an agent process does live there.
 window_status_from_panes() {
     local done_s=$'\n'"${2}"$'\n'
     local perm_s=$'\n' work_s=$'\n' dn_s=$'\n' seen=$'\n'
@@ -483,7 +468,7 @@ encode_cwd() {
 
 # One line per live claude: "paneId\tcwd\tsessionId", paneId is "-" when
 # unknown. Call once before the pane-exact lookups below, which read from
-# this cache.
+# this file ($_CWD_MAP_FILE).
 _CWD_MAP_FILE=""
 build_cwd_session_map() {
     _CWD_MAP_FILE=$(mktemp /tmp/claude-cwd-map.XXXXXX)
@@ -491,13 +476,11 @@ build_cwd_session_map() {
         "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null > "$_CWD_MAP_FILE"
 }
 
-# Pane-exact transcript lookup: sessions/*.json records each claude's
-# tmux pane id ("tmux":"sess:@win.%pane") — match this pane's id against
-# the map. This is what disambiguates two claude processes sharing one
-# CWD: without it, _cwd_lookup_jsonl's newest-jsonl heuristic silently
-# hands back the OTHER claude's transcript — no subagents dir, wrong
-# tokens. Prints the jsonl path, or nothing on a miss. Requires
-# build_cwd_session_map to have run.
+# sessions/*.json records each claude's tmux pane id
+# ("tmux":"sess:@win.%pane"). This is what disambiguates two claude
+# processes sharing one CWD: without it, _cwd_lookup_jsonl's newest-jsonl
+# heuristic silently hands back the OTHER claude's transcript — no
+# subagents dir, wrong tokens. Prints the jsonl path, or nothing on a miss.
 _pane_exact_jsonl() {
     local pane_id="$1"
     [[ -n "$_CWD_MAP_FILE" && -f "$_CWD_MAP_FILE" ]] || return 0
@@ -509,9 +492,7 @@ _pane_exact_jsonl() {
     [[ -n "$psid" && -f "$pjsonl" ]] && echo "$pjsonl"
 }
 
-# Prints the path to the active JSONL transcript for the claude running in
-# one exact pane, or empty string. Pane-exact lookup first, then the cwd
-# fallback against THAT pane's cwd (not window 1's).
+# The cwd fallback uses THAT pane's cwd, not window 1's.
 find_pane_jsonl() {
     local pane_id="$1"
     local pjsonl
@@ -525,8 +506,6 @@ find_pane_jsonl() {
     _cwd_lookup_jsonl "$cwd"
 }
 
-# Prints the path to the active JSONL transcript file, or empty string.
-# Pane-exact over window 1's panes first, then the cwd lookup.
 # Window-1-pinned by construction, so it cannot see a claude running
 # anywhere else: per-pane callers must use find_pane_jsonl instead.
 find_session_jsonl() {
@@ -747,15 +726,12 @@ _agent_cache_set() {
     printf '%s\n%s' "$2" "$3" > "$1" 2>/dev/null
 }
 
-# Prints one line per live subagent under the given transcript's subagents
-# dir, sorted for tree rendering (parents before children, siblings in spawn
+# Sorted for tree rendering (parents before children, siblings in spawn
 # order). Tab-separated: agent_id, spawn_depth, parent_id, agentType,
 # description, mtime, started. mtime is the transcript's last write, i.e.
 # recency; started is the meta.json mtime, written once at spawn, and is
 # what a "working Ns" age must count from — jsonl mtime resets on every
-# write, so counting from it shows a perpetual "working 2s". Agents whose
-# jsonl mtime is older than STALE_AGENT_SECS are hidden. Missing meta
-# fields degrade to blank rather than erroring.
+# write, so counting from it shows a perpetual "working 2s".
 list_session_agents() {
     local sid_jsonl="$1"
     [[ -z "$sid_jsonl" || ! -f "$sid_jsonl" ]] && return
@@ -899,21 +875,19 @@ def tool_line:
 # (tojson) or "-", so none carries a raw tab or newline that would shift
 # a TSV reader's columns. Claude transcripts only.
 #
-# Prompt side: the byte offset of the LAST user record whose origin.kind is
-# "human" or "peer" (grep -b — the only full-file pass here; a typed prompt
-# can sit far behind a 100+ KB run of tool results, so a bounded tail would
-# miss it — see workplans/hq-feed-plan.md). A peer record newer than the
-# last human one is a cross-session message (kind "msg", "from" its
-# origin.name) UNLESS it carries no name — a subagent hand-back
-# (senderTaskId, no name) — in which case it is skipped and the human
-# record answers instead. A record with neither key (an older transcript,
-# or a harness task-notification/local-command-stdout, whose origin.kind is
+# grep -b — the only full-file pass here; a typed prompt can sit far behind
+# a 100+ KB run of tool results, so a bounded tail would miss it — see
+# workplans/hq-feed-plan.md. A peer record newer than the last human one is
+# a cross-session message (kind "msg", "from" its origin.name) UNLESS it
+# carries no name — a subagent hand-back (senderTaskId, no name) — in which
+# case it is skipped and the human record answers instead. A record with
+# neither key (an older transcript, or a harness
+# task-notification/local-command-stdout, whose origin.kind is
 # "task-notification" or absent) never matches, so "you ›" is never drawn
 # from one.
 #
-# Assistant side: get_agent_snippet's bounded tail -c 131072, parsed once
-# for the last non-empty text block (reply), the last tool_use (tool) and
-# the last tool_use whose id has no matching tool_result in the window
+# The last non-empty text block (reply), the last tool_use (tool) and the
+# last tool_use whose id has no matching tool_result in the window
 # (pending; AskUserQuestion renders as its first question's text).
 #
 # No caching: the mtime gate against re-parsing an unchanged transcript
@@ -1020,6 +994,8 @@ get_last_exchange() {
 # quadratic on long strings in a UTF-8 locale — 13.7s for one 33KB
 # narration (macOS 25.5, 2026-09-10), which stalled the whole dashboard on
 # a cold cache. Bash must only ever see the <= maxlen result.
+# cache ($3), when given, is a path whose cached result is reused while the
+# jsonl's mtime is unchanged.
 get_agent_snippet() {
     local jsonl="$1" maxlen="${2:-60}" cache="$3"
     [[ ! -f "$jsonl" ]] && printf '' && return
@@ -1073,7 +1049,6 @@ get_agent_snippet() {
 # printing, so the dashboard's per-row loop forks nothing. bash 3.2's
 # printf -v rejects an array element: pass a plain variable.
 
-# 45 -> 45s, 300 -> 5m, 7200 -> 2h, empty -> ?
 format_age() {
     local _fa_s="$2"
     if [[ -z "$_fa_s" ]]; then
