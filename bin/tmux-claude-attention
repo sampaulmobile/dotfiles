@@ -3,8 +3,9 @@
 # Everything here is per agent PANE, never per session: "seen" means THAT
 # pane's window became current in a client-attached session. A
 # session-level flag would suppress a pane finishing in a background window
-# and fail to clear a window nobody looked at.
+# of an attached session, and clear the flags of a window nobody looked at.
 #
+# Stop hook for ~/.claude/settings.json:
 #   "hooks": {
 #     "Stop": [
 #       {
@@ -38,10 +39,6 @@ FLAG_DIR="$HOME/.cache/claude-attention"
 usage() {
     echo "usage: $(basename "$0") {flag-done|clear <session>|list|jump [client-tty]|jump-to <client-tty> <session> <pane>|codex-session-start|codex-session-end}" >&2
 }
-
-# Codex records no tmux pane of its own, so SessionStart maps pane -> rollout
-# here instead. The map is replaced (not appended) each time, so a pane's
-# /new threads stay mapped.
 
 # Pane ids are server-unique (%N), but the session name stays in the
 # filename so sessionizer glob-coloring and clear/list's per-session filter
@@ -178,10 +175,6 @@ cmd_jump() {
     local -a cflag=()
     [[ -n "$client" ]] && cflag=(-c "$client")
 
-    # scan_claude_sessions is tty-gated: without the gate, a vim buffer
-    # showing prompt literals could become a false jump target. Its 3rd
-    # field is the pane exhibiting the status, so the jump lands on the
-    # prompt itself, not the session's current window.
     local perm_s=$'\n'
     local st pane
     while IFS=$'\t' read -r session st pane; do
@@ -234,12 +227,15 @@ cmd_codex_session_start() {
     # A payload without a transcript path is useless to the dashboard; leave
     # any existing entry alone rather than replacing it with nothing.
     [[ -z "$tpath" ]] && exit 0
+    # Leading field never empty: codex_find_pane_jsonl tab-splits this file
+    # (see the IFS note above).
     sid=${sid:--}
 
     mkdir -p "$CODEX_MAP_DIR"
     local out="$CODEX_MAP_DIR/${TMUX_PANE#%}.tsv"
     local tmp="${out}.$$.tmp"
-    # Atomic: the dashboard reads these while codex writes them.
+    # Atomic (the dashboard reads this while codex writes it) and replaced,
+    # not appended, so a pane's /new threads stay mapped to one entry.
     if printf '%s\t%s\t%s\n' "$sid" "$tpath" "$cwd" > "$tmp" 2>/dev/null; then
         mv -f "$tmp" "$out"
     else
