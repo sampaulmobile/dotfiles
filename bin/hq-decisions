@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# tmux: only `g` (go_to_hub/other_client) touches tmux, read-only otherwise.
-# Terminal size never uses tmux (see term_size). `o` shells out to
+# tmux: only `g` (go_to_hub/other_client) touches tmux, read-only otherwise —
+# display, list-clients, has-session, switch-client -c are the only
+# subcommands anywhere in this file. Terminal size never uses tmux (see
+# term_size). `o` shells out to
 # `git -C <repo> remote get-url origin` (read-only) and `open <url>`.
 #
 # The screen's ONE write: the interactive viewer stamps
@@ -9,8 +11,10 @@
 # fd safety (bash 3.2 gotcha): this bash does not reliably close the fd a
 # `< <(…)` process substitution or a `<<<` here-string opens inside a
 # function on a path that runs every tick, so a pane left open long enough
-# hits "Too many open files". decisions_split/decisions_split_lines_preserve
-# (below) avoid both, capturing with `$(…)` and indexing into an array.
+# hits "Too many open files". Every per-tick path (load_data/build_frame/
+# paint and everything they call) must split with decisions_split /
+# decisions_split_lines_preserve (below) instead, capturing with `$(…)` and
+# indexing into an array.
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 # shellcheck source=/dev/null
@@ -249,7 +253,6 @@ decisions_read_seen_cutoff() {
     [[ -n "$e" ]] && SEEN_CUTOFF_EPOCH="$e"
 }
 
-# Stamps now into the seen file: tmp+mv, mkdir -p.
 decisions_write_seen() {
     local f tmp
     f=$(decisions_seen_file)
@@ -301,8 +304,6 @@ decisions_open_pr() {
     STATUS_NOTE="opened PR #$pr"
 }
 
-# other_client/go_to_hub are the only tmux callers in this file: display,
-# list-clients, has-session, switch-client -c.
 # The tty of the most recently active attached client that is not this one;
 # empty when this screen is the only client.
 other_client() {
@@ -1018,15 +1019,15 @@ decisions_detail_step() {
     frame_top=0
 }
 
-# Enter arrives as the empty string, space as " ". A read -t timeout ALSO
-# leaves the key empty — read's own exit status (> 128 on timeout) is the
-# only way to tell a timeout from Enter. bash 3.2 actually returns 1 for
-# BOTH a timeout and a read failure (e.g. the fd exhaustion this file
-# guards against elsewhere), so a failure masquerades as an idle tick and
-# spins forever — fail_count below tells them apart by elapsed time: a
-# non-zero read that took under a second is a failure, one that took the
-# full ~2s is a real timeout. 3 fast failures in a row exit instead of
-# spinning.
+# bash 3.2 rejects a fractional -t, so the tick is a whole 2 seconds. Enter
+# arrives as the empty string, space as " ". A read -t timeout ALSO leaves
+# the key empty — read's own exit status (> 128 on timeout) is the only
+# way to tell a timeout from Enter. bash 3.2 actually returns 1 for BOTH a
+# timeout and a read failure (e.g. the fd exhaustion this file guards
+# against elsewhere), so a failure masquerades as an idle tick and spins
+# forever — fail_count below tells them apart by elapsed time: a non-zero
+# read that took under a second is a failure, one that took the full ~2s
+# is a real timeout. 3 fast failures in a row exit instead of spinning.
 view() {
     local key rc kind idx entry last_sig sig fail_count=0 t0
     tput civis 2>/dev/null
