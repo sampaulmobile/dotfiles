@@ -17,8 +17,7 @@ if [[ -z "${search_dirs+x}" ]]; then
     )
 fi
 
-# bin/runners' self-hosted Actions runners; never a project, even when it sits
-# inside a depth-1 search dir.
+# Never a project, even when it sits inside a depth-1 search dir.
 if [[ -z "${runners_root+x}" ]]; then
     runners_root="$HOME/dev/gha-runners"
 fi
@@ -83,11 +82,8 @@ session_name_for_removed() {
     fi
 }
 
-# Sets `session_name`: agent worktree (<repo>/.claude/worktrees/<x>)
-# -> "<repo>_<branch>", detached -> "<repo>_<basename>"; legacy .bare/
-# worktree -> "<project>_<branch>"; anything else (plain project dir, or a
-# worktrunk sibling like proj.feat-x, whose dir name already encodes
-# repo+branch) -> basename. The branch lookup reads the filesystem, so it
+# A worktrunk sibling (proj.feat-x) keeps its basename: its dir name already
+# encodes repo+branch. The branch lookup below reads the filesystem, so it
 # only works while the worktree exists — callers running after removal use
 # session_name_for_branch instead.
 session_name_for() {
@@ -147,10 +143,9 @@ _project_dirs_add_candidate() {
     fi
 }
 
-# Worktrunk siblings (<entry>.*/, depth-0 only) count only when .git is a
-# FILE (a linked worktree), so a plain sibling like proj.bak is skipped;
-# depth-1 entries skip this pass since their siblings are already depth-1
-# rows.
+# Worktrunk siblings count only when .git is a FILE (a linked worktree), so
+# a plain sibling like proj.bak is skipped; depth-1 entries skip this pass
+# since their siblings are already depth-1 rows.
 #
 # Deliberately never builds an intermediate candidates array to iterate with
 # "${arr[@]}": bash 3.2 treats that expansion as unbound under `set -u` when
