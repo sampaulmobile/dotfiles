@@ -170,6 +170,14 @@ check "label: window 1, no name -> the session" "$(feed_label alpha 1 -)" "alpha
 check "label: window 3, no name -> session:3" "$(feed_label alpha 3 -)" "alpha:3"
 check "label: a name replaces the computed label outright" "$(feed_label alpha 3 alpha-hub)" "alpha-hub"
 
+echo "── feed_is_own_session (Ctrl+E popup vs the dedicated hq-feed session)"
+if feed_is_own_session hq-feed; then ok "the dedicated hq-feed session is its own"; else bad "feed_is_own_session hq-feed" "false"; fi
+if ! feed_is_own_session mysession; then ok "a Ctrl+E popup's host session is not its own"; else bad "feed_is_own_session mysession" "true"; fi
+if ! feed_is_own_session ""; then ok "an unreadable session name is not its own"; else bad "feed_is_own_session ''" "true"; fi
+
+echo "── IDLE defaults to expanded"
+check "show_idle defaults to true" "$show_idle" "true"
+
 echo "── condensing: strip_md and the 4-line budget with a (+N lines) marker"
 idle_reply=$(get_last_exchange "$fx/idle.jsonl" | cut -f4 | jq -r '.')
 stripped=$(printf '%s' "$idle_reply" | jq -Rs "$_FEED_STRIP_MD_JQ"'strip_md')
@@ -237,12 +245,53 @@ check "counts: 1 needs you" "$n_needs" "1"
 check "counts: 1 done" "$n_done" "1"
 check "counts: 1 working" "$n_working" "1"
 check "counts: 1 idle" "$n_idle" "1"
+
+echo "── cursor highlight covers the whole block, not just the headline"
+COLUMNS=100 LINES=40 build_frame
+if (( ${#cursor_map[@]} >= 1 )); then
+    # needsyou (the first block) carries a "you › -" body row, so a correct
+    # highlight must span 2 rows: the headline and that body line.
+    selected=0
+    selected_idx="${cursor_map[0]}"
+    frame_cursor_line="${frame_row_line[0]}"
+    SEL="<<SEL>>"; RST="<<RST>>"
+    painted=$(COLUMNS=100 LINES=40 paint)
+    SEL=""; RST=""
+    hl_lines=$(grep -c '<<SEL>>' <<< "$painted")
+    check "a block with a body row highlights headline + body (2 rows)" "$hl_lines" "2"
+    if [[ "$painted" == *'<<SEL>>  you › -<<RST>>'* ]]; then
+        ok "the body row itself is inside the highlight, not just the headline"
+    else
+        bad "body row highlight" "$painted"
+    fi
+    if [[ "$painted" != *'<<SEL>>'*'DONE'*'<<RST>>'* ]]; then
+        ok "the highlight stops before the next bucket's section label"
+    else
+        bad "highlight bled into the next section label" "$painted"
+    fi
+
+    # The last block overall (idlepane) has no body row: a 1-row highlight.
+    selected=$(( ${#cursor_map[@]} - 1 ))
+    selected_idx="${cursor_map[$selected]}"
+    frame_cursor_line="${frame_row_line[$selected]}"
+    SEL="<<SEL>>"; RST="<<RST>>"
+    painted_last=$(COLUMNS=100 LINES=40 paint)
+    SEL=""; RST=""
+    hl_lines_last=$(grep -c '<<SEL>>' <<< "$painted_last")
+    check "a block with no body row highlights only its headline (1 row)" "$hl_lines_last" "1"
+else
+    bad "cursor_map empty, cannot test the cursor highlight" "-"
+fi
+
 rm -f "$work/flags/doneflag@2.done"
 
 echo "── --dump and --dump --detail"
 dump_out=$("$repo/bin/hq-feed" --dump 2>&1)
 if [[ "$dump_out" == *'NEEDS YOU'* ]]; then ok "--dump renders the NEEDS YOU section"; else bad "--dump output" "$dump_out"; fi
 if [[ "$dump_out" == *'needsyou'* ]]; then ok "--dump shows the needs-you pane"; else bad "--dump pane" "$dump_out"; fi
+if [[ "$dump_out" == *'IDLE'* ]]; then ok "--dump shows IDLE expanded by default"; else bad "--dump IDLE section" "$dump_out"; fi
+if [[ "$dump_out" == *'idlepane'* ]]; then ok "--dump shows the idle pane itself, not just a count"; else bad "--dump idle pane" "$dump_out"; fi
+if [[ "$dump_out" != *'hidden — a to show'* ]]; then ok "--dump does not collapse IDLE to a count line"; else bad "--dump IDLE collapsed" "$dump_out"; fi
 detail_out=$("$repo/bin/hq-feed" --dump --detail %4 2>&1)
 if [[ "$detail_out" == *'idlepane'* ]]; then ok "--dump --detail renders the named pane"; else bad "--dump --detail" "$detail_out"; fi
 bad_detail=$("$repo/bin/hq-feed" --dump --detail %999 2>&1; echo "rc=$?")
