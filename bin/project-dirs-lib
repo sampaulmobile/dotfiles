@@ -7,9 +7,8 @@
 # associative arrays, no ${var,,}, no `local -n`.
 
 # Entries are "path:depth" — depth 0 = the directory is itself a project,
-# depth 1 = its immediate children are. Assigned only when unset so a test (or
-# the .local override below) can pre-set it. bash 3.2 quirk: ${arr+x} on an
-# array tests element 0, which is exactly the "is this unset" test wanted here.
+# depth 1 = its immediate children are. bash 3.2 quirk: ${arr+x} on an array
+# tests element 0, which is exactly the "is this unset" test wanted here.
 if [[ -z "${search_dirs+x}" ]]; then
     search_dirs=(
         "$HOME/dev:1"
@@ -25,8 +24,7 @@ if [[ -z "${runners_root+x}" ]]; then
 fi
 
 # Machine-local override (untracked): may redefine search_dirs entirely. See
-# other/tmux-sessionizer.local.example. PROJECT_DIRS_LOCAL exists so a test can
-# point this at /nonexistent instead of the real machine's file.
+# other/tmux-sessionizer.local.example.
 PROJECT_DIRS_LOCAL="${PROJECT_DIRS_LOCAL:-$HOME/dotfiles/other/tmux-sessionizer.local}"
 [[ -f "$PROJECT_DIRS_LOCAL" ]] && source "$PROJECT_DIRS_LOCAL"
 
@@ -59,10 +57,9 @@ worktree_branch() {
     esac
 }
 
-# Writes `session_name`: branch "/" -> "-" (matching worktrunk's own
-# sanitize), then "." -> "_". Reads no filesystem and needs no <path>, which
-# is what lets bin/wt-tmux-cleanup call it post-remove/post-merge, after the
-# worktree directory is already gone.
+# Writes `session_name`, matching worktrunk's own sanitize rule. Reads no
+# filesystem and needs no <path>, which is what lets bin/wt-tmux-cleanup call
+# it post-remove/post-merge, after the worktree directory is already gone.
 session_name_for_branch() {
     local repo_name="$1"
     local branch="$2"
@@ -88,8 +85,7 @@ session_name_for_removed() {
     fi
 }
 
-# No subshell per call: this runs once per candidate dir on the sessionizer's
-# hot path. Sets `session_name`: agent worktree (<repo>/.claude/worktrees/<x>)
+# Sets `session_name`: agent worktree (<repo>/.claude/worktrees/<x>)
 # -> "<repo>_<branch>", detached -> "<repo>_<basename>"; legacy .bare/
 # worktree -> "<project>_<branch>"; anything else (plain project dir, or a
 # worktrunk sibling like proj.feat-x, whose dir name already encodes
