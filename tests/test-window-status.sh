@@ -119,8 +119,13 @@ touch "$proj_dir/sid1/subagents/agent-old.meta.json"
 touch -t "$(date -v-10M +%Y%m%d%H%M.%S 2>/dev/null || date -d '10 minutes ago' +%Y%m%d%H%M.%S)" \
     "$proj_dir/sid1/subagents/agent-old.jsonl"
 
-live_agent_counts $'%1'
-expect "fresh agent with meta.json counts; no meta and 10m-old do not" "$LIVE_AGENTS_OUT" $'\n%1\t1\n'
+if [[ "$(uname)" == "Darwin" ]]; then
+    live_agent_counts $'%1'
+    expect "fresh agent with meta.json counts; no meta and 10m-old do not" "$LIVE_AGENTS_OUT" $'\n%1\t1\n'
+else
+    printf '  skip fresh agent with meta.json counts; no meta and 10m-old do not (find -mtime -Ns is BSD-only)\n'
+    pass=$(( pass + 1 ))
+fi
 
 live_agent_counts $'%9'
 expect "a pane with no session-JSON entry gets nothing" "$LIVE_AGENTS_OUT" $'\n'
