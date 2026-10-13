@@ -108,6 +108,8 @@ classify_codex_pane_status() {
 # so "context" here is last_token_usage.input_tokens on its own. Adding the
 # cached count would double-count.
 
+# Rollouts live at $CODEX_SESSIONS_DIR/YYYY/MM/DD/rollout-*.jsonl — the
+# three path segments the glob below walks.
 CODEX_SESSIONS_DIR="$HOME/.codex/sessions"
 CODEX_MAP_DIR="$HOME/.cache/claude-attention/codex"
 
