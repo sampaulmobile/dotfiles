@@ -99,7 +99,7 @@ inbox_parse() {
 }
 
 # True when the mark no longer describes the row — the log has been written
-# since, or the run moved on.
+# since, or the run moved on — which is what un-archives it.
 inbox_archive_stale() {
     local mtime="${1:-0}" state="$2" amtime="${3:-0}" astate="$4"
     [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
@@ -351,8 +351,7 @@ frame_foot=""
 frame_cols=0
 frame_at=0
 selected=0
-# frame_top — the first frame_rows index on screen; render scrolls it just
-# enough to keep the cursor's row, and its bucket header, in view.
+# frame_top — the first frame_rows index on screen.
 frame_top=0
 
 build_frame() {
