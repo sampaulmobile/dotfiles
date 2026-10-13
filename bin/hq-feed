@@ -11,8 +11,8 @@
 # client). The other-client move is bin/tmux-claude-attention's `jump-to`,
 # invoked as a separate process — this script never switch-clients a
 # DIFFERENT client itself. WRITES NOTHING of its own: no seen stamp, no
-# state dir; DONE's "unseen" is the attention flag file, cleared by
-# tmux-claude-attention when `g` lands on it.
+# state dir; DONE's "not yet visited" is the attention flag file, cleared
+# by tmux-claude-attention when `g` lands on it.
 #
 # UTF-8/width discipline, fd safety and the view loop's timeout-vs-key
 # distinction are the same bash 3.2 gotchas as bin/hq-decisions (see its own
@@ -52,16 +52,21 @@ what it needs from the owner, newest transcript first within a bucket:
 
   NEEDS YOU   pane status permission
   DONE        an attention flag (~/.cache/claude-attention/<session>@<pane>.done)
-              exists for the pane — "unseen"; cleared by `g` landing on it,
-              which drops the pane out of this bucket on the next load
+              exists for the pane — "not yet visited": nobody has landed on
+              that pane since it finished (Ctrl+Y's own rule); cleared by `g`
+              landing on it, by Ctrl+Y, or by visiting the pane, which drops
+              it out of this bucket on the next load
   WORKING     pane status working
   IDLE        everything else; hidden by default as a count line, `a` toggles
 
 Glyphs: permission, done, working (the statusbar's own 🔴/✅/●); IDLE rows
 carry none.
 
-Block, LIST view:
-  <label>  <glyph> <word> <age>[ · <pipeline tag>]
+Block, LIST view (a blank line separates blocks):
+  <label>      [<pipeline tag> ·] [#<pr> ·] <glyph> <word> <age>   (right-aligned
+                                                                  to the text width)
+               #<pr> is the pipeline's PR from the pipelines source: a
+               clickable OSC 8 link on a terminal when its URL is known.
   you › <prompt>              — kind "you": the owner's last typed prompt
   msg › <from>: <prompt>      — kind "msg": a cross-session message instead
   now → <tool>                — WORKING only: the tool_use in flight
@@ -71,9 +76,15 @@ Block, LIST view:
                                   (headings/**/backticks stripped, a fenced
                                   block -> [code], a run of | lines ->
                                   [table], */+ bullets -> "- "), wrapped to
-                                  width, up to 4 lines, else 3 plus a
-                                  right-aligned "(+N lines)" marker. Shown
-                                  whenever a reply exists.
+                                  the text width, blank lines dropped, up to
+                                  4 lines; when more remain the 4th carries a
+                                  right-aligned "(+N lines)" marker, clipped
+                                  with … to make room. Shown whenever a reply
+                                  exists.
+Text width: the terminal, capped at FEED_WIDTH columns (default 110) so a
+wide window does not stretch a reply into one long line. DETAIL keeps the
+reply's blank lines. The you ›/msg › line is dim; the reply is not. A GitHub
+PR URL in the reply collapses to #N, a clickable OSC 8 link on a terminal.
 A codex pane shows its glyph, label and age only — no exchange lines
 (get_last_exchange is Claude-only).
 
@@ -85,7 +96,9 @@ Header: `FEED  N needs you · N done · N working · N idle` then
 `updated <age> ago`, marked stale past turns' three cadences.
 
 Keys:
-  j/k   move by block        ⏎   DETAIL: full prompt + full stripped reply,
+  j/k   move by block; the whole block scrolls into view, and the
+        "↑ N blocks · ↓ N blocks" line counts what is off screen
+                             ⏎   DETAIL: full prompt + full stripped reply,
   a     show/hide IDLE             scrollable; q/esc/backspace back
   g     jump the OTHER tmux client to this block's exact pane
   r     recollect (runs `bin/hq-snapshot turns` first, then reloads)
@@ -97,10 +110,11 @@ EOF
 
 # ── paint ───────────────────────────────────────────────
 
-RST=""; BOLD=""; DIM=""; SEL=""
+RST=""; BOLD=""; DIM=""; SEL=""; LINK=""; LINKS=false
 C_NEEDS=""; C_DONE=""; C_WORKING=""
 if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; then
     RST=$'\033[0m'; BOLD=$'\033[1m'; DIM=$'\033[2m'; SEL=$'\033[48;5;236m'
+    LINK=$'\033[34;4m'; LINKS=true
     C_NEEDS=$'\033[33m'; C_DONE=$'\033[32m'; C_WORKING=$'\033[34m'
 fi
 
@@ -232,8 +246,8 @@ other_client() {
 
 p_session=(); p_pane=(); p_window=(); p_agent=(); p_status=(); p_name=()
 p_mtime=(); p_jsonl=(); p_kind=(); p_cwd=()
-p_prompt=(); p_prompt_list=(); p_from=(); p_reply=(); p_tool=(); p_pending=()
-p_label=(); p_pipe=(); p_bucket=(); p_age=()
+p_prompt=(); p_prompt_list=(); p_from=(); p_reply=(); p_tool=(); p_pending=(); p_links=()
+p_label=(); p_pipe=(); p_pr=(); p_pr_url=(); p_bucket=(); p_age=()
 order=()
 n_needs=0; n_done=0; n_working=0; n_idle=0
 TURNS_AGE=-1; TURNS_VERDICT=missing
@@ -308,8 +322,8 @@ load_data() {
     local body sep out
     p_session=(); p_pane=(); p_window=(); p_agent=(); p_status=(); p_name=()
     p_mtime=(); p_jsonl=(); p_kind=(); p_cwd=()
-    p_prompt=(); p_prompt_list=(); p_from=(); p_reply=(); p_tool=(); p_pending=()
-    p_label=(); p_pipe=(); p_bucket=(); p_age=()
+    p_prompt=(); p_prompt_list=(); p_from=(); p_reply=(); p_tool=(); p_pending=(); p_links=()
+    p_label=(); p_pipe=(); p_pr=(); p_pr_url=(); p_bucket=(); p_age=()
     order=()
     n_needs=0; n_done=0; n_working=0; n_idle=0
 
@@ -317,11 +331,13 @@ load_data() {
     TURNS_VERDICT=$(snapshot_verdict "$TURNS_AGE" "$(snapshot_cadence turns)")
     body=$(snapshot_read turns 2>/dev/null)
     pipeline_map_load
+    pipeline_pr_map_load
 
     [[ -n "$body" ]] || return 0
 
     sep="@@FEED-$$-${RANDOM}@@"
-    out=$(printf '%s\n' "$body" | jq -Rn -r --arg sep "$sep" "$_FEED_STRIP_MD_JQ"'
+    out=$(printf '%s\n' "$body" | jq -Rn -r --arg sep "$sep" \
+        --arg pr_url 'https://github\.com/[^/ ]+/[^/ ]+/pull/(?<n>[0-9]+)' "$_FEED_STRIP_MD_JQ"'
         def dec: if . == "-" then "-" else fromjson end;
         [inputs | select(length > 0) | split("\t")] as $rows
         | $rows[]
@@ -331,7 +347,11 @@ load_data() {
         | ($f[11] | dec) as $reply_raw
         | ($f[12] | dec) as $tool
         | ($f[13] | dec) as $pending
-        | ($reply_raw | if . == "-" then "-" else strip_md end) as $reply
+        | ($reply_raw | if . == "-" then "-" else strip_md end
+           | if . == "-" then "-" else gsub($pr_url; "\u0001" + .n + "\u0002") end) as $reply
+        | ($reply_raw | if . == "-" then "-"
+           else [match($pr_url; "g") | .string | (split("/") | last) + "=" + .] | unique | join(" ") end
+           | if . == "" then "-" else . end) as $links
         | ($prompt_raw | if . == "-" then "-" else .[0:32768] end) as $prompt
         | ($prompt | if . == "-" then "-"
                      else .[0:1024] | gsub("[\\n\\t\\x00-\\x1f\\x7f]"; " ") end) as $prompt_list
@@ -341,7 +361,8 @@ load_data() {
           $sep + "F", $from,
           $sep + "R", $reply,
           $sep + "T", $tool,
-          $sep + "D", $pending
+          $sep + "D", $pending,
+          $sep + "K", $links
     ' 2>/dev/null)
 
     local cur_field="" cur_buf="" first_in_field=true line
@@ -354,6 +375,7 @@ load_data() {
             R) p_reply+=("$cur_buf") ;;
             T) p_tool+=("$cur_buf") ;;
             D) p_pending+=("$cur_buf") ;;
+            K) p_links+=("$cur_buf") ;;
         esac
     }
     feed_split_lines_preserve "$out"
@@ -369,6 +391,7 @@ load_data() {
             "${sep}R") flush_field; cur_field=R; cur_buf=""; first_in_field=true; continue ;;
             "${sep}T") flush_field; cur_field=T; cur_buf=""; first_in_field=true; continue ;;
             "${sep}D") flush_field; cur_field=D; cur_buf=""; first_in_field=true; continue ;;
+            "${sep}K") flush_field; cur_field=K; cur_buf=""; first_in_field=true; continue ;;
         esac
         if [[ "$cur_field" == HDR ]]; then
             feed_split "$line" $'\t'
@@ -396,6 +419,8 @@ load_data() {
         p_bucket+=("$(feed_bucket "${p_status[$i]}" "$done_flag")")
         p_label+=("$(feed_label "${p_session[$i]}" "${p_window[$i]}" "${p_name[$i]}")")
         p_pipe+=("$(pipeline_for_cwd "${p_cwd[$i]}")")
+        pipeline_pr_for_cwd "${p_cwd[$i]}"
+        p_pr+=("$PR_NUM"); p_pr_url+=("$PR_URL")
         case "${p_bucket[$i]}" in
             'NEEDS YOU') n_needs=$(( n_needs + 1 )) ;;
             DONE)        n_done=$(( n_done + 1 )) ;;
@@ -456,11 +481,90 @@ feed_color() {
     esac
 }
 
+# pipeline_pr_map_load / pipeline_pr_for_cwd <cwd> — the pipelines record's
+# pr field for the worktree <cwd> sits in, as PR_NUM and PR_URL. The field is
+# a URL from a full run but a bare number from a --quick one; a bare number
+# borrows its pull-URL base from any record of the same repo that has a
+# URL, and stays unlinked (PR_URL empty) when none does.
+PR_NUM=""; PR_URL=""
+pipeline_pr_map=""
+pipeline_pr_map_load() {
+    local line path repo pr base
+    pipeline_pr_map=""
+    feed_split_lines_preserve "$(snapshot_read pipelines 2>/dev/null)"
+    for line in ${SPLIT_OUT[@]+"${SPLIT_OUT[@]}"}; do
+        feed_split "$line" $'\t'
+        path="${SPLIT_OUT[0]-}"; repo="${SPLIT_OUT[2]-}"; pr="${SPLIT_OUT[5]-}"
+        [[ -n "$path" && -n "$pr" && "$pr" != "-" ]] || continue
+        base=""
+        [[ "$pr" == */pull/* ]] && base="${pr%/pull/*}"
+        pipeline_pr_map+="${path}"$'\t'"${repo}"$'\t'"${pr}"$'\t'"${base:--}"$'\n'
+    done
+}
+pipeline_pr_for_cwd() {
+    local cwd="$1" line path repo pr base hit_repo="" hit_pr=""
+    PR_NUM=""; PR_URL=""
+    [[ -n "$cwd" && -n "$pipeline_pr_map" ]] || return 0
+    feed_split_lines_preserve "$pipeline_pr_map"
+    for line in ${SPLIT_OUT[@]+"${SPLIT_OUT[@]}"}; do
+        feed_split "$line" $'\t'
+        path="${SPLIT_OUT[0]-}"; repo="${SPLIT_OUT[1]-}"; pr="${SPLIT_OUT[2]-}"
+        [[ -n "$path" ]] || continue
+        if [[ "$cwd" == "$path" || "$cwd" == "$path"/* ]]; then hit_repo="$repo"; hit_pr="$pr"; break; fi
+    done
+    [[ -n "$hit_pr" ]] || return 0
+    if [[ "$hit_pr" == */pull/* ]]; then
+        PR_NUM="${hit_pr##*/}"; PR_URL="$hit_pr"
+        return 0
+    fi
+    [[ "$hit_pr" =~ ^[0-9]+$ ]] || return 0
+    PR_NUM="$hit_pr"
+    feed_split_lines_preserve "$pipeline_pr_map"
+    for line in ${SPLIT_OUT[@]+"${SPLIT_OUT[@]}"}; do
+        feed_split "$line" $'\t'
+        repo="${SPLIT_OUT[1]-}"; base="${SPLIT_OUT[3]-}"
+        if [[ "$repo" == "$hit_repo" && "$base" != "-" && -n "$base" ]]; then
+            PR_URL="${base}/pull/${PR_NUM}"
+            break
+        fi
+    done
+}
+
+# link_prs <idx> <line> — the \x01N\x02 markers load_data put where a PR URL
+# was become "#N": wrapped as an OSC 8 link to that URL on a terminal, plain
+# otherwise. The markers (not "#N") are what make the number's boundary
+# unambiguous, so #211 inside #2110 can never be linked twice.
+link_prs() {
+    local idx="$1" line="$2" n url pair out="" pre
+    while [[ "$line" == *$'\x01'* ]]; do
+        pre="${line%%$'\x01'*}"; line="${line#*$'\x01'}"
+        n="${line%%$'\x02'*}"; line="${line#*$'\x02'}"
+        url=""
+        for pair in ${p_links[$idx]}; do
+            [[ "${pair%%=*}" == "$n" ]] && url="${pair#*=}"
+        done
+        if [[ "$LINKS" == true && -n "$url" ]]; then
+            out+="${pre}${LINK}"$'\033]8;;'"${url}"$'\033\\'"#${n}"$'\033]8;;\033\\'"${RST}"
+        else
+            out+="${pre}#${n}"
+        fi
+    done
+    printf '%s%s' "$out" "$line"
+}
+
+# body_width — the column the block text wraps at: the terminal, capped at
+# FEED_WIDTH so a wide window does not stretch a reply into one long line.
+body_width() {
+    local w="$term_w" cap="${FEED_WIDTH:-110}"
+    [[ "$cap" =~ ^[1-9][0-9]*$ ]] && (( w > cap )) && w="$cap"
+    printf '%s' "$w"
+}
+
 # append_block_lines <idx> <width> — the shared block body (prompt/msg,
 # now/ask, it ›), used by both the LIST block and DETAIL.
 append_block_body() {
     local idx="$1" width="$2" bucket="${p_bucket[$1]}" full="$3"
-    local kind="${p_kind[$idx]}" prefix_w=7
+    local kind="${p_kind[$idx]}" prefix_w=8
 
     if [[ "$kind" == you || "$kind" == msg ]]; then
         local label="you ›"
@@ -469,14 +573,14 @@ append_block_body() {
             if [[ "$kind" == msg ]]; then label="msg ›"; p="${p_from[$idx]}: ${p}"; fi
             feed_split_lines_preserve "$(wrap_text "$p" $(( width - prefix_w )))"
             for wline in "${SPLIT_OUT[@]}"; do
-                if [[ "$first" == true ]]; then frame_rows+=("  ${DIM}${label}${RST} ${wline}"); first=false
-                else frame_rows+=("       ${wline}")
+                if [[ "$first" == true ]]; then frame_rows+=("  ${DIM}${label} ${wline}${RST}"); first=false
+                else frame_rows+=("        ${DIM}${wline}${RST}")
                 fi
             done
         else
             local p="${p_prompt_list[$idx]}"
             if [[ "$kind" == msg ]]; then label="msg ›"; p="${p_from[$idx]}: ${p}"; fi
-            frame_rows+=("  ${DIM}${label}${RST} $(clip "$p" $(( width - prefix_w )))")
+            frame_rows+=("  ${DIM}${label} $(clip "$p" $(( width - prefix_w )))${RST}")
         fi
     fi
 
@@ -490,20 +594,38 @@ append_block_body() {
         local wrapped wline total=0 shown=0 first=true
         wrapped=$(wrap_text "${p_reply[$idx]}" $(( width - prefix_w )))
         feed_split_lines_preserve "$wrapped"
-        total=${#SPLIT_OUT[@]}
-        local cap=4
-        [[ "$full" == true ]] && cap=$total
+        local -a body_lines=()
         for wline in "${SPLIT_OUT[@]}"; do
+            [[ "$full" != true && -z "$wline" ]] && continue
+            body_lines+=("$wline")
+        done
+        total=${#body_lines[@]}
+        local cap=4 text_w=$(( width - prefix_w )) tail=""
+        [[ "$full" == true ]] && cap=$total
+        for wline in ${body_lines[@]+"${body_lines[@]}"}; do
             if (( shown >= cap )); then break; fi
-            if (( shown == 3 && cap == 4 && total > 4 )); then
-                local marker
-                marker=$(printf '(+%d lines)' $(( total - 3 )))
-                frame_rows+=("       $(pad '' $(( width - prefix_w - ${#marker} )))${DIM}${marker}${RST}")
-                shown=$(( shown + 1 ))
-                break
+            if (( shown == cap - 1 && total > cap )); then
+                # Last shown line carries the marker. A link marker is two
+                # chars wider than the "#N" it renders as, so the plain width
+                # is ${#wline} minus the link count; a clip that cuts through
+                # one drops it rather than leaving half a marker behind.
+                local marker nlinks plain_w avail m
+                marker=$(printf '(+%d lines)' $(( total - cap )))
+                m="${wline//[^$'\x01']/}"; nlinks=${#m}
+                plain_w=$(( ${#wline} - nlinks ))
+                avail=$(( text_w - ${#marker} - 1 ))
+                if (( plain_w > avail )); then
+                    wline=$(clip "$wline" $(( avail + nlinks )))
+                    if [[ "$wline" == *$'\x01'* && "${wline##*$'\x01'}" != *$'\x02'* ]]; then
+                        wline="${wline%$'\x01'*}…"
+                    fi
+                    m="${wline//[^$'\x01']/}"; nlinks=${#m}
+                    plain_w=$(( ${#wline} - nlinks ))
+                fi
+                tail="$(pad '' $(( text_w - plain_w - ${#marker} )))${DIM}${marker}${RST}"
             fi
-            if [[ "$first" == true ]]; then frame_rows+=("  ${DIM}it  ›${RST} ${wline}"); first=false
-            else frame_rows+=("       ${wline}")
+            if [[ "$first" == true ]]; then frame_rows+=("  ${DIM}it  ›${RST} $(link_prs "$idx" "$wline")${tail}"); first=false
+            else frame_rows+=("        $(link_prs "$idx" "$wline")${tail}")
             fi
             shown=$(( shown + 1 ))
         done
@@ -529,17 +651,22 @@ build_list_frame() {
     fi
     frame_head="${header_line}"$'\n\n'
 
-    frame_rows=(); cursor_map=(); frame_row_line=()
+    frame_rows=(); cursor_map=(); frame_row_line=(); frame_section_line=()
     local last_bucket="" idx bucket label glyph word age agestr pipe headline color
+    local bw status_plain gw lw rw gap
+    bw=$(body_width)
     for idx in ${order[@]+"${order[@]}"}; do
         bucket="${p_bucket[$idx]}"
         if [[ "$bucket" == IDLE && "$show_idle" != true ]]; then continue; fi
         if [[ "$bucket" != "$last_bucket" ]]; then
             [[ -n "$last_bucket" ]] && frame_rows+=("")
             local section="$bucket"
-            [[ "$bucket" == DONE ]] && section="DONE · unseen"
-            frame_rows+=("${DIM}${section}${RST}")
+            [[ "$bucket" == DONE ]] && section="DONE · not yet visited"
+            frame_section_line+=("${#frame_rows[@]}")
+            frame_rows+=(" ${DIM}${section}${RST}")
             last_bucket="$bucket"
+        else
+            frame_rows+=("")
         fi
         color=$(feed_color "$bucket")
         glyph=$(feed_glyph "$bucket")
@@ -547,16 +674,39 @@ build_list_frame() {
         format_age agestr "${p_age[$idx]}"
         label="${p_label[$idx]}"
         pipe="${p_pipe[$idx]}"
-        headline="${color}$(pad "$label" 20) ${glyph} ${word} ${agestr}${RST}"
-        [[ -n "$pipe" ]] && headline+="  ${DIM}· ${pipe}${RST}"
+        # Column 0 is a one-char gutter paint() overwrites with the cursor
+        # mark, so the row must start with a plain space, never a color code.
+        # ✅/🔴 take two cells but count as one in ${#}, hence gw.
+        status_plain="${glyph} ${word} ${agestr}"
+        gw=1; case "$glyph" in ✅|🔴) gw=2 ;; esac
+        rw=$(( ${#status_plain} + gw - 1 ))
+        [[ -n "$pipe" ]] && rw=$(( rw + ${#pipe} + 3 ))
+        [[ -n "${p_pr[$idx]}" ]] && rw=$(( rw + ${#p_pr[$idx]} + 4 ))
+        lw=$(( ${#label} + 1 ))
+        gap=$(( bw - lw - rw ))
+        if (( gap < 2 )); then
+            label=$(clip "$label" $(( bw - rw - 3 )))
+            lw=$(( ${#label} + 1 )); gap=$(( bw - lw - rw ))
+            (( gap < 1 )) && gap=1
+        fi
+        headline=" ${color}${label}${RST}$(printf '%*s' "$gap" '')"
+        [[ -n "$pipe" ]] && headline+="${DIM}${pipe} · ${RST}"
+        if [[ -n "${p_pr[$idx]}" ]]; then
+            if [[ "$LINKS" == true && -n "${p_pr_url[$idx]}" ]]; then
+                headline+="${LINK}"$'\033]8;;'"${p_pr_url[$idx]}"$'\033\\'"#${p_pr[$idx]}"$'\033]8;;\033\\'"${RST}${DIM} · ${RST}"
+            else
+                headline+="${DIM}#${p_pr[$idx]} · ${RST}"
+            fi
+        fi
+        headline+="${color}${status_plain}${RST}"
         cursor_map+=("$idx")
         frame_row_line+=("${#frame_rows[@]}")
         frame_rows+=("$headline")
-        append_block_body "$idx" "$term_w" false
+        append_block_body "$idx" "$(body_width)" false
     done
     if [[ "$show_idle" != true ]] && (( n_idle > 0 )); then
         [[ -n "$last_bucket" ]] && frame_rows+=("")
-        frame_rows+=("${DIM}IDLE · ${n_idle} hidden — a to show${RST}")
+        frame_rows+=(" ${DIM}IDLE · ${n_idle} hidden — a to show${RST}")
     fi
     (( ${#frame_rows[@]} == 0 )) && frame_rows+=("  ${DIM}no live agent panes${RST}")
 
@@ -590,6 +740,7 @@ build_detail_frame() {
     local line1="‹ q  back to list"
     local right1="${p_label[$idx]} · ${word} ${agestr}"
     [[ -n "$pipe" ]] && right1+=" · ${pipe}"
+    [[ -n "${p_pr[$idx]}" ]] && right1+=" · #${p_pr[$idx]}"
     local pad1=$(( term_w - ${#line1} - ${#right1} ))
     local hl
     if (( pad1 >= 1 )); then
@@ -601,7 +752,7 @@ build_detail_frame() {
 
     frame_rows=()
     frame_rows+=("")
-    append_block_body "$idx" "$term_w" true
+    append_block_body "$idx" "$(body_width)" true
     (( ${#frame_rows[@]} == 1 )) && frame_rows+=("  ${DIM}nothing to show${RST}")
 
     frame_tail=""
@@ -611,7 +762,7 @@ build_detail_frame() {
 
 # ── loop-shared frame/paint ─────────────────────────────
 
-frame_rows=(); frame_row_line=(); frame_head=""; frame_tail=""; frame_foot=""
+frame_rows=(); frame_row_line=(); frame_section_line=(); frame_head=""; frame_tail=""; frame_foot=""
 frame_cols=0; frame_at=0; selected=0; selected_idx=-1; frame_top=0
 cursor_map=(); show_idle=false; view_mode=list; detail_idx=-1
 
@@ -640,8 +791,22 @@ paint() {
     sel=-1
     if (( frame_cursor_line >= 0 )); then
         sel="$frame_cursor_line"
-        (( sel < frame_top )) && frame_top="$sel"
-        (( sel >= frame_top + body )) && frame_top=$(( sel - body + 1 ))
+        # The unit of scrolling is the block: its headline, its body, and the
+        # section label above it when it is the first of its bucket. A
+        # headline alone at the screen's edge hides exactly what the cursor
+        # is pointing at.
+        local b_start="$sel" b_end=$(( total - 1 )) r
+        for r in ${frame_row_line[@]+"${frame_row_line[@]}"}; do
+            if (( r > sel )); then b_end=$(( r - 1 )); break; fi
+        done
+        while (( b_end > sel )) && [[ -z "${frame_rows[$b_end]}" ]]; do b_end=$(( b_end - 1 )); done
+        for r in ${frame_section_line[@]+"${frame_section_line[@]}"}; do
+            (( r == sel - 1 )) && b_start="$r"
+        done
+        (( sel == frame_row_line[0] )) && b_start=0
+        (( b_start < frame_top )) && frame_top="$b_start"
+        (( b_end >= frame_top + body )) && frame_top=$(( b_end - body + 1 ))
+        (( frame_top > b_start )) && frame_top="$b_start"
     fi
     (( frame_top > total - body )) && frame_top=$(( total - body ))
     (( frame_top < 0 )) && frame_top=0
@@ -660,13 +825,26 @@ paint() {
     done
     out+="$frame_tail"
     if (( frame_top > 0 || last < total - 1 )) && [[ -z "$STATUS_NOTE" ]]; then
-        local scroll_plain="  ↑ ${frame_top} more · ↓ $(( total - 1 - last )) more"
+        local scroll_plain
+        if [[ "$view_mode" == list ]]; then
+            local above=0 below=0 r
+            for r in ${frame_row_line[@]+"${frame_row_line[@]}"}; do
+                (( r < frame_top )) && above=$(( above + 1 ))
+                (( r > last )) && below=$(( below + 1 ))
+            done
+            scroll_plain="  ↑ ${above} blocks · ↓ ${below} blocks"
+        else
+            scroll_plain="  ↑ ${frame_top} lines · ↓ $(( total - 1 - last )) lines"
+        fi
         out+="${DIM}$(clip "$scroll_plain" "$term_w")${RST}"$'\n'
     else
         out+="$(clip "$STATUS_NOTE" "$term_w")"$'\n'
     fi
     out+="$frame_foot"
-    screen_out="$out"
+    # A newline written on the terminal's last row scrolls the frame up one
+    # line, and the header is what scrolls off; the frame therefore never
+    # ends in one.
+    screen_out="${out%$'\n'}"
     printf '\033[H\033[2J%s' "$screen_out"
 }
 
