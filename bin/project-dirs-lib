@@ -30,9 +30,7 @@ PROJECT_DIRS_LOCAL="${PROJECT_DIRS_LOCAL:-$HOME/dotfiles/other/tmux-sessionizer.
 
 # worktree_branch_out is the linked worktree's branch (empty when detached or
 # <path> isn't a linked worktree); worktree_repo_out is the main repo's path
-# (empty unless the gitdir has the ".../.git/worktrees/<name>" shape). Both
-# read straight from the .git FILE's gitdir line and the admin dir's HEAD, to
-# stay fork-free.
+# (empty unless the gitdir has the ".../.git/worktrees/<name>" shape).
 worktree_branch() {
     local path="$1" gitfile line gitdir ref
     worktree_branch_out=""
@@ -57,9 +55,10 @@ worktree_branch() {
     esac
 }
 
-# Writes `session_name`, matching worktrunk's own sanitize rule. Reads no
-# filesystem and needs no <path>, which is what lets bin/wt-tmux-cleanup call
-# it post-remove/post-merge, after the worktree directory is already gone.
+# Writes `session_name`: "/" -> "-" matches worktrunk's own sanitize; "." ->
+# "_" is this repo's own rule. Reads no filesystem and needs no <path>, which
+# is what lets bin/wt-tmux-cleanup call it post-remove/post-merge, after the
+# worktree directory is already gone.
 session_name_for_branch() {
     local repo_name="$1"
     local branch="$2"
@@ -69,11 +68,10 @@ session_name_for_branch() {
 
 # worktrunk always passes a 3rd hook argument to post-remove/post-merge; for
 # a DETACHED worktree it renders as the literal string "HEAD" (empirical, wt
-# v0.68.0; the docs claim `branch` is undefined there), never empty. Both ""
-# and "HEAD" fall back to session_name_for's path-basename rule, matching the
-# name Ctrl+F and wt-tmux-jump give that worktree. "HEAD" is an unambiguous
-# sentinel: git refuses it as a real branch name
-# (`git check-ref-format --branch HEAD`).
+# v0.68.0; the docs claim `branch` is undefined there), never empty. "HEAD"
+# is an unambiguous sentinel: git refuses it as a real branch name
+# (`git check-ref-format --branch HEAD`). The empty/"HEAD" fallback must keep
+# matching the name Ctrl+F and wt-tmux-jump give that worktree.
 session_name_for_removed() {
     local repo_name="$1"
     local path="$2"
