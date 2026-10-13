@@ -111,8 +111,9 @@ classify_codex_pane_status() {
 CODEX_SESSIONS_DIR="$HOME/.codex/sessions"
 CODEX_MAP_DIR="$HOME/.cache/claude-attention/codex"
 
-# The SessionStart hook's map is authoritative: pane-exact, rewritten after
-# /new.
+# The SessionStart hook's map is pane-exact, written on a thread's first
+# prompt and again after /new; the newest-rollout-by-cwd fallback below
+# covers a codex started before the hooks were trusted.
 #
 # tmux reuses pane ids after a server restart, so a mapped entry is trusted
 # only while its recorded cwd still matches the pane's own; a mismatch
@@ -158,8 +159,7 @@ _codex_newest_rollout_for_cwd() {
 }
 
 # Prints tab-separated: context model context_window. Context is the last
-# turn's prompt size; the window comes from the transcript itself
-# (model_context_window).
+# turn's prompt size.
 codex_get_context_and_model() {
     local jsonl="$1"
     [[ ! -f "$jsonl" ]] && printf '0\tunknown\t0' && return
