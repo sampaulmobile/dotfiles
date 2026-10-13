@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"summarize the outage"},"origin":{"kind":"human"}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"# Summary\nThe **cache** layer dropped `read` traffic for 4 minutes.\n```\n2026-10-01 panic: too many open files\n```\n* first bullet\n+ second bullet\n| col a | col b |\n| --- | --- |\n| 1 | 2 |\nNothing else changed."}]}}

@@ -1,0 +1,4 @@
+{"type":"user","message":{"role":"user","content":"deploy the change"},"origin":{"kind":"human"}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"p1","name":"Bash","input":{"command":"git status"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"p1","content":"clean"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"p2","name":"AskUserQuestion","input":{"questions":[{"question":"Deploy to staging or prod?"}]}}]}}
