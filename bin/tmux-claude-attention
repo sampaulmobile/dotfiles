@@ -37,7 +37,6 @@
 #   codex-session-end      codex SessionEnd hook.
 
 source ~/dotfiles/bin/tmux-claude-lib
-source ~/dotfiles/bin/hq-snapshot
 
 FLAG_DIR="$HOME/.cache/claude-attention"
 
@@ -150,13 +149,14 @@ cmd_list() {
     )
     [[ -n "$flagged" ]] || return 0
 
-    # Deferral at READ time (A3): a parent pane whose background subagents
-    # are still live shows no flag until the fresh panes snapshot reads 0
-    # for it — flag time cannot work, since the parent's next Stop (fired
-    # by a background agent finishing) would still see that agent's jsonl
-    # within LIVE_AGENT_SECS and re-suppress forever. The flag FILE is
-    # never touched here. Fails open (no filtering) when the panes snapshot
-    # is stale or missing.
+    # Sourced here, not at file top: cmd_clear (every window switch) and
+    # the Stop hook never reach this line, so they skip hq-snapshot's own
+    # parse and fork.
+    source ~/dotfiles/bin/hq-snapshot
+
+    # The flag FILE is never touched here, so it reappears once the fresh
+    # panes snapshot reads 0 for this pane. Stale/missing snapshot: no
+    # filtering (fail open).
     if [[ "$(snapshot_verdict "$(snapshot_age panes)" "$(snapshot_cadence panes)")" == fresh ]]; then
         drop_deferred_flags "$flagged" "$(snapshot_read panes 2>/dev/null)"
     else
@@ -198,8 +198,8 @@ cmd_jump() {
 
     local perm_s=$'\n'
     local st pane
-    # Trailing `_`: scan_claude_sessions now carries a 4th field (agents),
-    # which a 3-var read would otherwise fold into $pane as "<pane>\t<agents>".
+    # Trailing `_` absorbs scan_claude_sessions' 4th field (agents); a
+    # 3-var read folds it into $pane as "<pane>\t<agents>".
     while IFS=$'\t' read -r session st pane _; do
         [[ "$st" == "permission" ]] && perm_s+="${session}"$'\t'"${pane}"$'\n'
     done < <(scan_claude_sessions)
