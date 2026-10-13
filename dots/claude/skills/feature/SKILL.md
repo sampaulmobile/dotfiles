@@ -69,14 +69,14 @@ WT=$(git -C <repo> worktree list --porcelain | awk -v b="refs/heads/<branch>" '/
 **6. Task session.** Write the Run invocation to a scratch file, then hand it to the launcher:
 
 ```
-cat > /tmp/feature-launch-<SLUG>.md <<'LAUNCH_EOF'
+LAUNCH_FILE=$(mktemp) && cat > "$LAUNCH_FILE" <<'LAUNCH_EOF'
 /feature --run --requester=<REQUESTER> <PASSTHROUGH FLAGS>
 
 Plan: <ABSOLUTE plan path>
 
 <FEATURE / the brief, verbatim>
 LAUNCH_EOF
-~/dotfiles/bin/tmux-task-session --model <ORCH_MODEL> --effort <ORCH_EFFORT> "$WT" "$(cat /tmp/feature-launch-<SLUG>.md)"
+~/dotfiles/bin/tmux-task-session --model <ORCH_MODEL> --effort <ORCH_EFFORT> "$WT" "$(cat "$LAUNCH_FILE")"
 ```
 
 The quoted heredoc delimiter and the `"$(cat ...)"` are what make this exact: the task, the flags and the requester reach Run through a file, never through a string a model retyped. `<PASSTHROUGH FLAGS>` is every flag this Launch received except `--repo=` and `--orchestrator=`, whose seat is already on the claude command line above, and `--requester=`, filled in below. `<REQUESTER>` is that flag's value when Launch received one, else this session's own tmux session name whenever it answers in `ListAgents` — hub or hq alike. Drop `--requester=` entirely only when neither is available, and drop the `Plan:` line when no workplan was given.
