@@ -1,25 +1,19 @@
 #!/usr/bin/env bash
-# hq-inbox — the thread list: one row per pipeline run, bucketed by what it
-# waits on, with the headline the hub last wrote about it. Columns, keys,
-# formats and the bucket rules are usage() below, which is the reference a
-# user reads; CLAUDE.md points here rather than repeating it.
+# COMPOSES AND SENDS NOTHING: `g` only switches another client to the hub
+# session; the reply is typed there.
 #
-# It COMPOSES NOTHING and SENDS NOTHING: `g` moves another client to a hub
-# session and the reply is typed there, in a real conversation.
+# Rows come from bin/hq-snapshot's inbox source; never recompute a row's
+# fact here.
 #
-# Rows come from bin/hq-snapshot's inbox source, which is where the join
-# lives; this script buckets and paints, and never recomputes a row's facts.
-# Its own writes are the two state files under $HQ_INBOX_DIR/_state/, each
-# rewritten <file>.tmp.$$ then mv'ed. Nothing under ~/.local/state/hq is
-# removed, the thread logs included (dots/claude/rules/deletion-safety.md).
+# Nothing under ~/.local/state/hq is ever removed, the thread logs included
+# (dots/claude/rules/deletion-safety.md).
 #
 # tmux-safety: list-clients, display, has-session, new-session and
 # switch-client are the only tmux subcommands here, and switch-client only
 # ever targets the caller's own client or an explicitly named other tty.
 #
-# Sourceable — the decisions (inbox_bucket, the record parse, the un-archive
-# and unread rules) are handed back with no view loop, no snapshot read and
-# no directory created. See tests/test-hq-inbox.sh.
+# Sourcing this file has no side effects: no view loop, no snapshot read, no
+# directory created.
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 SELF="$DOTFILES/bin/hq-inbox"
@@ -68,10 +62,7 @@ HQ_INBOX_DIR). The hubs write the logs; nothing here ever removes one.
 EOF
 }
 
-# ── decisions (the sourced half) ────────────────────────
-
-# inbox_bucket <state> <pr-tag> <archived?> — the row's section. Order IS the
-# precedence; `archived?` is the already-resolved mark (see
+# Order IS the precedence; `archived?` is the already-resolved mark (see
 # inbox_archive_stale), not the raw presence of one.
 inbox_bucket() {
     local state="$1" tag="$2" archived="$3" phase
@@ -89,8 +80,7 @@ inbox_bucket() {
     printf 'WORKING'
 }
 
-# inbox_parse <record> — one inbox.tsv line into the $f_* variables, with the
-# TSV's `-` placeholders mapped back to empty.
+# inbox_parse: the TSV's `-` placeholders map back to empty.
 f_worktree=""; f_session=""; f_repo=""; f_branch=""; f_state=""
 f_pr=""; f_prtag=""; f_mtime=""; f_entries=""; f_headline=""
 inbox_parse() {
@@ -108,9 +98,8 @@ inbox_parse() {
     return 0
 }
 
-# inbox_archive_stale <thread-mtime> <state> <archived-mtime> <archived-state>
-#   true when the mark no longer describes the row — the log has been written
-#   since, or the run moved on — which is what un-archives it.
+# True when the mark no longer describes the row — the log has been written
+# since, or the run moved on.
 inbox_archive_stale() {
     local mtime="${1:-0}" state="$2" amtime="${3:-0}" astate="$4"
     [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
@@ -122,8 +111,7 @@ inbox_archive_stale() {
     fi
 }
 
-# inbox_unread <thread-mtime> <seen-mtime> — a thread with no entry is never
-# unread; one never opened always is.
+# A thread with no entry is never unread; one never opened always is.
 inbox_unread() {
     local mtime="$1" seen="$2"
     [[ "$mtime" =~ ^[0-9]+$ ]] || { printf 'false'; return 0; }
@@ -131,8 +119,7 @@ inbox_unread() {
     if (( mtime > seen )); then printf 'true'; else printf 'false'; fi
 }
 
-# iso_to_epoch <YYYY-MM-DDTHH:MM:SSZ> — UTC seconds, fork-free (days_from_civil);
-# empty for anything not that exact shape.
+# Fork-free (days_from_civil); empty for input that is not this exact shape.
 iso_to_epoch() {
     local y mo d h mi sec era yoe doy doe days
     [[ "$1" =~ ^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})Z$ ]] || return 0
@@ -147,9 +134,9 @@ iso_to_epoch() {
     printf '%s' $(( days * 86400 + h * 3600 + mi * 60 + sec ))
 }
 
-# inbox_thread_author <file> — the author half of the LAST `## <time> · <who>`
-# header; empty when the log has no entry. `g` lands on that session because
-# it is the one that spoke about this thread last.
+# The author half of the LAST `## <time> · <who>` header; empty when the log
+# has no entry. `g` treats that as the session that spoke about this thread
+# last.
 inbox_thread_author() {
     local f="$1" l last=""
     [[ -r "$f" ]] || return 0
@@ -164,9 +151,8 @@ inbox_thread_author() {
 
 inbox_state_file() { printf '%s/_state/%s.tsv' "$INBOX_DIR" "$1"; }
 
-# inbox_state_get <file> <repo> <branch> — the rest of the row for that key,
-# tab-separated; empty when the key is not marked. Both state files key by
-# <repo> and the branch slug (inbox_slug), never the branch itself.
+# Both state files key by <repo> and the branch slug (inbox_slug), never the
+# branch itself; empty when the key is not marked.
 inbox_state_get() {
     local f="$1" key line
     inbox_slug "$3"
@@ -180,10 +166,9 @@ inbox_state_get() {
     return 0
 }
 
-# inbox_state_put <file> <repo> <branch> [<rest>] — replace that key's row,
-# or drop it when <rest> is omitted. The file is rewritten to <file>.tmp.$$
-# and mv'ed, so a reader never sees a half-written mark and no state file is
-# ever unlinked.
+# Drops the key's row when <rest> is omitted, else replaces it. Rewritten to
+# <file>.tmp.$$ and mv'ed: a reader never sees a half-written mark, and no
+# state file is ever unlinked.
 inbox_state_put() {
     local f="$1" repo="$2" rest="${4-}" key line tmp
     inbox_slug "$3"
@@ -202,9 +187,8 @@ inbox_state_put() {
     mv -f "$tmp" "$f"
 }
 
-# inbox_hub_session <name> — the tmux session to send g to, empty when none
-# is running. A main checkout's hub claude is named "<session>-hub"
-# (new_hub_session), and thread entries carry that peer name.
+# Empty when no matching session is running. A main checkout's hub claude is
+# named "<session>-hub"; thread entries carry that peer name.
 inbox_hub_session() {
     local name="$1"
     if tmux has-session -t "=$name" 2>/dev/null; then
@@ -215,14 +199,11 @@ inbox_hub_session() {
     return 0
 }
 
-# Sourced by tests/test-hq-inbox.sh: hand back the decisions and stop.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 0 2>/dev/null || true
 fi
 
 set -uo pipefail
-
-# ── paint ───────────────────────────────────────────────
 
 # bin/worktrees' palette: yellow = on you, blue = live, green = done.
 RST=""; BOLD=""; DIM=""; SEL=""
@@ -239,8 +220,8 @@ bucket_color() {
         *)           printf '%s' "$C_ARCH" ;;
     esac
 }
-# term_size — sets term_w and term_h with at most one fork; a subshell would
-# lose them, so it is called bare, never inside $( ).
+# Sets term_w and term_h with at most one fork; a subshell would lose them,
+# so this is called bare, never inside $( ).
 term_size() {
     local w="${COLUMNS:-}" h="${LINES:-}" tw th
     if [[ ! "$w" =~ ^[0-9]+$ || ! "$h" =~ ^[0-9]+$ ]] && [[ -n "${TMUX:-}" ]]; then
@@ -261,8 +242,6 @@ clip() {
     (( w < 1 )) && { printf ''; return 0; }
     if (( ${#t} > w )); then printf '%s…' "${t:0:w-1}"; else printf '%s' "$t"; fi
 }
-
-# ── data ────────────────────────────────────────────────
 
 r_repo=(); r_branch=(); r_session=(); r_state=(); r_prtag=(); r_mtime=()
 r_headline=(); r_bucket=(); r_unread=(); r_age=(); r_thread=()
@@ -362,8 +341,6 @@ bucket_rank() {
         *)           printf 3 ;;
     esac
 }
-
-# ── frame ───────────────────────────────────────────────
 
 frame_rows=()
 # frame_row_line[<cursor position>] = the frame_rows index it paints, so the
@@ -483,8 +460,6 @@ dump() {
     printf '%s' "$frame_foot"
 }
 
-# ── actions ─────────────────────────────────────────────
-
 mark_seen() {
     local idx="$1" m
     m="${r_mtime[$idx]}"
@@ -507,8 +482,8 @@ toggle_archive() {
     fi
 }
 
-# other_client — the tty of the most recently active attached client that is
-# not this one; empty when the inbox is the only client.
+# The tty of the most recently active attached client that is not this one;
+# empty when the inbox is the only client.
 other_client() {
     local mine act tty best="" bestact=-1
     mine=$(tmux display -p '#{client_tty}' 2>/dev/null)
@@ -557,8 +532,6 @@ open_thread() {
     mark_seen "$idx"
     STATUS_NOTE=""
 }
-
-# ── entry ───────────────────────────────────────────────
 
 STATUS_NOTE=""
 FORCE_COLLECT=false
