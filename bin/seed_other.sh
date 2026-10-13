@@ -4,15 +4,16 @@
 # symlink_files.sh (so a rerun on an existing machine fills any gaps), and
 # safe to run by hand.
 #
-#   seed_other.sh           create missing files, then report settings drift
+#   seed_other.sh           create missing files, then apply settings drift
 #   seed_other.sh --check   report only — missing files + settings drift,
 #                           nothing written; exit 1 if anything is flagged
 #                           (this is what bin/doctor runs)
 #
 # The copy happens once, so a default added to an .example LATER never reaches
 # a machine that already has the real file. For the one structured file where
-# that matters, settings.json, the run ends with bin/claude-settings-check,
-# which lists exactly what the live file lacks and leaves the fix to the user.
+# that matters, settings.json, the run ends with bin/claude-settings-check: in
+# write mode it runs --apply (adds the gaps), in --check mode it only reports
+# them and names --apply as the fix.
 set -euo pipefail
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
@@ -46,9 +47,16 @@ fi
 
 # settings.json drift — only meaningful once the live file exists (a missing
 # one was just reported above, or just created from the example = no drift).
+# --check stays read-only (reports + names the fix); write mode applies the
+# gaps, and a failed apply is printed but does not fail this run, so
+# symlink_files.sh keeps linking.
 drift=0
 if [[ -f "$DOTFILES/other/claude/settings.json" ]]; then
-    "$DOTFILES/bin/claude-settings-check" || drift=1
+    if (( check )); then
+        "$DOTFILES/bin/claude-settings-check" || drift=1
+    else
+        "$DOTFILES/bin/claude-settings-check" --apply || true
+    fi
 fi
 
 if (( check )) && (( missing > 0 || drift )); then
