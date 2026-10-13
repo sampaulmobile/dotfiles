@@ -326,14 +326,15 @@ load_data() {
         [inputs | select(length > 0) | split("\t")] as $rows
         | $rows[]
         | . as $f
-        | ($f[9]  | dec) as $prompt
+        | ($f[9]  | dec) as $prompt_raw
         | ($f[10] | dec) as $from
         | ($f[11] | dec) as $reply_raw
         | ($f[12] | dec) as $tool
         | ($f[13] | dec) as $pending
         | ($reply_raw | if . == "-" then "-" else strip_md end) as $reply
+        | ($prompt_raw | if . == "-" then "-" else .[0:32768] end) as $prompt
         | ($prompt | if . == "-" then "-"
-                     else gsub("[\\n\\t\\x00-\\x1f\\x7f]"; " ") | .[0:1024] end) as $prompt_list
+                     else .[0:1024] | gsub("[\\n\\t\\x00-\\x1f\\x7f]"; " ") end) as $prompt_list
         | $sep + "H", ([$f[0],$f[1],$f[2],$f[3],$f[4],$f[5],$f[6],$f[7],$f[8],$f[14]] | join("\t")),
           $sep + "P", $prompt,
           $sep + "L", $prompt_list,
