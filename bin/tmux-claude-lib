@@ -122,6 +122,29 @@ new_hub_session() {
     fi
 }
 
+# unpark_session <session-name>
+#   Wakes a session bin/hq-reap parked: types its saved @parked_cmd into the
+#   saved @parked_pane if that pane has no agent on its tty, then clears
+#   @parked/@parked_pane/@parked_cmd either way. A non-parked session (the
+#   common case, paid on every sessionizer/wt-tmux-jump/dashboard visit)
+#   costs exactly one display -p and returns. CREATION-only per
+#   tmux-task-session's rule: display-message, send-keys, set-option.
+unpark_session() {
+    local session="$1" pane cmd tty
+    IFS=$'\t' read -r pane cmd < <(tmux display -p -t "$session" $'#{@parked_pane}\t#{@parked_cmd}' 2>/dev/null)
+    [[ -n "$pane" || -n "$cmd" ]] || return 0
+    if [[ -n "$pane" ]] && tmux display-message -p -t "$pane" '#{pane_id}' >/dev/null 2>&1; then
+        tty=$(tmux display-message -p -t "$pane" '#{pane_tty}' 2>/dev/null)
+        tty="${tty#/dev/}"
+        if [[ -z "$(agent_ttys | awk -v t="$tty" -F'\t' '$1==t{print; exit}')" ]]; then
+            tmux send-keys -t "$pane" "$cmd" Enter
+        fi
+    fi
+    tmux set-option -u -t "$session" @parked 2>/dev/null
+    tmux set-option -u -t "$session" @parked_pane 2>/dev/null
+    tmux set-option -u -t "$session" @parked_cmd 2>/dev/null
+}
+
 # agent_ttys
 #   Prints "<tty>\t<agent>" for every live agent process, one line per tty
 #   (no /dev/ prefix). Panes are identified by TTY, never by
@@ -195,7 +218,8 @@ get_claude_sessions() {
 
 # get_claude_panes
 #   Prints one line per agent PANE — any window of any session —
-#   tab-separated: session_name, pane_id, window_index, agent. Most recently
+#   tab-separated: session_name, pane_id, window_index, agent, cwd (last, so
+#   a path holding a tab still reads whole). Most recently
 #   active session first, window order within a session. The dashboard's row
 #   source: per-pane (unlike get_claude_sessions) so an agent outside window
 #   1 gets its own row, and the agent column tells each row which telemetry
@@ -203,14 +227,14 @@ get_claude_sessions() {
 get_claude_panes() {
     local map rest
     map=$(_agent_tty_map) || return 0
-    tmux list-panes -a -F $'#{session_activity}\t#{session_name}\t#{pane_id}\t#{window_index}\t#{pane_tty}' 2>/dev/null \
-        | while IFS=$'\t' read -r act name pid widx tty; do
+    tmux list-panes -a -F $'#{session_activity}\t#{session_name}\t#{pane_id}\t#{window_index}\t#{pane_tty}\t#{pane_current_path}' 2>/dev/null \
+        | while IFS=$'\t' read -r act name pid widx tty cwd; do
             rest="${map#*$'\n'"${tty#/dev/}"$'\t'}"
             [[ "$rest" == "$map" ]] && continue
-            printf '%s\t%s\t%s\t%s\t%s\n' "$act" "$name" "$pid" "$widx" "${rest%%$'\n'*}"
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$act" "$name" "$pid" "$widx" "${rest%%$'\n'*}" "$cwd"
         done \
         | sort -t$'\t' -k1,1rn -k4,4n \
-        | cut -f2-5
+        | cut -f2-
 }
 
 # classify_pane_status <raw-content> [agent]
@@ -244,7 +268,23 @@ classify_pane_status() {
         [[ -n "$line" ]] && filtered+=("$line")
     done
 
-    local total=${#filtered[@]}
+    # Claude Code renders an agents list below the footer while the session
+    # has subagents running, and a session that goes idle leaves it in the
+    # last painted frame indefinitely. Its rows end in a
+    # "36m 12s · ↓ 421.5k tokens" tail, so they look like the spinner and
+    # crowd the window below. "← for agents" is the footer hint,
+    # present whether or not the list is up, so everything after the last
+    # one is chrome. Older UI generations have no such line and are left
+    # whole.
+    local total=${#filtered[@]} i cut=-1
+    for (( i = 0; i < total; i++ )); do
+        [[ "${filtered[i]}" == *"← for agents"* ]] && cut="$i"
+    done
+    if (( cut >= 0 )); then
+        filtered=("${filtered[@]:0:$(( cut + 1 ))}")
+        total=${#filtered[@]}
+    fi
+
     if (( total == 0 )); then
         echo "unknown"
         return
@@ -267,12 +307,20 @@ classify_pane_status() {
     # Working markers across UI generations: "esc to interrupt" (older),
     # "⎿  Running…" (tool in flight), and the spinner status line
     # "· <Verb>… (41s · ↓ 1.9k tokens)", whose only stable fragment is the
-    # "s · ↓ " + "tokens" pair — the verbs are randomized.
-    if [[ "$content" == *"to interrupt"* || "$content" == *"⎿  Running…"* ]] \
-       || [[ "$content" == *"s · ↓ "* && "$content" == *"tokens"* ]]; then
+    # "s · ↓ " + "tokens" pair — the verbs are randomized. The current UI
+    # emits no "esc to interrupt", so the spinner is the only live marker
+    # left; it is matched PER LINE between its parentheses, since an agents
+    # list row carries the same fragment bare.
+    if [[ "$content" == *"to interrupt"* || "$content" == *"⎿  Running…"* ]]; then
         echo "working"
         return
     fi
+    for w in "${window[@]}"; do
+        if [[ "$w" == *"("*"s · ↓ "*"tokens"*")"* ]]; then
+            echo "working"
+            return
+        fi
+    done
 
     # Must be tested before idle: ❯ appears in the Yes/No selector too.
     if [[ "$content" == *"Yes"* && "$content" == *"No"* ]]; then
@@ -984,38 +1032,35 @@ get_agent_snippet() {
     printf '%s' "$text"
 }
 
-# format_age <seconds>
-#   Pretty-prints an age/duration: 45 -> 45s, 300 -> 5m, 7200 -> 2h
+# The formatters below assign to the variable named first instead of
+# printing, so the dashboard's per-row loop forks nothing. bash 3.2's
+# printf -v rejects an array element: pass a plain variable.
+
+# format_age <var> <seconds> — 45 -> 45s, 300 -> 5m, 7200 -> 2h, empty -> ?
 format_age() {
-    local s="$1"
-    [[ -z "$s" ]] && printf '?' && return
-    if (( s < 60 )); then
-        printf '%ds' "$s"
-    elif (( s < 3600 )); then
-        printf '%dm' "$(( s / 60 ))"
+    local _fa_s="$2"
+    if [[ -z "$_fa_s" ]]; then
+        printf -v "$1" '?'
+    elif (( _fa_s < 60 )); then
+        printf -v "$1" '%ds' "$_fa_s"
+    elif (( _fa_s < 3600 )); then
+        printf -v "$1" '%dm' $(( _fa_s / 60 ))
     else
-        printf '%dh' "$(( s / 3600 ))"
+        printf -v "$1" '%dh' $(( _fa_s / 3600 ))
     fi
 }
 
-# format_tokens <number>
-#   Pretty-prints token counts: 1234567 -> 1.2M, 12345 -> 12.3k, 999 -> 999
+# format_tokens <var> <number> — 1234567 -> 1.2M, 12345 -> 12.3k, 999 -> 999.
+#   The decimal truncates, never rounds: 1299 -> 1.2k.
 format_tokens() {
-    local n="$1"
-    if (( n >= 1000000 )); then
-        printf "%.1fM" "$(echo "scale=1; $n / 1000000" | bc)"
-    elif (( n >= 1000 )); then
-        printf "%.1fk" "$(echo "scale=1; $n / 1000" | bc)"
+    local _ft_n="$2"
+    if (( _ft_n >= 1000000 )); then
+        printf -v "$1" '%d.%dM' $(( _ft_n / 1000000 )) $(( _ft_n % 1000000 / 100000 ))
+    elif (( _ft_n >= 1000 )); then
+        printf -v "$1" '%d.%dk' $(( _ft_n / 1000 )) $(( _ft_n % 1000 / 100 ))
     else
-        echo "$n"
+        printf -v "$1" '%s' "$_ft_n"
     fi
-}
-
-# short_model <model-string>
-#   Shortens model names: claude-opus-4-6 -> opus-4-6, claude-sonnet-4-6 -> sonnet-4-6.
-#   Codex model ids carry no such prefix and pass through untouched.
-short_model() {
-    echo "$1" | sed 's/^claude-//'
 }
 
 # ── codex ───────────────────────────────────────────────

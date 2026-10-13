@@ -202,6 +202,19 @@ inbox_state_put() {
     mv -f "$tmp" "$f"
 }
 
+# inbox_hub_session <name> — the tmux session to send g to, empty when none
+# is running. A main checkout's hub claude is named "<session>-hub"
+# (new_hub_session), and thread entries carry that peer name.
+inbox_hub_session() {
+    local name="$1"
+    if tmux has-session -t "=$name" 2>/dev/null; then
+        printf '%s' "$name"
+    elif [[ "$name" == *-hub ]] && tmux has-session -t "=${name%-hub}" 2>/dev/null; then
+        printf '%s' "${name%-hub}"
+    fi
+    return 0
+}
+
 # Sourced by tests/test-hq-inbox.sh: hand back the decisions and stop.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 0 2>/dev/null || true
@@ -473,13 +486,15 @@ dump() {
 # ── actions ─────────────────────────────────────────────
 
 mark_seen() {
-    local idx="$1" m="${r_mtime[$idx]}"
+    local idx="$1" m
+    m="${r_mtime[$idx]}"
     [[ "$m" =~ ^[0-9]+$ ]] || return 0
     inbox_state_put "$(inbox_state_file seen)" "${r_repo[$idx]}" "${r_branch[$idx]}" "$m"
 }
 
 toggle_archive() {
-    local idx="$1" f m="${r_mtime[$idx]}"
+    local idx="$1" f m
+    m="${r_mtime[$idx]}"
     f=$(inbox_state_file archived)
     [[ "$m" =~ ^[0-9]+$ ]] || m=0
     if [[ "${r_bucket[$idx]}" == ARCHIVED ]]; then
@@ -513,10 +528,13 @@ go_to_hub() {
         STATUS_NOTE="no hub session for this thread"
         return 0
     fi
-    if ! tmux has-session -t "=$target" 2>/dev/null; then
+    local session
+    session=$(inbox_hub_session "$target")
+    if [[ -z "$session" ]]; then
         STATUS_NOTE="$target is not running"
         return 0
     fi
+    target="$session"
     tty=$(other_client)
     if [[ -z "$tty" ]]; then
         STATUS_NOTE="no other client — the hub is $target"
@@ -527,7 +545,8 @@ go_to_hub() {
 }
 
 open_thread() {
-    local idx="$1" f="${r_thread[$idx]}"
+    local idx="$1" f
+    f="${r_thread[$idx]}"
     if [[ ! -r "$f" ]]; then
         STATUS_NOTE="no entries yet for ${r_repo[$idx]}/${r_branch[$idx]}"
         return 0

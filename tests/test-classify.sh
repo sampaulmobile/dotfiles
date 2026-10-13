@@ -62,6 +62,8 @@ expect claude-idle.txt            claude idle
 expect claude-working.txt         claude working
 expect claude-permission.txt      claude permission
 expect claude-plan-permission.txt claude permission
+expect claude-idle-agents-list.txt    claude idle
+expect claude-working-agents-list.txt claude working
 
 echo "── claude: the agent argument is optional (every pre-existing caller)"
 got=$(classify_pane_status "$(cat "$fixtures/claude-permission.txt")")

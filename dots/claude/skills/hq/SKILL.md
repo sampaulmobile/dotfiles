@@ -35,7 +35,8 @@ it returns.
 ## 2. Launch a task session per piece
 
 Before dispatching anything that touches an EXISTING PR or branch (review
-fixes, rebases, follow-ups), check whether work on it is already in flight:
+fixes, branch catch-up merges, follow-ups), check whether work on it is
+already in flight:
 `bin/worktrees` lists a worktree for that branch with its PIPELINE column, and
 the user may be steering an agent there. If so, do NOT launch a second run —
 send the new direction to that session by name and ask it to fold the work in,
@@ -103,16 +104,18 @@ ask the user, before dispatching.
   <seat>` · PR · updated. A worktree with no run in flight has no row.
   `bin/worktrees` shows the same state as its PIPELINE column.
   A `phase: gate` line means that run is waiting on the requester, not
-  working: relay its digest to the user, and on a go send that go by message
-  to the task session itself, which resumes at its implement step. The file
+  working: review and give or relay the go per
+  `~/.claude/skills/feature/SKILL.md`'s "After a Launch, on the requester's
+  side" (same section this session loaded for `--requester=`). The file
   yields the phase, never the digest itself: for a run this session launched
   it arrived here as a message, and otherwise it is at the top of that
   worktree's `workplans/<slug>-plan.md`, or of `.feature/plan.md` when
   workplans are off.
-- Before relaying a digest, a result, a stalled notice or `--quick` findings,
-  append it to that thread's inbox log — format and rule are in the feature
-  skill's requester-side section (`dots/claude/skills/feature/SKILL.md`,
-  "After a Launch, on the requester's side").
+- A decision that is the owner's call never goes into chat without a
+  record — the auto-take test, the asked/auto-taken split and the
+  `hq-make-decision` calls are all in that same section of
+  `~/.claude/skills/feature/SKILL.md`; this session follows it rather than
+  its own copy.
 - Relay results to the user as they land — PR URLs and summaries, or the
   findings when a `--quick` run produced no commits, not implementation detail.
 - Multi-repo: report per-piece status; the feature is done only when every
@@ -121,3 +124,9 @@ ask the user, before dispatching.
   in the run's `pipelines.tsv` row — the same name Launch reported and Ctrl+F
   lists. If the user wants hands-on control, name that session to jump
   to (Ctrl+F).
+- `bin/hq-reap` ends finished task sessions on its own: a merged/closed one
+  is killed within a few minutes, worktree untouched; a phase-`done` one
+  with the PR still open gets its claude ended ("parked") after 12h idle,
+  session kept. A message to a parked session sits unread until someone
+  visits it or runs `~/dotfiles/bin/hq-reap resume <session>` — if a
+  steering message seems to go nowhere, check that before escalating.

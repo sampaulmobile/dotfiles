@@ -91,6 +91,11 @@
             "type": "command",
             "command": "~/dotfiles/bin/claude-guard-pipe-truncate",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "~/dotfiles/bin/claude-guard-docker-delete",
+            "timeout": 10
           }
         ]
       }

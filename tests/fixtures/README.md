@@ -10,6 +10,8 @@ are written down.
 | `claude-idle.txt` | claude | idle | hand-written from the strings the classifier matches (`❯` prompt) |
 | `claude-working.txt` | claude | working | hand-written (`esc to interrupt`, `s · ↓ … tokens`, `⎿  Running…`) |
 | `claude-permission.txt` | claude | permission | hand-written (Yes/No selector) |
+| `claude-idle-agents-list.txt` | claude | idle | real capture, sanitized: a finished pipeline session whose last painted frame still shows the agents list, whose rows end in a bare `36m 12s · ↓ 421.5k tokens` tail the spinner test must not match |
+| `claude-working-agents-list.txt` | claude | working | same list, genuinely working: three rows push the spinner past the 10-line window, so this reads `idle` unless the chrome after `← for agents` is dropped first |
 | `claude-plan-permission.txt` | claude | permission | hand-written (plan-mode question, `Enter to select` on the last line — deliberately has no "No" option so it exercises that branch and not the Yes/No one) |
 | `codex-idle.txt` | codex | idle | real `tmux capture-pane -p` from codex-cli 0.153.4 |
 | `codex-working.txt` | codex | working | real capture, mid-turn |

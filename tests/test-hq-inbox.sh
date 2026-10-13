@@ -172,6 +172,14 @@ echo "── the hub session g targets is the last entry's author"
 check "author of the newest entry" "$(inbox_thread_author "$HQ_INBOX_DIR/proj/feat-gate.md")" "proj-hub"
 check "a log with no entry"        "$(inbox_thread_author "$HQ_INBOX_DIR/_state/seen.tsv")"   ""
 
+echo "── g falls back from a <session>-hub peer name to tmux session <session>"
+# tmux is a function here, answering for a fake session list: no tmux
+# server is reached.
+hub_session() ( tmux() { [[ "$1" == has-session && " hq other " == *" ${3#=} "* ]]; }; inbox_hub_session "$1" )
+check "hq-hub with no such session resolves to hq" "$(hub_session hq-hub)" "hq"
+check "an exact session match is used as is"       "$(hub_session other)"  "other"
+check "nothing to fall back to resolves to empty"  "$(hub_session gone-hub)" ""
+
 echo "── state files are replaced, never unlinked"
 seen_file=$(inbox_state_file seen)
 inbox_state_put "$seen_file" proj feat/gate 4242

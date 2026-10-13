@@ -1,5 +1,6 @@
 # Machine-local git overrides — included by ~/.gitconfig (missing file is
 # silently skipped). To use: cp gitconfig.local.example gitconfig.local && edit.
-[user]
-	name = Your Name
-	email = you@example.com
+# Anything left uncommented here overrides dots/gitconfig on every repo.
+# [user]
+# 	name = Your Name
+# 	email = you@example.com

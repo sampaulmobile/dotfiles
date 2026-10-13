@@ -51,6 +51,10 @@
   branch, add a commit (`git revert`, or edit + commit) and push normally. If a
   force-push looks like the only way forward, stop and hand it to the user.
 
+- **Never rebase.** To bring a branch up to date with the default branch,
+  `git fetch` then `git merge origin/<default>`, resolve conflicts in the
+  merge commit, and push normally.
+
 - **Announce before writing or touching live systems.** Print the exact
   commands and wait when a command writes, deletes, deploys, or runs against
   a live/prod system — including anything that loops or polls against one.
@@ -59,10 +63,13 @@
 
 - **Never write to env, secret or credential files.** `.env*`, `envvars*.sh`,
   `*.key`, `*.pem`, `*.crt`, `credentials`, `.npmrc`, and anything else
-  holding keys, tokens or per-env config. Read them to check a value; never
-  create, append to, or edit one — not a one-line append, not a gitignored
-  file. If a script needs a var that is missing, say which file needs which
-  line and stop.
+  holding keys, tokens or per-env config. Never print one whole: no `cat`,
+  `head`, `sed -n`, `source`, or regex "redaction" of the output. Check a
+  single key with `grep -c '^NAME=' <file>`, or list key names alone with
+  `grep -o '^[A-Za-z_]*=' <file>`. Print a value only when it is not a secret
+  and the task needs it. Never create, append to, or edit one — not a one-line
+  append, not a gitignored file. If a script needs a var that is missing, say
+  which file needs which line and stop.
 
 - **Temp files go in the session scratchpad, never a bare `/tmp` path.** Every
   session on this machine resolves `/tmp/claude-501/` to the same directory,

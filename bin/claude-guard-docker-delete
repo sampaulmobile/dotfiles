@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# Claude Code PreToolUse(Bash) guard.
+# Denies docker commands that destroy volumes or prune docker state: compose
+# `down`/`rm` with `-v`/`--volumes`, `docker rm -v`/`--volumes`, `docker
+# volume rm`/`prune`, and `system`/`image`/`container`/`builder`/`network`
+# prune. Case-insensitive, flag-order-independent, `docker compose` and
+# `docker-compose` both match. Checks the command string AND the contents of
+# any .sh file it executes — same input/report/exit contract as
+# bin/claude-guard-pipe-truncate.
+#
+# These delete state outside the worktree an agent runs in (see
+# dots/claude/rules/deletion-safety.md) and are unrecoverable once run — an
+# agent never runs them; print the exact command and hand it to the human.
+#
+# stdin: PreToolUse hook JSON. Deny => print permissionDecision JSON. Allow => exit 0.
+set -euo pipefail
+
+input="$(cat)"
+cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // ""' 2>/dev/null || true)"
+cwd="$(printf '%s' "$input" | jq -r '.cwd // ""' 2>/dev/null || true)"
+[ -z "$cmd" ] && exit 0
+
+reason=""
+
+# is_tok <padded-lowercase-haystack> <token> -> token appears with a space (or
+# the padded start/end) on both sides, so e.g. "--rm" never matches "rm" and
+# "stack-down.yml" never matches "down".
+is_tok() {
+  case "$1" in
+    *" $2 "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# blocked_seg <padded-lowercase-segment> -> 0 if this one command segment is
+# a volume-destroying or prune docker invocation.
+blocked_seg() {
+  local lc="$1"
+  is_tok "$lc" docker || is_tok "$lc" docker-compose || return 1
+
+  local down=1 v=1 rm=1 volume=1 prune=1 system=1 image=1 container=1 builder=1 network=1 runsub=1 execsub=1
+  is_tok "$lc" down && down=0
+  { is_tok "$lc" -v || is_tok "$lc" --volumes; } && v=0
+  is_tok "$lc" rm && rm=0
+  is_tok "$lc" volume && volume=0
+  is_tok "$lc" prune && prune=0
+  is_tok "$lc" system && system=0
+  is_tok "$lc" image && image=0
+  is_tok "$lc" container && container=0
+  is_tok "$lc" builder && builder=0
+  is_tok "$lc" network && network=0
+  is_tok "$lc" run && runsub=0
+  is_tok "$lc" exec && execsub=0
+
+  [ "$down" -eq 0 ] && [ "$v" -eq 0 ] && return 0
+  # `rm`+`-v` is only docker's own flag when `rm` is docker's subcommand, not
+  # an argv word handed to a containerized command under `run`/`exec`.
+  [ "$rm" -eq 0 ] && [ "$v" -eq 0 ] && [ "$runsub" -ne 0 ] && [ "$execsub" -ne 0 ] && return 0
+  [ "$volume" -eq 0 ] && [ "$rm" -eq 0 ] && return 0
+  [ "$volume" -eq 0 ] && [ "$prune" -eq 0 ] && return 0
+  [ "$system" -eq 0 ] && [ "$prune" -eq 0 ] && return 0
+  [ "$image" -eq 0 ] && [ "$prune" -eq 0 ] && return 0
+  [ "$container" -eq 0 ] && [ "$prune" -eq 0 ] && return 0
+  [ "$builder" -eq 0 ] && [ "$prune" -eq 0 ] && return 0
+  [ "$network" -eq 0 ] && [ "$prune" -eq 0 ] && return 0
+  return 1
+}
+
+check_text() {  # $1 = text, $2 = where (for message)
+  local text="$1" where="$2"
+  local norm seg trimmed lc
+  # Join shell line-continuations into one logical line per command (same
+  # join the pipe-truncate guard does), blank fd redirections so a bare `&`
+  # only ever means a command separator, then split on ; & | && || into one
+  # segment per command so a dangerous combination must appear in the SAME
+  # invocation, not merely the same command string.
+  norm="$(printf '%s' "$text" | awk '
+    { if (cont) buf = buf " " $0; else buf = $0
+      t = buf; sub(/[[:space:]]+$/,"",t)
+      if (t ~ /\\$/) { sub(/\\[[:space:]]*$/,"",buf); cont=1; next }
+      print buf; cont=0; buf="" }
+    END { if (buf != "") print buf }' \
+    | sed -E 's/[0-9]*[<>]&[0-9-]+/ /g; s/&>>?/ /g' \
+    | sed -E 's/(&&|\|\|)/\n/g; s/[;&|]/\n/g')"
+
+  while IFS= read -r seg; do
+    trimmed="$(printf '%s' "$seg" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+    [ -z "$trimmed" ] && continue
+    lc=" $(printf '%s' "$trimmed" | tr '[:upper:]' '[:lower:]') "
+    if blocked_seg "$lc"; then
+      reason="Blocked: \`$trimmed\`${where} deletes Docker volumes or prunes Docker state. Volume-destroying and prune docker commands are run by the human, not an agent — print the exact command and hand it to the user. See dots/claude/rules/deletion-safety.md."
+      return 0
+    fi
+  done <<EOF
+$norm
+EOF
+  return 1
+}
+
+# 1) the command string itself
+if check_text "$cmd" ""; then
+  jq -nc --arg r "$reason" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
+  exit 0
+fi
+
+# 2) any .sh file the command executes -> scan its contents
+for tok in $(printf '%s' "$cmd" | grep -oE '[^[:space:]"'"'"']+\.sh' || true); do
+  f=""
+  if [ -f "$tok" ]; then f="$tok"
+  elif [ -n "$cwd" ] && [ -f "$cwd/$tok" ]; then f="$cwd/$tok"
+  fi
+  [ -z "$f" ] && continue
+  body="$(cat "$f" 2>/dev/null || true)"
+  [ -z "$body" ] && continue
+  if check_text "$body" " inside the script $tok"; then
+    jq -nc --arg r "$reason" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
+    exit 0
+  fi
+done
+
+exit 0
