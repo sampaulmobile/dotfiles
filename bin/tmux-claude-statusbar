@@ -42,6 +42,10 @@ fi
 # This tick is the only producer that already holds the scan, so it publishes
 # the source itself rather than making `hq-snapshot tick` scan a second time.
 { [[ -z "$status_lines" ]] || printf '%s\n' "$status_lines"; } | snapshot_write sessions
+# Same reasoning for panes — bin/hq-snapshot's collect_turns joins against
+# this instead of its own scan_agent_panes/get_claude_panes (measured well
+# over the tick's budget; see workplans/hq-feed-plan.md's amendment).
+{ [[ -z "$pane_lines" ]] || printf '%s\n' "$pane_lines"; } | snapshot_write panes
 ~/dotfiles/bin/hq-snapshot tick >/dev/null 2>&1 &
 
 done_list=$(~/dotfiles/bin/tmux-claude-attention list 2>/dev/null)

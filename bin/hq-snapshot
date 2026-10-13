@@ -52,7 +52,7 @@ REAP_CADENCE=120
 # `all` walks this list BACKWARDS (slowest first), so a source that joins two
 # others — inbox, over pipelines and prs — is listed before them to be
 # collected after them.
-SNAPSHOT_SOURCES="inbox:5 sessions:5 pipelines:5 worktrees:15 prs:30"
+SNAPSHOT_SOURCES="inbox:5 sessions:5 pipelines:5 worktrees:15 prs:30 turns:5 panes:5"
 
 snapshot_file() { printf '%s/%s.tsv' "$SNAPSHOT_DIR" "$1"; }
 
@@ -216,6 +216,84 @@ pipeline_for_cwd() {
     return 0
 }
 
+# turns_rows <pane-body> <pane-meta> <name-map> <prev-body>
+#   Pure builder for the turns record, one line per <pane-body> line
+#   (scan_agent_panes' format: session, pane, window_id, agent, status):
+#     session pane window agent status name mtime jsonl kind prompt from
+#     reply tool pending cwd
+#   (- for empty; leading fields never empty). Calls into tmux-claude-lib
+#   (find_pane_jsonl, codex_find_pane_jsonl, _agent_file_mtime,
+#   get_last_exchange) — source that first; this function is pure over its
+#   arguments otherwise, which is what lets a test stub get_last_exchange
+#   with a call counter. <pane-meta> is "pane_id\twindow_index\tcwd" with a
+#   LEADING newline (one tmux list-panes call — the amendment's point
+#   against a second get_claude_panes, which costs a ps via agent_ttys).
+#   <name-map> is "pane_num\tname" (no %) from ~/.claude/sessions/*.json,
+#   also leading-newlined; a name is shown only when it differs from the
+#   session (the dashboard's rule). <prev-body> is the previous turns
+#   snapshot's OWN body, leading-newlined: a pane whose jsonl and mtime both
+#   match its previous record copies that record's six exchange fields
+#   instead of calling get_last_exchange — the mtime gate the ambient cost
+#   depends on, so an idle pane's transcript is never re-parsed.
+turns_rows() {
+    local pane_body="$1" pane_meta="$2" name_map="$3" prev_body="$4"
+    local session pane _wid agent status
+    while IFS=$'\t' read -r session pane _wid agent status; do
+        [[ -n "$pane" ]] || continue
+
+        local rest widx cwd name
+        widx="-"; cwd="-"
+        rest="${pane_meta#*$'\n'"${pane}"$'\t'}"
+        if [[ "$rest" != "$pane_meta" ]]; then
+            widx="${rest%%$'\t'*}"
+            cwd="${rest#*$'\t'}"
+            cwd="${cwd%%$'\n'*}"
+        fi
+
+        name="-"
+        rest="${name_map#*$'\n'"${pane#%}"$'\t'}"
+        if [[ "$rest" != "$name_map" ]]; then
+            local nm="${rest%%$'\n'*}"
+            [[ -n "$nm" && "$nm" != "-" && "$nm" != "$session" ]] && name="$nm"
+        fi
+
+        local mtime="-" jsonl="-" kind="-" prompt="-" from="-" reply="-" tool="-" pending="-"
+        if [[ "$agent" == codex ]]; then
+            jsonl=$(codex_find_pane_jsonl "$pane" 2>/dev/null)
+            [[ -n "$jsonl" ]] || jsonl="-"
+            if [[ "$jsonl" != "-" ]]; then
+                mtime=$(_agent_file_mtime "$jsonl")
+                [[ -n "$mtime" ]] || mtime="-"
+            fi
+        else
+            jsonl=$(find_pane_jsonl "$pane" 2>/dev/null)
+            [[ -n "$jsonl" ]] || jsonl="-"
+            if [[ "$jsonl" != "-" ]]; then
+                mtime=$(_agent_file_mtime "$jsonl")
+                [[ -n "$mtime" ]] || mtime="-"
+
+                local reused=false
+                rest="${prev_body#*$'\n'"${session}"$'\t'"${pane}"$'\t'}"
+                if [[ "$rest" != "$prev_body" ]]; then
+                    local _pw _pa _ps _pn p_mtime p_jsonl _pc
+                    IFS=$'\t' read -r _pw _pa _ps _pn p_mtime p_jsonl \
+                        kind prompt from reply tool pending _pc <<< "${rest%%$'\n'*}"
+                    if [[ "$p_jsonl" == "$jsonl" && "$p_mtime" == "$mtime" ]]; then
+                        reused=true
+                    fi
+                fi
+                if [[ "$reused" != true ]]; then
+                    IFS=$'\t' read -r kind prompt from reply tool pending < <(get_last_exchange "$jsonl")
+                fi
+            fi
+        fi
+
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "$session" "$pane" "$widx" "$agent" "$status" "$name" "$mtime" "$jsonl" \
+            "$kind" "$prompt" "$from" "$reply" "$tool" "$pending" "$cwd"
+    done <<< "$pane_body"
+}
+
 # Sourced by the screens and by tests/test-hq-snapshot.sh: hand back the
 # helpers above and run no collection.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
@@ -242,19 +320,25 @@ Sources and their cadence, one TSV each under ~/.local/state/hq/snapshot/
   inbox      5s   bin/hq-inbox's threads: pipelines and prs joined to the
                   hub-written thread logs under ~/.local/state/hq/inbox
                   (override that directory with HQ_INBOX_DIR)
+  turns      5s   bin/hq-feed's per-pane last exchange (prompt/reply/tool)
+  panes      5s   bin/hq-feed's per-pane status, for turns to join against
+                  with no second scan_agent_panes/get_claude_panes of its own
 
 Every file starts with a `# generated <ISO time>` line. A reader treats a
 snapshot older than three times its cadence as unusable and computes live.
 
 tick is called by bin/tmux-claude-statusbar every ~5s: it collects pipelines
-inline and spawns the slower sources when they are due and not already
-running; a tick that finds another one running exits at once. inbox is not
-ticked: bin/hq-inbox recollects it when it is stale, so --check flags it only
-when missing. sessions is written by the statusbar itself, which has just run
-the scan — `hq-snapshot sessions` is the standalone path, for a machine whose
-status bar is not ticking. tick also spawns `hq-reap --apply` (its own
-last-run stamp under ~/.local/state/hq/reap gates it, default every 120s) —
-hq-snapshot's own job stays collect-only; it kills and removes nothing.
+and turns inline and spawns the slower sources when they are due and not
+already running; a tick that finds another one running exits at once. inbox
+is not ticked: bin/hq-inbox recollects it when it is stale, so --check flags
+it only when missing. sessions and panes are written by the statusbar
+itself, which has just run the scan each publishes from — `hq-snapshot
+sessions` / `hq-snapshot panes` are the standalone paths, for a machine
+whose status bar is not ticking (collect_turns falls back to scanning
+itself when the panes snapshot is stale or missing). tick also spawns
+`hq-reap --apply` (its own last-run stamp under ~/.local/state/hq/reap gates
+it, default every 120s) — hq-snapshot's own job stays collect-only; it kills
+and removes nothing.
 
 Nothing under ~/.local/state/hq is ever removed, by this script or any other.
 A failed write leaves <file>.tmp.<pid> behind on purpose; to clear them, run
@@ -270,6 +354,52 @@ collect_sessions() {
     # shellcheck source=/dev/null
     source "$DOTFILES/bin/tmux-claude-lib" || return 1
     scan_claude_sessions
+}
+
+# collect_panes — scan_agent_panes' own line, "<session>\t<pane>\t
+# <window_id>\t<agent>\t<status>" per agent pane. Standalone path for a
+# machine whose status bar is not ticking; the statusbar itself publishes
+# this source every tick from the scan it already holds (see
+# bin/tmux-claude-statusbar), so collect_turns can join against it with no
+# second scan_agent_panes of its own.
+collect_panes() {
+    # shellcheck source=/dev/null
+    source "$DOTFILES/bin/tmux-claude-lib" || return 1
+    scan_agent_panes
+}
+
+# collect_turns — bin/hq-feed's turns source. Joins the panes snapshot (or a
+# live scan_agent_panes when it is stale/missing — never get_claude_panes or
+# a second scan_agent_panes: the amendment measured both well over the 5s
+# tick's ~50ms budget) to one tmux list-panes call for window_index/cwd, so
+# the only tmux cost here beyond that is per-codex-pane
+# (codex_find_pane_jsonl's display-message, bounded by how many codex panes
+# exist). turns_rows does the actual mtime-gated parsing. No
+# build_cwd_session_map here deliberately: this script is append-only and
+# removes nothing it creates, and that helper's mktemp file is the
+# dashboard's to clean up (its own EXIT trap) — find_pane_jsonl's per-pane
+# cwd-lookup fallback costs one jq call per pane with no map file, cheap at
+# this pane count.
+collect_turns() {
+    # shellcheck source=/dev/null
+    source "$DOTFILES/bin/tmux-claude-lib" || return 1
+
+    local pane_body verdict
+    verdict=$(snapshot_verdict "$(snapshot_age panes)" "$(snapshot_cadence panes)")
+    if [[ "$verdict" == fresh ]]; then
+        pane_body=$(snapshot_read panes 2>/dev/null)
+    else
+        pane_body=$(scan_agent_panes)
+    fi
+    [[ -n "$pane_body" ]] || return 0
+
+    local pane_meta name_map prev_body
+    pane_meta=$'\n'"$(tmux list-panes -a -F $'#{pane_id}\t#{window_index}\t#{pane_current_path}' 2>/dev/null)"
+    name_map=$'\n'"$(jq -r '[((.tmux // "") | [scan("%[0-9]+$")] | .[0] // "-"), (.name // "-")] | @tsv' \
+        "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null)"
+    prev_body=$'\n'"$(snapshot_read turns 2>/dev/null)"
+
+    turns_rows "$pane_body" "$pane_meta" "$name_map" "$prev_body"
 }
 
 # collect_pipelines — one row per worktree running a /feature or
@@ -511,6 +641,7 @@ case "${1:-}" in
                 "${TMPDIR:-/tmp}/hq-snapshot-tick.lock" "$0" tick
         fi
         collect_one pipelines || rc=1
+        collect_one turns || rc=1
         for s in worktrees prs; do
             declare -f "collect_$s" >/dev/null 2>&1 || continue
             due "$s" || continue
