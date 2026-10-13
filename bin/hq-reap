@@ -9,10 +9,10 @@
 #
 # NEVER A CANDIDATE, either tier: a session that is not a task session (its
 # @task option unset and no claude on its panes carrying `/feature --run` in
-# argv — the pre-this-change fallback); one not tied to a linked worktree row
-# (session_name_for <row path> must equal the session name); one that is
-# attached; one with any agent pane working/permission/unknown; one with any
-# non-agent pane running something other than a shell or an editor.
+# argv); one not tied to a linked worktree row (session_name_for <row path>
+# must equal the session name); one that is attached; one with any agent
+# pane working/permission/unknown; one with any non-agent pane running
+# something other than a shell or an editor.
 #
 # NEVER REMOVED: no worktree, no file, ever. The log under
 # ~/.local/state/hq/reap is append-only, like the sweep archive beside it.
@@ -38,8 +38,8 @@ REAP_PARK_SECS="${HQ_REAP_PARK_SECS:-43200}"
 
 # ---- pure halves: decision table, command builders, detectors ----
 
-# reap_sq <string> — single-quoted for a line typed into a shell, embedded
-# quotes escaped the '\'' way (mirrors tmux-task-session's _task_sq).
+# reap_sq <string> — single-quoted for a shell line (mirrors
+# tmux-task-session's _task_sq).
 reap_sq() {
     local s="$1" q="'"
     printf "'%s'" "${s//$q/$q\\$q$q}"
@@ -65,8 +65,8 @@ reap_parse_model_effort() {
     [[ "$args" =~ --effort[[:space:]]+([A-Za-z0-9._-]+) ]] && reap_effort_out="${BASH_REMATCH[1]}"
 }
 
-# reap_is_task_args <ps-args> — true when a claude's argv still carries the
-# launch brief's leading `/feature --run` (sessions from before @task existed).
+# reap_is_task_args <ps-args> — true when a claude's argv carries
+# `/feature --run`.
 reap_is_task_args() {
     [[ "$1" == *"/feature --run"* ]]
 }
@@ -175,8 +175,8 @@ EOF
 
 # ---- live-system glue (not unit-tested; thin wrappers over tmux/ps/jq) ----
 
-# reap_session_is_task <session> — @task option, else the pre-@task
-# fallback: any pane's tty running a claude whose argv matches reap_is_task_args.
+# reap_session_is_task <session> — @task option if set, else any pane's tty
+# running a claude whose argv matches reap_is_task_args.
 reap_session_is_task() {
     local name="$1" v tty args
     v=$(tmux show-options -qv -t "$name" @task 2>/dev/null)
@@ -392,7 +392,6 @@ reap_pass() {
     done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null)
 }
 
-# reap_apply_kill <session> <worktree> <pr> <reason> — tmux kill-session, logged.
 reap_apply_kill() {
     local name="$1" wt="$2" pr="$3" reason="$4"
     if tmux kill-session -t "=${name}" 2>/dev/null; then
@@ -404,9 +403,6 @@ reap_apply_kill() {
     fi
 }
 
-# reap_apply_park <session> <pid> <peer-name> <worktree> <pr> <reason> —
-# verifies the pid is still a claude on the parked pane's own tty, SIGTERMs
-# it, then marks the session parked with the exact resume command.
 reap_apply_park() {
     local name="$1" pid="$2" peer="$3" wt="$4" pr="$5" reason="$6"
     local pane="$reap_last_pane_out" pane_tty ps_tty ps_comm args model effort epoch

@@ -1,18 +1,16 @@
 #!/usr/bin/env bash
 # prs — your pull requests, one table per repo: OPEN rows tagged with the ONE
 # thing each PR is waiting on, then the PRs merged since --since (default:
-# today). Read-only. The deterministic half of a status check — bin/worktrees
-# is the other half (checkouts), and anything that needs judgment (what to do
-# next) is left to whoever reads the two.
+# today). Read-only; the deterministic half of a status check (bin/worktrees
+# is the other half).
 #
-# Two GitHub search calls for the whole run (open, merged, in parallel),
-# whatever the repo count: GraphQL `search` returns every PR by an author
-# across repos with the tag fields attached, and `archived:false` drops
-# archived repos (GitHub keeps listing their PRs, but nothing can be done to
-# them). Results are filtered locally to the repos in scope, so a repo is never
-# queried on its own. A failing call is retried once (GitHub's GraphQL returns
-# transient "Something went wrong" errors — seen 2026-09-08) and then fails the
-# run with gh's own error.
+# Two GitHub search calls for the whole run (open, merged, in parallel):
+# GraphQL `search` returns every PR by an author across repos with the tag
+# fields attached; `archived:false` drops archived repos (GitHub still lists
+# their PRs). Results are filtered locally to the repos in scope, so a repo
+# is never queried on its own. A failing call is retried once (GraphQL
+# returns transient "Something went wrong" errors — seen 2026-09-08) and
+# then fails the run with gh's own error.
 #
 # Tag precedence is pr_tag()'s order; the tag list is in --help.
 set -uo pipefail
@@ -57,8 +55,6 @@ PRS_PROFILE=1 adds a stderr line per stage with its elapsed time.
 USAGE
 }
 
-# fmt_age <seconds> — "just now" / "5m" / "3h" / "2d" / "6w". Pure; tested in
-# tests/test-prs.sh.
 fmt_age() {
     local s="$1"
     (( s < 0 )) && s=0
@@ -106,10 +102,9 @@ github_slug() {
     printf '%s' "$r" | tr '[:upper:]' '[:lower:]'
 }
 
-# Colors and links only when stdout is a terminal (NO_COLOR drops the colors,
-# links stay). Same palette as bin/worktrees: green = go merge it, red = broken,
-# yellow = on you, cyan = in review, blue = live. Padding is applied to the
-# visible text first and the escapes wrapped after, so columns stay aligned.
+# Colors and links only on a terminal (NO_COLOR drops the colors, links
+# stay). Padding is applied to the visible text first and the escapes
+# wrapped after, so columns stay aligned.
 C_RESET=""
 LINKS=false
 if [[ -t 1 ]]; then
@@ -126,17 +121,15 @@ tag_color() {
         open)                      printf '\033[34m' ;;
     esac
 }
-# paint <tag> <width>
 paint() {
     local padded
     padded=$(printf "%-${2}s" "$1")
     printf '%s%s%s' "$(tag_color "$1")" "$padded" "$C_RESET"
 }
-# link_open <url> / link_close — the OSC 8 hyperlink around a whole row, on
-# a terminal only. Colors (SGR) nest inside a hyperlink without ending it.
+# link_open <url> / link_close — OSC 8 hyperlink around a row, terminal
+# only. SGR colors nest inside without ending it.
 link_open() { [[ "$LINKS" == true ]] && printf '\033]8;;%s\033\\' "$1"; return 0; }
 link_close() { [[ "$LINKS" == true ]] && printf '\033]8;;\033\\'; return 0; }
-# pr_num <number> <width> — "#N" padded, blue on a terminal.
 pr_num() {
     local text="#$1" n pad=""
     n=$(( $2 - ${#text} ))
@@ -171,7 +164,6 @@ while (( $# )); do
     shift
 done
 
-# --since: "7d" -> a date 7 days back; a bare date passes through; default today.
 if [[ -z "$SINCE" ]]; then
     SINCE=$(date +%Y-%m-%d)
 elif [[ "$SINCE" =~ ^([0-9]+)d$ ]]; then
@@ -226,7 +218,6 @@ gh_try() {
     sleep 3
     gh "$@" 2>"$GH_ERRF"
 }
-# gh_failed <errfile> — its first line, for the report.
 gh_failed() {
     local line
     line=$(head -n1 "$1" 2>/dev/null)
@@ -262,8 +253,7 @@ OPEN_JQ='[ (.repository.nameWithOwner | ascii_downcase), .number, .isDraft, (.me
   (.reviewDecision // "-"), ((now - (.updatedAt | fromdate)) | floor), .title, .url ] | @tsv'
 MERGED_JQ='[ (.repository.nameWithOwner | ascii_downcase), .number, (.mergedAt | fromdate | strflocaltime("%H:%M")), .title, .url ] | @tsv'
 
-# The two searches run in parallel, each in its own subshell with its own
-# stderr file; the run fails as a whole if either does.
+# The two searches run in parallel; the run fails as a whole if either does.
 open_pid=""; merged_pid=""
 if [[ "$FROM_SNAPSHOT" == false ]]; then
     if [[ "$WANT_OPEN" == true ]]; then
@@ -278,9 +268,8 @@ fi
 prof "searches launched"
 # Scope: "<slug>\t<dir>" per local repo, in bin/project-dirs-lib order. With
 # --any-repo the list still supplies dirs for headers, but no longer filters.
-# Computed AFTER the searches are launched: enumerating ~25 repos and reading
-# each remote costs ~1s, which overlaps the network wait instead of adding to it.
-# --snapshot stores the rows unfiltered, so it never computes one.
+# Computed AFTER the searches are launched: enumerating ~25 repos and
+# reading each remote costs ~1s, overlapping the network wait.
 scope=$'\n'
 add_scope() {
     local slug
@@ -354,7 +343,6 @@ if [[ "$ANY_REPO" == true ]]; then
     done <<< "${open_rows}"$'\n'"${merged_rows}"
 fi
 
-# rows_for <rows> <slug> — the rows of one repo, slug column dropped.
 rows_for() {
     local line
     while IFS= read -r line; do
