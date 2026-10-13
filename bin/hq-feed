@@ -1,11 +1,4 @@
 #!/usr/bin/env bash
-# hq-feed — one block per live agent pane, bucketed by what it needs from
-# the owner, each block showing its last exchange. Fed by bin/hq-snapshot's
-# `turns` source (bin/tmux-claude-lib's get_last_exchange); this script
-# reads and paints only. Columns, keys, buckets and the block format are
-# usage() below, the reference a user reads; CLAUDE.md points here rather
-# than restating it.
-#
 # The screen's ONLY tmux subcommands: list-clients, display, has-session,
 # new-session (its own `hq-feed` session) and switch-client (its own
 # client). The other-client move is bin/tmux-claude-attention's `jump-to`,
@@ -108,8 +101,6 @@ The viewer never recollects on its own between keypresses — only `r` does.
 EOF
 }
 
-# ── paint ───────────────────────────────────────────────
-
 RST=""; BOLD=""; DIM=""; SEL=""; LINK=""; LINKS=false
 C_NEEDS=""; C_DONE=""; C_WORKING=""
 if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; then
@@ -154,8 +145,8 @@ count_lines() {
     printf '%s' "${#nl}"
 }
 
-# feed_split <text> <seps> — see bin/hq-decisions' decisions_split: splits on
-# any char in <seps> into the global SPLIT_OUT with no `read`/`<<<`/`< <(…)`.
+# See bin/hq-decisions' decisions_split: splits on any char in <seps> into
+# the global SPLIT_OUT with no `read`/`<<<`/`< <(…)`.
 feed_split() {
     local text="$1" seps="$2" oIFS="$IFS" had_f=0
     case "$-" in *f*) had_f=1 ;; esac
@@ -166,8 +157,8 @@ feed_split() {
     (( had_f )) || set +f
 }
 
-# feed_split_lines_preserve <text> — every line including empty ones, no
-# here-string. See bin/hq-decisions' decisions_split_lines_preserve.
+# Every line including empty ones, no here-string. See bin/hq-decisions'
+# decisions_split_lines_preserve.
 feed_split_lines_preserve() {
     local text="$1" rest line
     SPLIT_OUT=()
@@ -185,7 +176,7 @@ feed_split_lines_preserve() {
     done
 }
 
-# wrap_text <text> <width> — pure bash word wrap (see bin/hq-decisions).
+# Pure bash word wrap (see bin/hq-decisions).
 wrap_text() {
     local text="$1" width="$2" para rest line word out="" first_para=true
     (( width < 1 )) && width=1
@@ -225,8 +216,6 @@ wrap_text() {
     printf '%s' "$out"
 }
 
-# other_client/go_to_hub-equivalent: the only tmux reads here besides the
-# entry points below.
 other_client() {
     local mine out line act tty best="" bestact=-1
     mine=$(tmux display -p '#{client_tty}' 2>/dev/null)
@@ -242,8 +231,6 @@ other_client() {
     printf '%s' "$best"
 }
 
-# ── data ────────────────────────────────────────────────
-
 p_session=(); p_pane=(); p_window=(); p_agent=(); p_status=(); p_name=()
 p_mtime=(); p_jsonl=(); p_kind=(); p_cwd=()
 p_prompt=(); p_prompt_list=(); p_from=(); p_reply=(); p_tool=(); p_pending=(); p_links=()
@@ -253,8 +240,8 @@ n_needs=0; n_done=0; n_working=0; n_idle=0
 TURNS_AGE=-1; TURNS_VERDICT=missing
 STATUS_NOTE=""
 
-# feed_bucket <status> <done?> — NEEDS YOU / DONE / WORKING / IDLE, first
-# match wins. <done?> is the already-resolved flag-file test, not a path.
+# First match wins. <done?> is the already-resolved flag-file test, not a
+# path.
 feed_bucket() {
     local status="$1" done="$2"
     if [[ "$status" == permission ]]; then printf 'NEEDS YOU'
@@ -264,8 +251,8 @@ feed_bucket() {
     fi
 }
 
-# feed_label <session> <window> <name> — the dashboard's "session:N" rule,
-# replaced outright by <name> when the record carries one.
+# The dashboard's "session:N" rule, replaced outright by <name> when the
+# record carries one.
 feed_label() {
     local session="$1" window="$2" name="$3"
     if [[ -n "$name" && "$name" != "-" ]]; then
@@ -277,8 +264,8 @@ feed_label() {
     fi
 }
 
-# feed_strip_md — jq fragment (string, not a function call) shared by
-# load_data's one pass: markdown that reads badly in a terminal.
+# A jq fragment (string, not a function call), spliced into load_data's
+# one jq pass: strips markdown that reads badly in a terminal.
 _FEED_STRIP_MD_JQ='
 def strip_md:
   . as $text
@@ -310,14 +297,11 @@ def strip_md:
   | join("\n");
 '
 
-# load_data — the turns snapshot (age/verdict), pipeline_map_load for the
-# tag, the flag glob per pane, and ONE jq pass that decodes the JSON fields
-# and markdown-flattens the reply. No per-pane fork and no bash
-# `${var//x/y}` over a reply: the jq pass emits one sentinel-delimited
-# block per pane and the loop below reconstructs each field by APPENDING
-# lines (never substituting), which is what keeps a 32 KB reply off bash
-# 3.2's quadratic ${var//} path (see bin/tmux-claude-lib's get_agent_snippet
-# header).
+# No per-pane fork and no bash `${var//x/y}` over a reply: the jq pass
+# emits one sentinel-delimited block per pane and the loop below
+# reconstructs each field by APPENDING lines (never substituting), which is
+# what keeps a 32 KB reply off bash 3.2's quadratic ${var//} path (see
+# bin/tmux-claude-lib's get_agent_snippet header).
 load_data() {
     local body sep out
     p_session=(); p_pane=(); p_window=(); p_agent=(); p_status=(); p_name=()
@@ -452,8 +436,6 @@ _feed_bucket_rank() {
     esac
 }
 
-# ── LIST frame ──────────────────────────────────────────
-
 feed_glyph() {
     case "$1" in
         'NEEDS YOU') printf '%s' "🔴" ;;
@@ -481,11 +463,11 @@ feed_color() {
     esac
 }
 
-# pipeline_pr_map_load / pipeline_pr_for_cwd <cwd> — the pipelines record's
-# pr field for the worktree <cwd> sits in, as PR_NUM and PR_URL. The field is
-# a URL from a full run but a bare number from a --quick one; a bare number
-# borrows its pull-URL base from any record of the same repo that has a
-# URL, and stays unlinked (PR_URL empty) when none does.
+# The pipelines record's pr field for the worktree <cwd> sits in, as
+# PR_NUM and PR_URL. The field is a URL from a full run but a bare number
+# from a --quick one; a bare number borrows its pull-URL base from any
+# record of the same repo that has a URL, and stays unlinked (PR_URL empty)
+# when none does.
 PR_NUM=""; PR_URL=""
 pipeline_pr_map=""
 pipeline_pr_map_load() {
@@ -530,10 +512,10 @@ pipeline_pr_for_cwd() {
     done
 }
 
-# link_prs <idx> <line> — the \x01N\x02 markers load_data put where a PR URL
-# was become "#N": wrapped as an OSC 8 link to that URL on a terminal, plain
-# otherwise. The markers (not "#N") are what make the number's boundary
-# unambiguous, so #211 inside #2110 can never be linked twice.
+# The \x01N\x02 markers load_data put where a PR URL was become "#N":
+# wrapped as an OSC 8 link on a terminal, plain otherwise. The markers (not
+# "#N") make the number's boundary unambiguous, so #211 inside #2110 can
+# never be linked twice.
 link_prs() {
     local idx="$1" line="$2" n url pair out="" pre
     while [[ "$line" == *$'\x01'* ]]; do
@@ -552,16 +534,16 @@ link_prs() {
     printf '%s%s' "$out" "$line"
 }
 
-# body_width — the column the block text wraps at: the terminal, capped at
-# FEED_WIDTH so a wide window does not stretch a reply into one long line.
+# The terminal, capped at FEED_WIDTH so a wide window doesn't stretch a
+# reply into one long line.
 body_width() {
     local w="$term_w" cap="${FEED_WIDTH:-110}"
     [[ "$cap" =~ ^[1-9][0-9]*$ ]] && (( w > cap )) && w="$cap"
     printf '%s' "$w"
 }
 
-# append_block_lines <idx> <width> — the shared block body (prompt/msg,
-# now/ask, it ›), used by both the LIST block and DETAIL.
+# The shared block body (prompt/msg, now/ask, it ›), used by both the LIST
+# block and DETAIL.
 append_block_body() {
     local idx="$1" width="$2" bucket="${p_bucket[$1]}" full="$3"
     local kind="${p_kind[$idx]}" prefix_w=8
@@ -728,8 +710,6 @@ build_list_frame() {
     frame_foot="${DIM}$(clip "j/k move · ⏎ detail · a show/hide idle · g jump to pane · r recollect · ^C quit" "$term_w")${RST}"$'\n'
 }
 
-# ── DETAIL frame ────────────────────────────────────────
-
 build_detail_frame() {
     local idx="$detail_idx" bucket="${p_bucket[$detail_idx]}"
     local glyph word agestr
@@ -759,8 +739,6 @@ build_detail_frame() {
     frame_cursor_line=-1
     frame_foot="${DIM}$(clip "j/k scroll · q/esc back · g jump to pane · ^C quit" "$term_w")${RST}"$'\n'
 }
-
-# ── loop-shared frame/paint ─────────────────────────────
 
 frame_rows=(); frame_row_line=(); frame_section_line=(); frame_head=""; frame_tail=""; frame_foot=""
 frame_cols=0; frame_at=0; selected=0; selected_idx=-1; frame_top=0
@@ -865,8 +843,6 @@ dump() {
     printf '%s' "$frame_foot"
 }
 
-# ── cursor / navigation ─────────────────────────────────
-
 list_move() {
     local dir="$1"
     (( selected += dir ))
@@ -883,8 +859,6 @@ feed_signature() {
     printf ' '
     file_mtime "$FLAG_DIR" 2>/dev/null
 }
-
-# ── actions ─────────────────────────────────────────────
 
 jump_to_pane() {
     local idx="$1" tty
@@ -907,8 +881,6 @@ recollect() {
     fi
     load_data
 }
-
-# ── entry ───────────────────────────────────────────────
 
 # Same timeout-vs-key handling as bin/hq-decisions: bash 3.2's `read -rsn1
 # -t 2` returns 1 on BOTH a real timeout and a read failure, told apart by
@@ -989,8 +961,8 @@ view() {
     done
 }
 
-# Sourced by tests/test-hq-feed.sh: hand back wrap_text and the other pure
-# functions, running no loop and reading no directory.
+# Hands back wrap_text and the other pure functions; sourcing runs no loop
+# and reads no directory.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 0 2>/dev/null || true
 fi
