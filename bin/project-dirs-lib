@@ -1,21 +1,14 @@
 #!/usr/bin/env bash
 
-# The single home for search_dirs, the machine-local override and the
-# tmux-session naming rule. Sourced by bin/tmux-sessionizer, bin/worktrees,
-# bin/wt-tmux-jump, bin/wt-tmux-cleanup and bin/runners, none of which keep a
-# second copy.
-#
 # Constraints: project_dirs() runs on the sessionizer's hot path before fzf
 # draws, so this file must stay fork-free (globs, [[ ]], `read`, parameter
 # expansion — no $(...), no git, no basename) and free of side effects beyond
 # sourcing the .local override. bash 3.2 (macOS /bin/bash): no mapfile, no
 # associative arrays, no ${var,,}, no `local -n`.
 
-# ---- Project directories ----
 # Entries are "path:depth" — depth 0 = the directory is itself a project,
-# depth 1 = its immediate children are. Assigned only when unset so a test (or
-# the .local override below) can pre-set it. bash 3.2 quirk: ${arr+x} on an
-# array tests element 0, which is exactly the "is this unset" test wanted here.
+# depth 1 = its immediate children are. bash 3.2 quirk: ${arr+x} on an array
+# tests element 0, which is exactly the "is this unset" test wanted here.
 if [[ -z "${search_dirs+x}" ]]; then
     search_dirs=(
         "$HOME/dev:1"
@@ -24,26 +17,19 @@ if [[ -z "${search_dirs+x}" ]]; then
     )
 fi
 
-# bin/runners' self-hosted Actions runners; never a project, even when it sits
-# inside a depth-1 search dir.
+# Never a project, even when it sits inside a depth-1 search dir.
 if [[ -z "${runners_root+x}" ]]; then
     runners_root="$HOME/dev/gha-runners"
 fi
 
 # Machine-local override (untracked): may redefine search_dirs entirely. See
-# other/tmux-sessionizer.local.example. PROJECT_DIRS_LOCAL exists so a test can
-# point this at /nonexistent instead of the real machine's file.
+# other/tmux-sessionizer.local.example.
 PROJECT_DIRS_LOCAL="${PROJECT_DIRS_LOCAL:-$HOME/dotfiles/other/tmux-sessionizer.local}"
 [[ -f "$PROJECT_DIRS_LOCAL" ]] && source "$PROJECT_DIRS_LOCAL"
-# ------------------------------
 
-# worktree_branch <path>
-#   Branch of a linked worktree into the global `worktree_branch_out` (empty
-#   when detached, or when <path> is not a linked worktree), and the MAIN
-#   repo's path into `worktree_repo_out` (empty unless the gitdir has the
-#   ".../.git/worktrees/<name>" shape) — the sessionizer groups a worktrunk
-#   sibling under its repo rather than its own dir name. Both come fork-free
-#   out of the .git FILE's gitdir line and that admin dir's HEAD.
+# worktree_branch_out is the linked worktree's branch (empty when detached or
+# <path> isn't a linked worktree); worktree_repo_out is the main repo's path
+# (empty unless the gitdir has the ".../.git/worktrees/<name>" shape).
 worktree_branch() {
     local path="$1" gitfile line gitdir ref
     worktree_branch_out=""
@@ -68,12 +54,10 @@ worktree_branch() {
     esac
 }
 
-# session_name_for_branch <repo-name> <branch>
-#   The naming rule itself, into the global `session_name`: branch "/" -> "-"
-#   (matching worktrunk's sanitize), then "." -> "_". Every naming path routes
-#   through here so they cannot drift. Reads no filesystem and needs no
-#   <path>, which is what lets bin/wt-tmux-cleanup call it from post-remove /
-#   post-merge, after the worktree directory is already gone.
+# Writes `session_name`: "/" -> "-" matches worktrunk's own sanitize; "." ->
+# "_" is this repo's own rule. Reads no filesystem and needs no <path>, which
+# is what lets bin/wt-tmux-cleanup call it post-remove/post-merge, after the
+# worktree directory is already gone.
 session_name_for_branch() {
     local repo_name="$1"
     local branch="$2"
@@ -81,15 +65,12 @@ session_name_for_branch() {
     session_name="${name//./_}"
 }
 
-# session_name_for_removed <repo-name> <path> <branch>
-#   wt-tmux-cleanup's naming entry point; writes the global `session_name`.
-#   worktrunk always passes a 3rd hook argument to post-remove/post-merge, and
-#   for a DETACHED worktree it renders as the literal string "HEAD" (empirical,
-#   wt v0.68.0; the docs claim `branch` is undefined there), never empty. Empty
-#   and "HEAD" therefore both mean "no real branch" and fall back to
-#   session_name_for's path-basename rule — the same name Ctrl+F and
-#   wt-tmux-jump give that worktree. "HEAD" is an unambiguous sentinel: it can
-#   never be a real branch (`git check-ref-format --branch HEAD` refuses it).
+# worktrunk always passes a 3rd hook argument to post-remove/post-merge; for
+# a DETACHED worktree it renders as the literal string "HEAD" (empirical, wt
+# v0.68.0; the docs claim `branch` is undefined there), never empty. "HEAD"
+# is an unambiguous sentinel: git refuses it as a real branch name
+# (`git check-ref-format --branch HEAD`). The empty/"HEAD" fallback must keep
+# matching the name Ctrl+F and wt-tmux-jump give that worktree.
 session_name_for_removed() {
     local repo_name="$1"
     local path="$2"
@@ -101,16 +82,10 @@ session_name_for_removed() {
     fi
 }
 
-# session_name_for <path>
-#   Session name for a project/worktree path, into the global `session_name`
-#   (no subshell per call: this runs once per candidate dir on the hot path).
-#   Agent worktree (<repo>/.claude/worktrees/<x>) -> "<repo>_<branch>",
-#   detached -> "<repo>_<basename>"; legacy .bare/ worktree ->
-#   "<project>_<branch>"; anything else (plain project dir, or a worktrunk
-#   sibling like proj.feat-x, whose dir name already encodes repo+branch) ->
-#   basename. The branch lookup reads the filesystem, so it only works while
-#   the worktree still exists — that is why callers running after removal use
-#   session_name_for_branch instead.
+# A worktrunk sibling (proj.feat-x) keeps its basename: its dir name already
+# encodes repo+branch. The branch lookup below reads the filesystem, so it
+# only works while the worktree exists — callers running after removal use
+# session_name_for_branch instead.
 session_name_for() {
     # One variable per `local` on purpose: bash expands every word of a
     # `local a=$x b=$a` command before any of its assignments take effect, so
@@ -142,9 +117,8 @@ session_name_for() {
     session_name="${name//./_}"
 }
 
-# _project_dirs_add_one <path>
-#   Appends <path> to project_dirs_out, then its agent worktrees when <path>
-#   is a main worktree (.git is a directory, not a linked worktree's file).
+# .git is a directory only for a main worktree; a linked worktree's .git is a
+# file, so this is how a main worktree's own agent worktrees get included.
 _project_dirs_add_one() {
     local cand="$1" wt
     project_dirs_out+=("$cand")
@@ -156,9 +130,6 @@ _project_dirs_add_one() {
     fi
 }
 
-# _project_dirs_add_candidate <path>
-#   Expands a legacy .bare/ container into its worktree children, otherwise
-#   adds <path> directly.
 _project_dirs_add_candidate() {
     local cand="$1" wt
     if [[ -d "$cand/.bare" ]]; then
@@ -172,24 +143,20 @@ _project_dirs_add_candidate() {
     fi
 }
 
-# project_dirs
-#   Fills the global array project_dirs_out, per search_dirs entry: the entry
-#   itself (depth 0) or its immediate children (depth 1); legacy .bare/
-#   containers expanded into their worktree children; those candidates' agent
-#   worktrees (<cand>/.claude/worktrees/*/); and, for depth-0 entries only,
-#   worktrunk siblings (<entry>.*/) that really are linked worktrees (.git is
-#   a FILE), so a plain sibling like proj.bak is skipped. Depth-1 entries need
-#   no sibling pass: their siblings are already depth-1 rows.
-#   Deliberately never builds an intermediate candidates array to iterate with
-#   "${arr[@]}": bash 3.2 treats that expansion as unbound under `set -u` when
-#   the array is empty (a depth-1 entry with no subdirectories), and
-#   bin/worktrees sources this into a `set -uo pipefail` shell. Globbing
-#   straight into `for x in <pattern>` with nullglob just runs zero times.
+# Worktrunk siblings count only when .git is a FILE (a linked worktree), so
+# a plain sibling like proj.bak is skipped; depth-1 entries skip this pass
+# since their siblings are already depth-1 rows.
+#
+# Deliberately never builds an intermediate candidates array to iterate with
+# "${arr[@]}": bash 3.2 treats that expansion as unbound under `set -u` when
+# the array is empty (a depth-1 entry with no subdirectories, and
+# search_dirs itself, hence the early return below), and bin/worktrees
+# sources this into a `set -uo pipefail` shell. Globbing straight into
+# `for x in <pattern>` with nullglob just runs zero times.
 project_dirs() {
     project_dirs_out=()
     local entry dir depth cand sib
 
-    # bash 3.2 + `set -u`: "${arr[@]}" on a ZERO-element array is "unbound".
     (( ${#search_dirs[@]} )) || return 0
     shopt -s nullglob
     for entry in "${search_dirs[@]}"; do

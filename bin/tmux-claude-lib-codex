@@ -1,17 +1,14 @@
 #!/usr/bin/env bash
 
-# Codex-specific half of the shared agent library. Sourced at the end of
-# bin/tmux-claude-lib, never on its own, so it can assume the generic
-# helpers exist.
+# Sourced at the end of bin/tmux-claude-lib, never on its own, so it can
+# assume the generic helpers exist.
 #
 # Every TUI string matched below was captured from codex-cli 0.153.4 in a
 # throwaway tmux session (tests/fixtures/codex-*.txt holds the screens).
 # Same contract as the claude classifier: pure bash 3.2, no forks, last 10
 # non-blank lines only.
 
-# classify_codex_pane_status <raw-content>
-#   Prints: working | idle | permission | unknown
-#   Called by classify_pane_status when the pane's agent is codex.
+# Prints: working | idle | permission | unknown
 classify_codex_pane_status() {
     local raw="$1"
 
@@ -20,8 +17,6 @@ classify_codex_pane_status() {
         return
     fi
 
-    # Same windowing as the claude classifier, duplicated on purpose — do
-    # not merge the two.
     local -a all filtered
     IFS=$'\n' read -rd '' -a all <<< "$raw"
     local line
@@ -90,11 +85,8 @@ classify_codex_pane_status() {
     echo "unknown"
 }
 
-# ── rollout telemetry ───────────────────────────────────
-#
-# Codex keeps one JSONL "rollout" per thread under
-# ~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<id>.jsonl. Record shapes below
-# were read off a live 0.153.4 rollout (jq -c '.type' over the file):
+# Record shapes below were read off a live 0.153.4 rollout (jq -c '.type'
+# over the file):
 #
 #   session_meta        .payload.session_id, .payload.cwd
 #   turn_context        .payload.model, .payload.cwd  (one per turn)
@@ -114,22 +106,20 @@ classify_codex_pane_status() {
 # so "context" here is last_token_usage.input_tokens on its own. Adding the
 # cached count would double-count.
 
+# Rollouts live at $CODEX_SESSIONS_DIR/YYYY/MM/DD/rollout-*.jsonl — the
+# three path segments the glob below walks.
 CODEX_SESSIONS_DIR="$HOME/.codex/sessions"
 CODEX_MAP_DIR="$HOME/.cache/claude-attention/codex"
 
-# codex_find_pane_jsonl <pane-id>
-#   Prints the rollout path for the codex running in one exact pane, or
-#   nothing. The SessionStart hook's map (written by tmux-claude-attention
-#   codex-session-start) is authoritative: pane-exact, and rewritten after
-#   /new. The fallback — newest rollout whose session_meta cwd is this
-#   pane's — covers a codex started before the hooks were trusted.
+# The SessionStart hook's map is pane-exact, written on a thread's first
+# prompt and again after /new; the newest-rollout-by-cwd fallback below
+# covers a codex not yet prompted or started before the hooks were trusted.
 #
-#   The map is keyed by bare pane id and tmux reuses pane ids after a server
-#   restart, so an entry is trusted only while the cwd it recorded is still
-#   the pane's own. A mismatch means a recycled id, or a codex relaunched
-#   elsewhere; treating it as a miss is what stops a fresh codex from reading
-#   another project's thread until its first prompt rewrites the map. An
-#   unknown pane cwd (no server to ask) trusts the entry.
+# tmux reuses pane ids after a server restart, so a mapped entry is trusted
+# only while its recorded cwd still matches the pane's own; a mismatch
+# (recycled id, or a codex relaunched elsewhere) is treated as a miss so a
+# fresh codex never reads another project's thread until its first prompt
+# rewrites the map. An unknown pane cwd (no server to ask) trusts the entry.
 codex_find_pane_jsonl() {
     local pane="${1#%}"
     local mapping="${CODEX_MAP_DIR}/${pane}.tsv"
@@ -149,10 +139,8 @@ codex_find_pane_jsonl() {
     _codex_newest_rollout_for_cwd "$pcwd"
 }
 
-# _codex_newest_rollout_for_cwd <cwd>
-#   Newest rollout (by mtime) whose session_meta records this cwd. Capped at
-#   the 20 most recent files: this is a fallback, and the dashboard must not
-#   pay a full scan of every rollout ever written.
+# Capped at the 20 most recent files: this is a fallback, and the dashboard
+# must not pay a full scan of every rollout ever written.
 _codex_newest_rollout_for_cwd() {
     local cwd="$1" f
     [[ -d "$CODEX_SESSIONS_DIR" ]] || return
@@ -170,11 +158,8 @@ _codex_newest_rollout_for_cwd() {
     done < <(ls -t "${CODEX_SESSIONS_DIR}"/*/*/*/rollout-*.jsonl 2>/dev/null | head -20)
 }
 
-# codex_get_context_and_model <rollout-path>
-#   Prints tab-separated: context model context_window
-#   Context is the last turn's prompt size; the window comes from the
-#   transcript itself (model_context_window). Reads only the tail of the
-#   file, like its claude counterpart.
+# Prints tab-separated: context model context_window. Context is the last
+# turn's prompt size.
 codex_get_context_and_model() {
     local jsonl="$1"
     [[ ! -f "$jsonl" ]] && printf '0\tunknown\t0' && return
@@ -193,15 +178,13 @@ codex_get_context_and_model() {
     printf '%s' "$result"
 }
 
-# codex_get_totals <rollout-path> [cache-file]
-#   Prints tab-separated: total_output total_all turns cost
-#   No incremental accumulation, unlike get_totals_incremental: codex's
-#   token_count carries CUMULATIVE thread totals, so the last one wins.
-#   Turns are task_started events, counted with a plain grep and cached
-#   against the file's mtime when a cache path is given — a long rollout is
-#   a few MB and the dashboard re-reads it every refresh.
-#   cost: codex plans bill by rate limit, not per token, so COST shows the
-#   primary rate-limit window's usage ("5h:42%") when present, else "-".
+# Prints tab-separated: total_output total_all turns cost. No incremental
+# accumulation, unlike get_totals_incremental: codex's token_count carries
+# CUMULATIVE thread totals, so the last one wins. Turns are task_started
+# events. cost: codex plans bill by rate limit, not per token, so COST shows
+# the primary rate-limit window's usage ("5h:42%") when present, else "-".
+# cache, when given, is a path whose cached result is reused while the
+# rollout's mtime is unchanged.
 codex_get_totals() {
     local jsonl="$1" cache="$2"
     [[ ! -f "$jsonl" ]] && printf '0\t0\t0\t-' && return
