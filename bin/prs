@@ -6,8 +6,6 @@
 # A failing GitHub search is retried once (GraphQL returns transient
 # "Something went wrong" errors — seen 2026-09-08) and then fails the run
 # with gh's own error.
-#
-# Tag precedence is pr_tag()'s order; the tag list is in --help.
 set -uo pipefail
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
@@ -301,9 +299,7 @@ else
     [[ -n "$merged_pid" ]] && merged_rows=$(cat "$TMPD/merged")
 fi
 
-# --snapshot stores the searches unfiltered by repo, tagged with the author
-# and window they answer for. The scope filter below belongs to whoever
-# renders them.
+# The scope filter below belongs to whoever renders them.
 if [[ "$EMIT" == true ]]; then
     printf 'meta\tauthor\t%s\n' "$AUTHOR"
     printf 'meta\tsince\t%s\n' "$SINCE"
@@ -319,8 +315,6 @@ if [[ "$EMIT" == true ]]; then
     exit 0
 fi
 
-# Repo order: scope first (project-dirs order), then — with --any-repo only —
-# every other slug the rows mention, first seen.
 slugs=""
 while IFS=$'\t' read -r slug _dir; do
     [[ -n "$slug" ]] && slugs+="${slug}"$'\n'
@@ -338,7 +332,6 @@ rows_for() {
         [[ "$line" == "${2}"$'\t'* ]] && printf '%s\n' "${line#*$'\t'}"
     done <<< "$1"
 }
-# Piped output keeps the URL as a trailing column: no terminal, no link.
 url_col() { [[ "$LINKS" == true ]] || printf '  %s' "$1"; }
 
 printed_any=false

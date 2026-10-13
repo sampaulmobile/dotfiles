@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 # worktrees — every worktree of every project bin/project-dirs-lib knows
 # about, as one bucketed table (read-only report), plus `sweep`, the one verb
-# that acts on it. One program so the report and sweep never disagree on
-# "merged": dry-run renders the report's own records, classifying nothing of
-# its own. Buckets/flags/precedence: usage() below.
+# that acts on it. Buckets/flags/precedence: usage() below.
 #
 # The report changes nothing: every git/gh call is a read. `git worktree
 # remove` (remove_worktree) is this script's only removal of anything it did
@@ -87,8 +85,8 @@ WORKTREES_PROFILE=1 adds a stderr line per stage with its elapsed time.
 EOF
 }
 
-# Both modes color the bucket word alone (row labels, not icons); alignment
-# is padded first and colour-wrapped after.
+# Padded first, colour-wrapped after: an ANSI-wrapped string breaks a
+# fixed-width printf %-Ns pad.
 C_RESET=""
 if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; then
     C_RESET=$'\033[0m'
@@ -134,8 +132,6 @@ _row_cell() {
         3) cell="${row_c4[$2]}" ;; 4) cell="${row_c5[$2]}" ;; 5) cell="${row_c6[$2]}" ;;
     esac
 }
-# rows_render <label-width>: $repos is pre-filtered to repos with a linked
-# worktree, so every one has rows.
 rows_render() {
     local lw="$1" i c b w cell r have line
     local -a widths=(0 0 0 0 0 0)
@@ -156,7 +152,6 @@ rows_render() {
         [[ "$have" == false ]] && continue
         printf '\n== %s\n' "$(shorten "$r")"
         for b in $BUCKET_ORDER; do
-            # Within a bucket: newest commit first (age desc); ties by index asc.
             local -a order=()
             while IFS= read -r i; do
                 [[ -n "$i" ]] && order+=("$i")
@@ -344,12 +339,8 @@ parse_porcelain_blocks() {
     _pb_flush
 }
 
-# init_liveness, derive_worktree_facts read/write globals the caller owns:
-# init_liveness fills live_paths; derive_worktree_facts reads $repo,
-# $default_ref and $GH_OK and writes the f_* result globals below.
-
-# Without lsof, live_paths stays empty and is_live is always false (every
-# worktree treated as not-live).
+# init_liveness fills live_paths. Without lsof, live_paths stays empty and
+# is_live is always false (every worktree treated as not-live).
 LSOF_RAN=false
 live_paths=$'\n'
 init_liveness() {
@@ -440,15 +431,16 @@ load_pr_cache() {
 
 # prefetch_guards: backgrounds worktree_ignored_at_risk per worktree, from
 # the parallel _wt_paths/_wt_repos arrays, into GUARD_PREFETCH_DIR keyed by
-# path. Sweep only; does not wait — the caller's single `wait` before the
-# rows loop collects this too.
+# path. Sweep only; does not wait for the last batch — the caller's single
+# `wait` before the rows loop collects it.
 #   The `.rc` file is what makes a prefetch SAFE to trust: an absent or
 #   non-zero rc means the job did not finish, and guard_at_risk recomputes
 #   rather than read a short file as "nothing at risk" — empty output is the
 #   verdict that permits DELETION.
 #   Batched at hw.ncpu width, not all at once: each job reads (and off
-#   --force, hashes) a whole worktree's gitignored data. Measured over 50
-#   Flutter worktrees, 2026-09-26: serial 499s, width 4 263s, width 8 159s.
+#   --force, hashes) a whole worktree's gitignored data, so unlimited
+#   parallelism puts tens of GiB in flight at once. Measured over 50 Flutter
+#   worktrees, 2026-09-26: serial 499s, width 4 263s, width 8 159s.
 #   GUARD_JOBS overrides.
 GUARD_PREFETCH_DIR=""
 prefetch_guards() {
@@ -473,10 +465,8 @@ prefetch_guards() {
     done
 }
 
-# guard_at_risk <worktree> <hub> <any>
-#   prefetch_guards' answer for this worktree, or the guard run here and now
-#   when there is no trustworthy one. <any> must match what the prefetch used;
-#   both read the same FORCE, which cannot change mid-run.
+# guard_at_risk <worktree> <hub> <any>: <any> must match what the prefetch
+#   used; both read the same FORCE, which cannot change mid-run.
 guard_at_risk() {
     local p="$1" hub="$2" any="$3" key rc
     if [[ -n "$GUARD_PREFETCH_DIR" ]]; then
@@ -513,7 +503,8 @@ default_ref_for() {
 }
 
 # sweep_remove_cmd <repo> <path> <branch> <locked> [<dirty>] — %q-quoted; the
-# sweep's dry-run line and remove_worktree both come from here.
+# sweep's -v dry-run line. remove_worktree mirrors it step for step — change
+# both together.
 #   --no-delete-branch plus our own `git branch -D`: wt's merged-ness check
 #   is offline and capped at 500 commits, so left to itself it can keep the
 #   branch and still exit 0 even though the caller has already proved
@@ -536,8 +527,8 @@ sweep_remove_cmd() {
     printf '%s' "$cmd"
 }
 
-# porcelain_untracked_only: true only when every status --porcelain line is
-# an untracked entry (`?? `) — any other status code makes it false.
+# porcelain_untracked_only: true only when non-empty and every status
+# --porcelain line is an untracked entry (`?? `).
 porcelain_untracked_only() {
     local porc="$1" line
     [[ -n "$porc" ]] || return 1
@@ -601,7 +592,7 @@ prime_repo_facts() {
 }
 
 # lookup_tsv <table> <key>: rest of the first matching line, empty when
-# none. Parameter expansion, never `while read <<<` — a here-string forks a
+# none. Parameter expansion, never `while read <<<` — a here-string costs a
 # temp file per call.
 lookup_tsv() {
     local table=$'\n'"$1" key="$2" rest
@@ -663,10 +654,10 @@ repo_fact_age() {
 
 # derive_worktree_facts <path> <branch> <prunable> <wt_head>: writes the
 # globals f_live f_dirty f_untracked_only f_unpushed f_merged_local
-# f_pr_state f_pr_head f_pr_disp f_age. f_pr_head is the merged/open PR's
-# head commit ("" when unknown). Reads $repo, $default_ref and $GH_OK from
-# the caller. A prunable block short-circuits to the "nothing to inspect"
-# defaults (its gitdir is gone).
+# f_pr_state f_pr_head f_pr_disp f_age f_age_epoch. f_pr_head is the
+# merged/open PR's head commit ("" when unknown). Reads $repo, $default_ref
+# and $GH_OK from the caller. A prunable block short-circuits to the
+# "nothing to inspect" defaults (its gitdir is gone).
 derive_worktree_facts() {
     local path="$1" branch="$2" prunable="$3" wt_head="$4"
 
@@ -895,8 +886,8 @@ _dir_is_cache() {
 # collapsed, with a trailing slash), in CLASSIFY_VERDICT rather than on
 # stdout — a `$(...)` here forks per gitignored entry, thousands for a
 # vendored dir.
-#   safe-cache  regenerable cache (a segment in sweep_excludes), or
-#               .feature/ (pipeline scratch, archived separately)
+#   safe-cache  regenerable cache (a segment in sweep_excludes), or a
+#               .feature/ dir (pipeline scratch, disposable)
 #   compare     plain file; byte-identity against the hub decides, batched
 #               across every such file by the caller
 #   recurse     ignored directory, not a cache and not .feature/ — the
@@ -946,12 +937,9 @@ _bulk_lines() {
     (( n == want ))
 }
 
-# _bulk_at_risk <wt> <hub>  (stdin: NUL-separated relpaths, all regular
-# files present on both sides): the batched half of the byte-identity test,
-# printing paths NOT byte-identical to the hub's copy. Sizes first — a file
-# the worktree created or grew is settled without reading a byte; only
-# same-size pairs are hashed. FAILS CLOSED: any failure reports every
-# candidate at-risk.
+# _bulk_at_risk <wt> <hub> <any>  (stdin: NUL-separated relpaths, all regular
+# files present on both sides): prints paths NOT byte-identical to the
+# hub's copy. FAILS CLOSED: any failure reports every candidate at-risk.
 _bulk_at_risk() {
     local wt="$1" hub="$2" any="${3:-}" rel i n
     local cand=() w_size=() h_size=() same=()
@@ -1067,9 +1055,8 @@ _worktree_at_risk_raw() {
     printf '%s\0' "${cands[@]}" | _bulk_at_risk "$wt" "$hub" "$any"
 }
 
-# summarize_at_risk  (stdin: at-risk paths, one per line): collapses to one
-# line per top-level component with a file count. A path with no `/` (a
-# repo-root file, or the fail-closed placeholder) is printed verbatim.
+# summarize_at_risk  (stdin: at-risk paths, one per line): a path with no
+# `/` (a repo-root file, or the fail-closed placeholder) is printed verbatim.
 summarize_at_risk() {
     awk -F/ '
         !/./ { next }
@@ -1121,8 +1108,7 @@ sweep_would_kill_own_session() {
 
 # merged_under_untracked <prunable>: true when the f_* facts describe a
 # DIRTY worktree whose only dirt is untracked files and which classifies
-# MERGED once that dirt is ignored. Shared by the sweep and the report's
-# -v hint so they cannot disagree.
+# MERGED once that dirt is ignored.
 merged_under_untracked() {
     [[ "$f_dirty" == true && "$f_untracked_only" == true ]] || return 1
     [[ "$(classify_worktree false false "$1" "$f_pr_state" "$f_unpushed" "$f_merged_local")" == MERGED ]]
@@ -1136,9 +1122,8 @@ worktree_untracked() {
 
 # feature_archive_dir <repo> <path> <branch>: one UTC-stamped directory per
 # sweep run, from $SWEEP_STAMP so every row of one sweep shares it. The
-# branch slug maps "/" -> "-", matching worktrunk's sibling-directory
-# sanitisation. A detached worktree has no branch; its directory basename
-# stands in.
+# branch slug maps "/" -> "-". A detached worktree has no branch; its
+# directory basename stands in.
 feature_archive_dir() {
     local repo="$1" path="$2" branch="$3" slug stamp
     slug="${branch:-${path##*/}}"
@@ -1147,12 +1132,12 @@ feature_archive_dir() {
     printf '%s/.local/state/hq/runs/%s/%s/%s' "$HOME" "${repo##*/}" "${slug//\//-}" "$stamp"
 }
 
-# archive_feature_dir <repo> <path> <branch> — copy this worktree's .feature/
-#   into its own timestamp directory. The run history is append-only: a sweep
-#   adds a directory and this script removes nothing under runs/, so no run can
-#   be lost to a later sweep of the same branch. The copy lands at
-#   <dest>.partial and is renamed only once whole, so a .partial directory is a
-#   copy that did not finish; it is left on disk for the caller to name.
+# archive_feature_dir <repo> <path> <branch>: the run history is
+#   append-only — a sweep adds a directory and this script removes nothing
+#   under runs/, so no run can be lost to a later sweep of the same branch.
+#   The copy lands at <dest>.partial and is renamed only once whole, so a
+#   .partial directory is a copy that did not finish; it is left on disk
+#   for the caller to name.
 archive_feature_dir() {
     local repo="$1" path="$2" branch="$3" dest partial
     [[ -d "$path/.feature" ]] || return 0
@@ -1197,10 +1182,8 @@ remove_worktree() {
 }
 
 # sweep_row <path> <branch> <locked> <prunable> <wt_head>: the sweep's LIVE
-# per-worktree callback — derive the facts, then decide. Buffers a row and
-# bumps the counters in THIS shell; the caller is fed by process
-# substitution, not a pipe, so both survive. Under --apply the removal
-# happens in sweep_decide; only the printing is deferred.
+# per-worktree callback — derive the facts, then decide. Under --apply the
+# removal happens in sweep_decide; only the printing is deferred.
 sweep_row() {
     local path="$1" branch="$2" locked="$3" prunable="$4" wt_head="$5"
     local bucket
@@ -1221,9 +1204,8 @@ sweep_row() {
 
 # sweep_snapshot_row <path> <branch> <locked> <bucket> <sweepable_dirty>
 #                    <pr_disp> <flags> <pr_state> <pr_head> <wt_head> <merged_local>:
-# the same callback fed by a stored record instead of by git — fills the
-# f_* globals sweep_decide reads and hands over. The record carries every
-# fact the decision needs except `unpushed`, whose home is the flags column.
+# the record carries every fact sweep_decide needs except `unpushed`, whose
+# home is the flags column.
 sweep_snapshot_row() {
     local path="$1" branch="$2" locked="$3" bucket="$4" sweepable="$5"
     local dirty_untracked=false
@@ -1239,15 +1221,12 @@ sweep_snapshot_row() {
 }
 
 # sweep_decide <path> <branch> <locked> <bucket> <dirty_untracked> <wt_head>:
-# everything the sweep does once the facts are in hand, live or stored —
-# removability, the gitignored-data guard, and under --apply the archive
-# and the removal. Reads the f_* globals its two callers fill.
+# reads the f_* globals its two callers fill.
 sweep_decide() {
     local path="$1" branch="$2" locked="$3" bucket="$4" dirty_untracked="$5" wt_head="$6"
     local at_risk detail listing reason nl=$'\n'
     [[ "$bucket" == MERGED ]] || return 0
 
-    # Removable only if the worktree carries nothing the merge did not.
     if ! sweep_is_removable "$bucket" "$f_unpushed" "$f_pr_state" "$f_pr_head" "$wt_head" "$f_merged_local"; then
         CNT_SKIP=$((CNT_SKIP + 1))
         if [[ "$f_pr_state" == MERGED && -n "$f_pr_head" ]]; then
@@ -1284,7 +1263,6 @@ sweep_decide() {
         return 0
     fi
 
-    # The post-remove hook would kill the session this sweep runs in.
     if sweep_would_kill_own_session "$repo" "$path" "$branch"; then
         CNT_SKIP=$((CNT_SKIP + 1))
         rows_add SKIP "${branch:-(detached)}" "$f_pr_disp" "$(where_for "$path" "$repo")" "merged, in this session" "" "" ""
@@ -1292,7 +1270,7 @@ sweep_decide() {
     fi
 
     # Re-check liveness right before the point of no return: the snapshot
-    # predates the slow (one gh call per row) work above.
+    # predates the slow gitignored-data-guard work above.
     if [[ "$APPLY" == true ]]; then
         init_liveness
         if is_live "$path"; then
@@ -1350,8 +1328,6 @@ snapshot_rows_current() {
     return 0
 }
 
-# Sourced (tests/test-worktrees.sh) rather than executed: hand back every
-# function above and run none of the report or sweep below.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 0
 fi
@@ -1393,7 +1369,6 @@ for arg in "$@"; do
     esac
 done
 
-# Without gh, a squash merge looks unmerged and the sweep leaves it alone.
 GH_OK=false
 if [[ "$OFFLINE" == false ]] && command -v gh >/dev/null 2>&1; then
     GH_OK=true
@@ -1428,8 +1403,6 @@ if [[ "$APPLY" == false && "$EMIT" == false && "$OFFLINE" == false ]]; then
 fi
 prof "snapshot"
 
-# project-dirs-lib is sourced here for the naming rule alone; the project
-# enumeration belongs to the live path below.
 SWEEP_STAMP=""
 sweep_excludes=()
 if [[ "$MODE" == sweep ]]; then
@@ -1445,8 +1418,6 @@ if [[ "$USE_SNAPSHOT" == false ]]; then
 init_liveness
 prof "liveness (lsof)"
 
-# Without lsof every worktree looks not-live, and the one guard against
-# removing out from under a live agent/editor is silently off.
 if [[ "$APPLY" == true ]] && [[ "$LSOF_RAN" == false ]]; then
     echo "worktrees: sweep --apply needs lsof to protect live worktrees; not found" >&2
     exit 2
@@ -1460,8 +1431,6 @@ fi
 
 repos=()
 repos_seen=$'\n'
-# Scope: the repo the cwd is in — a worktree resolves to its hub through
-# the common git dir — unless --all or the cwd is in no repo.
 SCOPED=""
 _cwd_common=$(git rev-parse --git-common-dir 2>/dev/null)
 if [[ "$SHOW_ALL" == false && -n "$_cwd_common" ]]; then
@@ -1648,8 +1617,6 @@ sweep_snapshot_rows() {
     return 0
 }
 
-# Degraded-source state, so a screen rendering the records can print the
-# same warnings the live path would have.
 if [[ "$EMIT" == true ]]; then
     printf 'meta\tgh_ok\t%s\n' "$GH_OK"
     printf 'meta\tlsof\t%s\n' "$LSOF_RAN"
@@ -1659,8 +1626,6 @@ if [[ "$USE_SNAPSHOT" == true ]]; then
     if [[ "$MODE" == sweep ]]; then sweep_snapshot_rows; else render_snapshot_rows; fi
     prof "render"
 elif (( ${#repos[@]} )); then
-# Guarded on element count, not just "declared" — see the note above the
-# same guard around project_dirs_out.
 # A repo holds a linked worktree iff its common dir has a non-empty
 # `worktrees/` — a glob, no fork. A repo whose `.git` is not a directory
 # stays a candidate for the `git worktree list` below to decide.
@@ -1681,9 +1646,6 @@ repos=()
 prof "worktree filter"
 if (( ${#repos[@]} )); then
     prefetch_pr_lists "${repos[@]}"
-    # One `git worktree list` per candidate repo, cached, feeding the
-    # porcelain straight into the loop below. Every worktree path it names
-    # (the hub itself excepted) goes to the status prefetch.
     _with_wts=()
     _porc=()
     _wt_paths=()
@@ -1746,8 +1708,8 @@ if (( ${#repos[@]} )); then
 fi
 fi
 
-# Exit 0 whatever the buckets hold — the exit code belongs to the report
-# the collector is feeding, not to the collection.
+# --snapshot always exits 0: the "something to act on" exit 1 below belongs
+# to the interactive report, never to the collector.
 [[ "$EMIT" == true ]] && exit 0
 
 echo
@@ -1778,8 +1740,7 @@ _sum="$(count_cell MERGED "$CNT_MERGED")$(count_cell ABANDONED "$CNT_ABANDONED")
 if [[ -n "$_sum" ]]; then printf '%s\n' "${_sum%  }"; else echo "no linked worktrees"; fi
 source_warnings
 
-# Exit 1 = something to act on (MERGED/ABANDONED/PRUNABLE), same convention
-# as bin/doctor.
+# Exit 1 = something to act on (MERGED/ABANDONED/PRUNABLE).
 if (( CNT_MERGED > 0 || CNT_ABANDONED > 0 || CNT_PRUNABLE > 0 )); then
     exit 1
 fi

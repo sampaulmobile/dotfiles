@@ -52,8 +52,8 @@ reap_is_task_args() {
     [[ "$1" == *"/feature --run"* ]]
 }
 
-# reap_pane_busy <pane_current_command> — strips a leading "-" login-shell
-# marker first.
+# reap_pane_busy <pane_current_command> — true when a non-agent pane is
+# busy with anything but a shell or editor.
 reap_pane_busy() {
     local cmd="${1#-}"
     case "$cmd" in
@@ -67,7 +67,8 @@ reap_pane_busy() {
 #             <phase> <pane_count> <has_transcript> <idle_secs> <park_secs> <parked>
 #   One line on stdout: "kill <reason>" / "park <reason>" / "keep <reason>".
 #   Live and prunable forced false — the task session IS the liveness
-#   signal here, not lsof. Already-parked is never re-signalled.
+#   signal here, not lsof. Already-parked is never re-signalled: a claude
+#   that ignored SIGTERM must not be re-signalled every pass.
 reap_decide() {
     local task="$1" tied="$2" attached="$3" busy="$4" pane_bad="$5"
     local dirty="$6" pr_state="$7" unpushed="$8" merged_local="$9"
@@ -253,7 +254,8 @@ reap_row_for_session() {
 }
 
 # reap_log <kind> <session> <worktree> <pr> <reason> — appends one line to
-# $REAP_DIR/log.tsv. Append-only.
+# $REAP_DIR/log.tsv. Append-only. REAP_DIR comes from bin/hq-snapshot,
+# sourced transitively via bin/worktrees.
 reap_log() {
     mkdir -p "$REAP_DIR" || return 1
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" "$3" "$4" "$5" \

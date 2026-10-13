@@ -114,10 +114,12 @@ snapshot_read() {
     return 0
 }
 
-# inbox_slug <branch> — into $inbox_slug_out: / -> -. A thread's ONLY
-# identity that survives a sweep — once the worktree is gone only the file
-# name remains — so anything keyed per thread (inbox archive and seen marks
-# included) keys by this, never by the real branch.
+# inbox_slug <branch> — into $inbox_slug_out: / -> -, worktrunk's own
+# sanitisation and the rule session_name_for_branch applies, so a branch,
+# its worktree and its thread agree. A thread's ONLY identity that survives
+# a sweep — once the worktree is gone only the file name remains — so
+# anything keyed per thread (inbox archive and seen marks included) keys by
+# this, never by the real branch.
 inbox_slug_out=""
 inbox_slug() {
     inbox_slug_out="${1//\//-}"
@@ -140,9 +142,10 @@ jsonl_last_line() {
     printf '%s' "$last"
 }
 
-# json_field <json-line> <key> — empty for an absent key and for null,
-# which status records use for "not yet". Records are flat, one line,
-# pipeline-written — a pattern match is the whole parser this needs.
+# json_field <json-line> <key> — a quoted string without its quotes, or a
+# bare token as written; empty for an absent key and for null, which status
+# records use for "not yet". Records are flat, one line, pipeline-written —
+# a pattern match is the whole parser this needs.
 json_field() {
     local line="$1" key="$2" re v
     re="\"$key\"[[:space:]]*:[[:space:]]*\"([^\"]*)\""
@@ -155,9 +158,9 @@ json_field() {
     return 0
 }
 
-# pipeline_map_load — the pipelines source into the global $pipeline_map.
-# Empty when never written; the CALLER decides whether a stale one is
-# worth refreshing first.
+# pipeline_map_load — the pipelines source into the global $pipeline_map,
+# one `<worktree>\t<state>` line per run in flight. Empty when never
+# written; the CALLER decides whether a stale one is worth refreshing first.
 pipeline_map=""
 pipeline_map_load() {
     local path state
@@ -291,7 +294,8 @@ turns_rows() {
 }
 
 # snapshot_lines_preserve <text> — every line of <text>, including empty
-# ones, into the global SPLIT_OUT array. No `<<<`/`< <(...)` on the result.
+# ones, into the global SPLIT_OUT array. No `<<<`/`< <(...)` on the result:
+# bash 3.2 leaks their fd in the long-lived viewers that source this file.
 snapshot_lines_preserve() {
     local text="$1" rest line
     SPLIT_OUT=()
@@ -309,6 +313,8 @@ snapshot_lines_preserve() {
     done
 }
 
+# Nothing above this guard sets a shell option or collects anything, so a
+# screen can source this file at any point.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 0 2>/dev/null || true
 fi
@@ -420,7 +426,6 @@ collect_pipelines() {
     local dir last state repo branch pr updated
     # shellcheck source=/dev/null
     source "$DOTFILES/bin/project-dirs-lib" || return 1
-    # pipeline_state, so the PIPELINE column and this file cannot disagree.
     # shellcheck source=/dev/null
     source "$DOTFILES/bin/worktrees" || return 1
     project_dirs
@@ -503,7 +508,6 @@ pr_row_tag() {
 collect_inbox() {
     local line kind slug num draft mergeable ci review title url
     local path session repo branch state pr map="" tag seen=$'\n' d f b
-    # pr_tag, so the inbox's tag and the one bin/prs prints cannot disagree.
     # shellcheck source=/dev/null
     source "$DOTFILES/bin/prs" || return 1
     while IFS= read -r line; do
@@ -641,9 +645,8 @@ case "${1:-}" in
             already_running "$s" && continue
             ( "$0" "$s" >/dev/null 2>&1 & )
         done
-        # bin/hq-reap --apply, when its own last-run stamp is missing or
-        # past its cadence. It takes its own lock, so a tick overlapping an
-        # already-running reap is a no-op, not a second pass.
+        # hq-reap takes its own lock, so a tick overlapping an already-running
+        # reap is a no-op, not a second pass.
         reap_mtime=$(file_mtime "$REAP_DIR/last-run") || reap_mtime=-1
         if [[ "$reap_mtime" == -1 ]] || (( $(date +%s) - reap_mtime >= REAP_CADENCE )); then
             ( "$DOTFILES/bin/hq-reap" --apply >/dev/null 2>&1 & )
