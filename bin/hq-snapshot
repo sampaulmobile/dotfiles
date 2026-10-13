@@ -114,9 +114,9 @@ snapshot_read() {
     return 0
 }
 
-# inbox_slug <branch> — into $inbox_slug_out: / -> -, worktrunk's own
-# sanitisation and the rule session_name_for_branch applies, so a branch,
-# its worktree and its thread agree. A thread's ONLY identity that survives
+# inbox_slug <branch> — into $inbox_slug_out: / -> -, the same mapping
+# session_name_for_branch uses, so a branch, its worktree and its thread
+# agree. A thread's ONLY identity that survives
 # a sweep — once the worktree is gone only the file name remains — so
 # anything keyed per thread (inbox archive and seen marks included) keys by
 # this, never by the real branch.
@@ -171,8 +171,6 @@ pipeline_map_load() {
     done < <(snapshot_read pipelines 2>/dev/null)
 }
 
-# pipeline_for_cwd <cwd> — the PIPELINE field of the worktree <cwd> sits in
-# or under; nothing when no run is in flight there.
 pipeline_for_cwd() {
     local cwd="$1" path state
     [[ -n "$cwd" && -n "$pipeline_map" ]] || return 0
@@ -554,9 +552,8 @@ collect_inbox() {
     done
 }
 
-# collect_one <source> — produce it, then publish it. The body is held in
-# full first: a producer that fails must leave the previous snapshot alone
-# rather than publish a truncated one.
+# collect_one: the body is held in full first — a producer that fails must
+# leave the previous snapshot alone rather than publish a truncated one.
 collect_one() {
     local name="$1" out
     if ! declare -f "collect_$name" >/dev/null 2>&1; then

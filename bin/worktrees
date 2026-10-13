@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # worktrees — every worktree of every project bin/project-dirs-lib knows
 # about, as one bucketed table (read-only report), plus `sweep`, the one verb
-# that acts on it. Buckets/flags/precedence: usage() below.
+# that acts on it.
 #
 # The report changes nothing: every git/gh call is a read. `git worktree
 # remove` (remove_worktree) is this script's only removal of anything it did
@@ -85,8 +85,6 @@ WORKTREES_PROFILE=1 adds a stderr line per stage with its elapsed time.
 EOF
 }
 
-# Padded first, colour-wrapped after: an ANSI-wrapped string breaks a
-# fixed-width printf %-Ns pad.
 C_RESET=""
 if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; then
     C_RESET=$'\033[0m'
@@ -102,6 +100,8 @@ bucket_color() {
         SHIPPED?)                    printf '\033[35m' ;;
     esac
 }
+# Padded first, colour-wrapped after: an ANSI-wrapped string breaks a
+# fixed-width printf %-Ns pad.
 paint() {
     local padded
     padded=$(printf "%-${2}s" "$1")
@@ -270,14 +270,11 @@ classify_worktree() {
     echo "SHIPPED?"
 }
 
-# action_for <bucket> <repo> <path> <branch> <locked> [<sweepable_dirty>].
-# A detached worktree (empty branch) must be addressed by PATH, not branch,
-# for `wt remove` (verified against wt v0.68.0's --help). `locked` only
-# gates the `git worktree unlock` prefix on MERGED/ABANDONED: every
-# harness-made agent worktree stays locked after its agent exits, and
-# `wt remove` refuses a locked worktree. `sweepable_dirty`: merged
-# underneath with untracked files as the sole dirt, which `sweep --force`
-# drops.
+# action_for: `wt remove` takes a path target (verified against wt v0.68.0's
+# --help) — needed since a detached worktree has no branch. `locked` only
+# gates the `git worktree unlock` prefix on ABANDONED: every harness-made
+# agent worktree stays locked after its agent exits, and `wt remove`
+# refuses a locked worktree.
 action_for() {
     local bucket="$1" repo="$2" path="$3" branch="$4" locked="${5:-false}" sweepable_dirty="${6:-false}"
     local target unlock_prefix
@@ -303,11 +300,6 @@ action_for() {
     esac
 }
 
-# parse_porcelain_blocks <repo> [<callback>]: reads `git worktree list
-# --porcelain` from stdin and calls <callback> (default on_worktree_block)
-# with <path> <branch> <locked> <prunable> <wt_head> once per block,
-# skipping <repo> itself (always listed first by git) and flushing a
-# trailing block with no blank line after it.
 parse_porcelain_blocks() {
     local repo="$1" cb="${2:-on_worktree_block}"
     local path="" branch="" locked=false prunable=false wt_head=""
@@ -383,9 +375,8 @@ _pr_list() {
         --json number,state,headRefName,headRefOid,url \
         --jq '.[] | [.headRefName, (.number|tostring), .state, .headRefOid, .url] | @tsv' 2>/dev/null
 }
-# prefetch_pr_lists <repo>...: backgrounds _pr_list per repo into
-# PR_PREFETCH_DIR keyed by path; does not wait — the caller's single `wait`
-# before the rows loop collects this and prefetch_statuses.
+# prefetch_pr_lists: async — the caller's single `wait` before the rows
+# loop collects this and prefetch_statuses.
 prefetch_pr_lists() {
     local r key
     [[ "$GH_OK" == true ]] && (( $# )) || return 0
@@ -396,9 +387,8 @@ prefetch_pr_lists() {
     done
 }
 
-# prefetch_statuses <worktree-path>...: backgrounds `git status --porcelain`
-# per worktree into STATUS_PREFETCH_DIR keyed by path; async, collected by
-# the same `wait` as prefetch_pr_lists.
+# prefetch_statuses: async — collected by the same `wait` as
+# prefetch_pr_lists.
 STATUS_PREFETCH_DIR=""
 prefetch_statuses() {
     local p key
@@ -429,9 +419,7 @@ load_pr_cache() {
     return 0
 }
 
-# prefetch_guards: backgrounds worktree_ignored_at_risk per worktree, from
-# the parallel _wt_paths/_wt_repos arrays, into GUARD_PREFETCH_DIR keyed by
-# path. Sweep only; does not wait for the last batch — the caller's single
+# prefetch_guards: does not wait for the last batch — the caller's single
 # `wait` before the rows loop collects it.
 #   The `.rc` file is what makes a prefetch SAFE to trust: an absent or
 #   non-zero rc means the job did not finish, and guard_at_risk recomputes
@@ -441,7 +429,6 @@ load_pr_cache() {
 #   --force, hashes) a whole worktree's gitignored data, so unlimited
 #   parallelism puts tens of GiB in flight at once. Measured over 50 Flutter
 #   worktrees, 2026-09-26: serial 499s, width 4 263s, width 8 159s.
-#   GUARD_JOBS overrides.
 GUARD_PREFETCH_DIR=""
 prefetch_guards() {
     local i p hub key any="" width n=0
@@ -465,8 +452,8 @@ prefetch_guards() {
     done
 }
 
-# guard_at_risk <worktree> <hub> <any>: <any> must match what the prefetch
-#   used; both read the same FORCE, which cannot change mid-run.
+# <any> must match what the prefetch used; both read the same FORCE, which
+# cannot change mid-run.
 guard_at_risk() {
     local p="$1" hub="$2" any="$3" key rc
     if [[ -n "$GUARD_PREFETCH_DIR" ]]; then
@@ -482,8 +469,8 @@ guard_at_risk() {
     worktree_ignored_at_risk "$p" "$hub" "$any"
 }
 
-# default_ref_for: empty when a repo has no origin/HEAD and no local
-# main/master — merged_local then reports false for every worktree in it.
+# default_ref_for empty return: merged_local then reports false for every
+# worktree in that repo.
 default_ref_for() {
     local repo="$1" ref
     ref=$(git -C "$repo" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
@@ -502,9 +489,8 @@ default_ref_for() {
     printf ''
 }
 
-# sweep_remove_cmd <repo> <path> <branch> <locked> [<dirty>] — %q-quoted; the
-# sweep's -v dry-run line. remove_worktree mirrors it step for step — change
-# both together.
+# sweep_remove_cmd — %q-quoted; the sweep's -v dry-run line. remove_worktree
+# mirrors it step for step — change both together.
 #   --no-delete-branch plus our own `git branch -D`: wt's merged-ness check
 #   is offline and capped at 500 commits, so left to itself it can keep the
 #   branch and still exit 0 even though the caller has already proved
@@ -562,7 +548,7 @@ collect_worktree_block() {
     return 0
 }
 
-# prime_repo_facts <repo>: reads $default_ref from the caller.
+# prime_repo_facts reads $default_ref from the caller.
 prime_repo_facts() {
     local repo="$1" b r pats=()
     REPO_FACTS_REPO="$repo"
@@ -769,11 +755,9 @@ derive_worktree_facts() {
     f_age_epoch="${_age##*$'\t'}"; [[ -z "$f_age_epoch" ]] && f_age_epoch=0
 }
 
-# pipeline_state <worktree-path>: the PIPELINE column, `<phase> r<round>
-# <seat>` from the LAST line of <path>/.feature/status.jsonl. Empty when
-# the file is absent, unreadable, empty, or its last line carries no phase.
-# Only the .jsonl is read: a worktree holding the pre-jsonl
-# .feature/status.json gets a blank column, never a stale state.
+# pipeline_state: the PIPELINE column, `<phase> r<round> <seat>`. Only the
+# .jsonl is read: a worktree holding the pre-jsonl .feature/status.json
+# gets a blank column, never a stale state.
 pipeline_state() {
     local wt="$1" l last="" out="" re f
     f="$wt/.feature/status.jsonl"
@@ -792,9 +776,8 @@ pipeline_state() {
     printf '%s' "$out"
 }
 
-# _toml_strip_comment <line> — drop a trailing `#...` unless the # is inside
-# a double-quoted string. Walks quote state by hand: bash 3.2 regex has no
-# lookbehind, and a naive token pass would harvest quoted words from comments.
+# Walks quote state by hand: bash 3.2 regex has no lookbehind, and a naive
+# token pass would harvest quoted words from comments.
 _toml_strip_comment() {
     local line="$1" out="" ch in_str=false i
     for (( i = 0; i < ${#line}; i++ )); do
@@ -809,12 +792,10 @@ _toml_strip_comment() {
     printf '%s' "$out"
 }
 
-# parse_copy_ignored_excludes <toml-path>: prints the regenerable-cache dir
-# names from worktrunk.toml's [step.copy-ignored] exclude array — files
-# copy-ignored never copied in, safe to drop. Prints nothing if the
-# section/key is absent, so the guard falls back to pure content comparison
-# (more skips, never an unsafe removal). Comments are stripped before any
-# match, including on a `[step.copy-ignored]` header line.
+# parse_copy_ignored_excludes: the names it prints are never copied in by
+# `wt step copy-ignored`, safe to drop. Prints nothing if the section/key is
+# absent, so the guard falls back to pure content comparison (more skips,
+# never an unsafe removal).
 parse_copy_ignored_excludes() {
     local toml="$1" raw line in_section=false collecting=false rest tok
     [[ -f "$toml" ]] || return 0
@@ -840,12 +821,11 @@ parse_copy_ignored_excludes() {
     done < "$toml"
 }
 
-# _seg_is_cache <relpath>: true if <relpath> is, or is under, a name in
-# sweep_excludes. Excludes are gitignore-style and the trailing slash
-# carries gitignore's meaning: "build/" matches only a directory, "build"
-# matches a file of that name too. Every ancestor segment is a directory
-# and matches either way; only the final segment of a file path turns on
-# the distinction.
+# sweep_excludes is gitignore-style and the trailing slash carries
+# gitignore's meaning: "build/" matches only a directory, "build" matches a
+# file of that name too. Every ancestor segment is a directory and matches
+# either way; only the final segment of a file path turns on the
+# distinction.
 _seg_is_cache() {
     local rel="$1" seg ex pat rest is_dir=false first=true
     (( ${#sweep_excludes[@]} )) || return 1
@@ -887,7 +867,8 @@ _dir_is_cache() {
 # stdout — a `$(...)` here forks per gitignored entry, thousands for a
 # vendored dir.
 #   safe-cache  regenerable cache (a segment in sweep_excludes), or a
-#               .feature/ dir (pipeline scratch, disposable)
+#               .feature/ dir (pipeline scratch, disposable — the top-level
+#               .feature/ is archived separately by archive_feature_dir)
 #   compare     plain file; byte-identity against the hub decides, batched
 #               across every such file by the caller
 #   recurse     ignored directory, not a cache and not .feature/ — the
@@ -917,11 +898,10 @@ classify_ignored_file() {
 LS_FILES_FAILED='<git ls-files failed — cannot verify gitignored contents, treating as at-risk>'
 
 # _bulk_lines <count> <command...>  (args: NUL-separated paths on stdin):
-# runs <command> over every path via xargs into bulk_out[], requiring
-# exactly <count> lines. xargs preserves argument order across however many
-# invocations it splits into, so the Nth line is the Nth path. A short read
-# (a path the tool could not stat or read) desynchronises the pairing:
-# fail, and the caller fails closed.
+# xargs preserves argument order across however many invocations it splits
+# into, so the Nth line is the Nth path. A short read (a path the tool
+# could not stat or read) desynchronises the pairing: fail, and the caller
+# fails closed.
 #   Answers land in bulk_out, so callers must REDIRECT the path list in
 #   rather than pipe it — piping runs this in a subshell, and the array
 #   never reaches the caller: silently empty, which reads as "nothing at
@@ -1106,9 +1086,6 @@ sweep_would_kill_own_session() {
     [[ "$cur_session" == "$session_name" ]]
 }
 
-# merged_under_untracked <prunable>: true when the f_* facts describe a
-# DIRTY worktree whose only dirt is untracked files and which classifies
-# MERGED once that dirt is ignored.
 merged_under_untracked() {
     [[ "$f_dirty" == true && "$f_untracked_only" == true ]] || return 1
     [[ "$(classify_worktree false false "$1" "$f_pr_state" "$f_unpushed" "$f_merged_local")" == MERGED ]]
@@ -1121,9 +1098,7 @@ worktree_untracked() {
 }
 
 # feature_archive_dir <repo> <path> <branch>: one UTC-stamped directory per
-# sweep run, from $SWEEP_STAMP so every row of one sweep shares it. The
-# branch slug maps "/" -> "-". A detached worktree has no branch; its
-# directory basename stands in.
+# sweep run, from $SWEEP_STAMP so every row of one sweep shares it.
 feature_archive_dir() {
     local repo="$1" path="$2" branch="$3" slug stamp
     slug="${branch:-${path##*/}}"
@@ -1132,7 +1107,7 @@ feature_archive_dir() {
     printf '%s/.local/state/hq/runs/%s/%s/%s' "$HOME" "${repo##*/}" "${slug//\//-}" "$stamp"
 }
 
-# archive_feature_dir <repo> <path> <branch>: the run history is
+# archive_feature_dir: the run history is
 #   append-only — a sweep adds a directory and this script removes nothing
 #   under runs/, so no run can be lost to a later sweep of the same branch.
 #   The copy lands at <dest>.partial and is renamed only once whole, so a
@@ -1182,8 +1157,8 @@ remove_worktree() {
 }
 
 # sweep_row <path> <branch> <locked> <prunable> <wt_head>: the sweep's LIVE
-# per-worktree callback — derive the facts, then decide. Under --apply the
-# removal happens in sweep_decide; only the printing is deferred.
+# per-worktree callback. Under --apply the removal happens here, mid-loop;
+# only the printing is deferred.
 sweep_row() {
     local path="$1" branch="$2" locked="$3" prunable="$4" wt_head="$5"
     local bucket
@@ -1269,8 +1244,8 @@ sweep_decide() {
         return 0
     fi
 
-    # Re-check liveness right before the point of no return: the snapshot
-    # predates the slow gitignored-data-guard work above.
+    # Re-check liveness right before the point of no return: the lsof scan
+    # predates the slow gitignored-data-guard work.
     if [[ "$APPLY" == true ]]; then
         init_liveness
         if is_live "$path"; then
@@ -1410,6 +1385,7 @@ if [[ "$MODE" == sweep ]]; then
     while IFS= read -r _ex; do
         [[ -n "$_ex" ]] && sweep_excludes+=("$_ex")
     done < <(parse_copy_ignored_excludes "$DOTFILES/dots/worktrunk.toml")
+    # sweep needs session_name_for_removed even on the snapshot path.
     # shellcheck source=/dev/null
     source "$DOTFILES/bin/project-dirs-lib"
 fi
@@ -1466,8 +1442,7 @@ count_bucket() {
     esac
 }
 
-# report_row <path> <branch> <locked> <prunable> <wt_head>: the report's
-# per-worktree callback — derive facts, classify, buffer a row. Depends on
+# report_row <path> <branch> <locked> <prunable> <wt_head>: depends on
 # globals the per-repo loop below sets: $repo and $default_ref.
 report_row() {
     local path="$1" branch="$2" locked="$3" prunable="$4" wt_head="$5"
@@ -1709,7 +1684,7 @@ fi
 fi
 
 # --snapshot always exits 0: the "something to act on" exit 1 below belongs
-# to the interactive report, never to the collector.
+# to the report, never to the collector.
 [[ "$EMIT" == true ]] && exit 0
 
 echo
@@ -1740,7 +1715,6 @@ _sum="$(count_cell MERGED "$CNT_MERGED")$(count_cell ABANDONED "$CNT_ABANDONED")
 if [[ -n "$_sum" ]]; then printf '%s\n' "${_sum%  }"; else echo "no linked worktrees"; fi
 source_warnings
 
-# Exit 1 = something to act on (MERGED/ABANDONED/PRUNABLE).
 if (( CNT_MERGED > 0 || CNT_ABANDONED > 0 || CNT_PRUNABLE > 0 )); then
     exit 1
 fi

@@ -95,8 +95,6 @@ github_slug() {
     printf '%s' "$r" | tr '[:upper:]' '[:lower:]'
 }
 
-# Padding is applied to the visible text first and the escapes wrapped
-# after, so columns stay aligned.
 C_RESET=""
 LINKS=false
 if [[ -t 1 ]]; then
@@ -113,6 +111,8 @@ tag_color() {
         open)                      printf '\033[34m' ;;
     esac
 }
+# Padding is applied to the visible text first and the escapes wrapped
+# after, so columns stay aligned.
 paint() {
     local padded
     padded=$(printf "%-${2}s" "$1")
@@ -299,7 +299,6 @@ else
     [[ -n "$merged_pid" ]] && merged_rows=$(cat "$TMPD/merged")
 fi
 
-# The scope filter below belongs to whoever renders them.
 if [[ "$EMIT" == true ]]; then
     printf 'meta\tauthor\t%s\n' "$AUTHOR"
     printf 'meta\tsince\t%s\n' "$SINCE"
