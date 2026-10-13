@@ -250,8 +250,8 @@ if [[ "$bad_detail" == *'rc=1'* ]]; then ok "--dump --detail on an unknown pane 
 
 echo "── LIST caps a long multi-line prompt instead of bash \${var//} over it"
 biglines=()
-for i in $(seq 1 600); do
-    biglines+=("line $i of a long multi-line prompt padded out with filler words to add length")
+for i in $(seq 1 700); do
+    biglines+=("$(printf 'line %04d of a padded prompt line to add length' "$i")")
 done
 bigprompt=$(printf '%s\n' "${biglines[@]}")
 bigsize=${#bigprompt}
@@ -260,7 +260,7 @@ if (( bigsize >= 30000 )); then
 else
     bad "long-prompt fixture size" "$bigsize bytes"
 fi
-big_json=$(jq -Rn --arg t "$bigprompt" '$t | tojson')
+big_json=$(jq -Rnr --arg t "$bigprompt" '$t | tojson')
 {
     printf '# generated 2026-01-01T00:00:00Z\n'
     printf '%s\t%%8\t1\tclaude\tworking\t-\t%s\t-\tyou\t%s\t-\t-\t-\t-\t/home/user/big\n' \
@@ -272,8 +272,20 @@ elapsed_load=$(( SECONDS - t0 ))
 idx=-1
 for i in "${!p_session[@]}"; do [[ "${p_session[$i]}" == bigpromptpane ]] && idx="$i"; done
 if (( idx >= 0 )); then
+    nl_file="$work/bigprompt.raw"
+    printf '%s' "${p_prompt[$idx]}" > "$nl_file"
+    nl_count=$(tr -dc '\n' < "$nl_file" | wc -c)
+    nl_count="${nl_count//[[:space:]]/}"
+    if (( nl_count > 500 )); then
+        ok "load_data decodes real newlines into p_prompt, not literal \\n ($nl_count newlines)"
+    else
+        bad "p_prompt newline count" "$nl_count"
+    fi
+
     frame_rows=()
+    t0=$SECONDS
     append_block_body "$idx" 80 false
+    elapsed_block=$(( SECONDS - t0 ))
     you_lines=0
     for l in "${frame_rows[@]}"; do [[ "$l" == *'you ›'* ]] && you_lines=$(( you_lines + 1 )); done
     check "a >=30KB multi-line prompt renders as exactly one you › line in LIST" "$you_lines" "1"
@@ -282,15 +294,19 @@ if (( idx >= 0 )); then
     else
         bad "LIST line length" "${#frame_rows[0]} chars"
     fi
+    if (( elapsed_block <= 2 )); then
+        ok "append_block_body over the long prompt completes in <=2s (was ~28s/29KB pre-fix)"
+    else
+        bad "append_block_body elapsed" "${elapsed_block}s"
+    fi
 else
     bad "long-prompt fixture pane not loaded" "-"
 fi
 # The pre-fix bug ran bash's quadratic ${var//$'\n'/ } over the UNCAPPED
-# prompt on every LIST repaint: 29 KB measured at 28.3s (see
-# .feature/findings-round-1.md). 5s is generous slack for a correct,
-# jq-capped pass over 35+ KB and still catches that regression outright.
+# prompt on every LIST repaint: 29 KB measured at 28.3s. 5s is generous
+# slack for a correct, jq-capped pass over 30+ KB.
 if (( elapsed_load <= 5 )); then
-    ok "load_data over the long prompt completes in <=5s (was ~28s/29KB pre-fix)"
+    ok "load_data over the long prompt completes in <=5s"
 else
     bad "load_data elapsed" "${elapsed_load}s"
 fi
