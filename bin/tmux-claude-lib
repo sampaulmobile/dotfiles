@@ -54,10 +54,10 @@ agent_window_name() {
 # Builds the standard layout every launcher here uses: window 1 <agent>, 2
 # nvim, 3 zsh. Only the agent window's name is pinned; nvim's stays on
 # automatic-rename so it tracks whatever runs there after nvim exits.
-# <agent-command> is TYPED into an initialized shell
-# rather than passed as the tmux session command: a session command skips
-# the zsh rc files, so other/zshrc.local env (ANTHROPIC_MODEL, TLS, ...)
-# would be missing and the agent would come up on the wrong model.
+# <agent-command> is TYPED into an initialized shell rather than passed as
+# the tmux session command: a session command skips the zsh rc files, so
+# other/zshrc.local env (ANTHROPIC_MODEL, TLS, ...) would be missing and the
+# agent would come up on the wrong model.
 # CREATION ONLY — no kill, no switch-client, no source-file, no set-hook.
 new_agent_session() {
     local name="$1" dir="$2" agent="$3" cmd="$4"
@@ -481,9 +481,9 @@ encode_cwd() {
     echo "$1" | sed 's|[/._]|-|g'
 }
 
-# Builds a temp file mapping tmux pane id + CWD -> sessionId (one line per
-# live claude: "paneId\tcwd\tsessionId", paneId is "-" when unknown). Call
-# once before the pane-exact lookups below, which read from this cache.
+# One line per live claude: "paneId\tcwd\tsessionId", paneId is "-" when
+# unknown. Call once before the pane-exact lookups below, which read from
+# this cache.
 _CWD_MAP_FILE=""
 build_cwd_session_map() {
     _CWD_MAP_FILE=$(mktemp /tmp/claude-cwd-map.XXXXXX)
