@@ -8,8 +8,8 @@
 # by tmux-claude-attention when `g` lands on it.
 #
 # UTF-8/width discipline, fd safety and the view loop's timeout-vs-key
-# distinction are the same bash 3.2 gotchas as bin/hq-decisions (see its own
-# header).
+# distinction are the same bash 3.2 gotchas as bin/hq-decisions (see its
+# decisions_ensure_utf8_locale/pad, its fd-safety header and view()).
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 SELF="$DOTFILES/bin/hq-feed"
@@ -542,8 +542,6 @@ body_width() {
     printf '%s' "$w"
 }
 
-# The shared block body (prompt/msg, now/ask, it ›), used by both the LIST
-# block and DETAIL.
 append_block_body() {
     local idx="$1" width="$2" bucket="${p_bucket[$1]}" full="$3"
     local kind="${p_kind[$idx]}" prefix_w=8
