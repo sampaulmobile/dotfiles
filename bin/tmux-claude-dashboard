@@ -56,13 +56,11 @@ source ~/dotfiles/bin/hq-snapshot
 CACHE_DIR="${DASHBOARD_CACHE_DIR:-/tmp/claude-dashboard}"
 mkdir -p "$CACHE_DIR/agents"
 
-# context window per CLAUDE model — drives the CTX% column (percent of
-# window used) and the context coloring. Current lineup (per Anthropic docs,
-# 2026-06): 1M for Fable/Mythos, Opus 5/4.6+, Sonnet 5/4.6, and any [1m]
-# beta variant; 200K for Haiku and older Sonnet/Opus. Unknown → 0 (no
-# percent shown; coloring falls back to absolute thresholds).
-# Codex rows never come here: their rollout states its own
-# model_context_window, which the row carries instead (windows[] below).
+# context window per CLAUDE model, per Anthropic docs 2026-06: 1M for
+# Fable/Mythos, Opus 5/4.6+, Sonnet 5/4.6, any [1m] beta; 200K for Haiku and
+# older Sonnet/Opus. Unknown -> 0, coloring then falls back to absolute
+# thresholds. Codex rows never call this: their rollout states its own
+# model_context_window (windows[] below).
 # context_window_for <var> <model> — assigns, like the lib's formatters
 context_window_for() {
     local _cw=0
@@ -111,12 +109,8 @@ SEL=$'\033[48;5;236m'
 
 # ── helpers ─────────────────────────────────────────────
 
-# reload_sessions
-#   Re-collects the row list from tmux into the parallel arrays
-#   sessions/panes/names. Display name: the session name for a window-1
-#   agent, "session:N" for one in window N.
-#   The cursor is preserved by pane id, not index: rows are sorted by
-#   activity time, so the order changes between refreshes.
+# the cursor is preserved by pane id, not index: rows re-sort by activity
+# time, so index order changes between refreshes.
 reload_sessions() {
     frame_at=0
     local prev=""
@@ -179,7 +173,6 @@ is_marked() { [[ "$marked" == *" $1 "* ]]; }
 toggle_mark() {
     if is_marked "$1"; then marked="${marked/ $1 / }"; else marked+="$1 "; fi
 }
-# prune_marks — drops marks whose pane no longer has a row.
 prune_marks() {
     local kept=" " p
     for p in "${panes[@]}"; do
@@ -188,11 +181,10 @@ prune_marks() {
     marked="$kept"
 }
 
-# plan_kill <row-index>...
-#   Splits a batch of rows into kill_sessions and kill_panes: a session goes
-#   whole only when EVERY agent row of it is in the batch, else just the
-#   batch's panes in it — killing a secondary agent must never take down the
-#   session's primary one. Returns 1 (with kill_error) on an empty target.
+# a session batches whole only when every one of its agent rows is in the
+# batch, else just those panes — killing a secondary agent must never take
+# down the session's primary one. Returns 1 with kill_error set on an
+# empty target.
 kill_error=""
 plan_kill() {
     kill_sessions=()
@@ -225,11 +217,10 @@ plan_kill() {
     done
 }
 
-# run_kill <dashboard-host-session>
-#   Executes plan_kill's lists. The dashboard's own host session goes last:
-#   with detach-on-destroy off the client moves to the last session, and
-#   this window dies with its host. No silent failure: every tmux refusal is
-#   collected into kill_error, and any one makes it return 1.
+# the dashboard's own host session is killed last: with detach-on-destroy
+# off, killing it moves the client to the last-killed session, so this
+# window must outlive every other kill. Every tmux refusal is collected
+# into kill_error.
 run_kill() {
     local myself="$1" s p err self=""
     kill_error=""
@@ -250,7 +241,6 @@ run_kill() {
     [[ -z "$kill_error" ]]
 }
 
-# reload_after_kill — re-collects rows, exiting when none are left.
 reload_after_kill() {
     reload_sessions
     if (( session_count == 0 )); then
@@ -267,7 +257,6 @@ _row_key() {
     stat -f '%m %z' "$1" 2>/dev/null || stat -c '%Y %s' "$1" 2>/dev/null
 }
 
-# get_row_stats <row-name> <jsonl-path> [agent]
 #   Token/turn/cost stats for one row's transcript, tab-separated:
 #   context, output, total, turns, cost, model, mtime, context_window.
 #   The trailing window is 0 for claude rows (the per-model table sizes
@@ -310,9 +299,8 @@ get_row_stats() {
         IFS=$'\t' read -r tout tall turns cost <<< "$(get_totals_incremental "$jsonl" "$totals_cache")"
     fi
 
-    # render shows this mtime as an age on idle/done/permission rows. The
-    # model column is written "-" when empty: a tab run collapses on `read`,
-    # and the reader in load_data maps it back.
+    # model is written "-" when empty: a tab run collapses on `read`, and
+    # the reader in load_data maps it back.
     mt="${key%% *}"
     printf -v cv '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
         "${ctx:-0}" "${tout:-0}" "${tall:-0}" "${turns:-0}" "${cost:--}" "${mdl:--}" "${mt:-0}" "${win:-0}"
@@ -320,7 +308,6 @@ get_row_stats() {
     printf '%s' "$cv"
 }
 
-# get_row_agent_tree <row-name> <jsonl-path>
 #   Prints one line per live subagent under this row's transcript,
 #   tab-separated: agent_id, depth, parent_id, agentType, description,
 #   mtime, started, context, output, turns, model, snippet. Per-agent
@@ -360,15 +347,10 @@ get_row_agent_tree() {
 
 # ── render ──────────────────────────────────────────────
 
-# build_frame
-#   Lays out and formats every row for the current data into frame_head,
-#   frame_rows[i] / frame_trees[i] (session line, then its agent tree and
-#   snippets) and frame_foot, at the width in $cols and the clock in $now.
-#   Fork-free per row, so it scales with the session count; render() still
-#   reuses it across cursor moves. A cached row is
-#   cursor-neutral: two leading spaces where the marker goes and the name
-#   wrapped in \x01..\x02, which render() turns into bold on the selected
-#   row and strips elsewhere.
+# build_frame — fork-free per row, so it scales with the session count. A
+# row is cursor-neutral: two leading spaces where the marker goes, and the
+# name wrapped in \x01..\x02, which render() turns into bold on the
+# selected row and strips elsewhere.
 build_frame() {
     frame_rows=()
     frame_trees=()
@@ -384,9 +366,7 @@ build_frame() {
     # ctx_w fits the used/total fraction, e.g. "199.9k/200k"
     local ctx_w=12 out_w=9 all_w=9 mdl_w=12 pct_w=4 turns_w=5 cost_w=7
 
-    # row_width sets rw to the exact VISIBLE chars of a layout:
-    # row = marker(2) + name_w + status(15) + ctx(12) + 1+pct(4)
-    #       [+ 2+mdl] [+ 1+turns] [+ 1+out] [+ 1+all] [+ 1+cost]
+    # row_width sets rw to the exact VISIBLE chars of a layout.
     local rw
     row_width() {
         local nw=$1 o=$2 t=$3 m=$4 u=$5 c=$6
@@ -449,8 +429,8 @@ build_frame() {
             local _exp=$agents_forced
             (( ${agent_working_counts[$_i]:-0} > 0 )) && _exp=1
             (( _exp )) && [[ -n "${agent_lines[$_i]}" ]] || continue
-            # agent MODEL cell is "agentType·model" (see render below), so
-            # size the column to the combined label, not the type alone.
+            # size for the combined agentType·model label (below), not the
+            # type alone.
             local aid adepth aparent atype adesc amtime astarted actx aout aturns amdl _rest
             while IFS=$'\t' read -r aid adepth aparent atype adesc amtime astarted actx aout aturns amdl _rest; do
                 [[ -z "$aid" ]] && continue
@@ -468,10 +448,8 @@ build_frame() {
         fi
     fi
 
-    # SESSION is the flexible column: all remaining spare (minus a 1-col
-    # right margin, so a full row can never trip terminal autowrap) goes to
-    # the name column — SESSION left-aligned with the whole middle of the
-    # screen to spend, STATUS through MODEL pinned to the right edge.
+    # all remaining spare, minus a 1-col right margin, goes to the name
+    # column — the margin keeps a full row from tripping terminal autowrap.
     if (( spare > 1 )); then
         name_w=$(( name_w + spare - 1 ))
         spare=1
@@ -513,7 +491,6 @@ build_frame() {
         out=""
         local working_agents="${agent_working_counts[$i]:-0}"
 
-        # live-agent badge eats into the name's own width budget
         local badge=""
         (( working_agents > 0 )) && badge=" +${working_agents}"
         local avail_name_w=$(( name_w - ${#badge} ))
@@ -541,7 +518,6 @@ build_frame() {
         local all_tok="${total_alls[$i]}"
         local mdl="${models[$i]}"
 
-        # marker slot + name (+ badge, if this session has working agents)
         out+="  "$'\x01'"${name}"$'\x02'
         (( working_agents > 0 )) && out+="${CYAN}${badge}${RST}"
         [[ -n "$pipe" ]] && out+="${DIM}${pipe}${RST}"
@@ -588,7 +564,6 @@ build_frame() {
         printf -v _p '%*s' "$st_padn" ''
         out+="${st_color}${st_text}${RST}${_p}"
 
-        # model — left-aligned right after status
         if (( show_model )); then
             local mdl_field="$mdl"
             if (( ${#mdl_field} > mdl_w )); then
@@ -598,13 +573,9 @@ build_frame() {
             out+="${DIM}${_p}${RST}  "
         fi
 
-        # context column — colored by percent of the model's window when the
-        # window is known, else the old absolute thresholds
         local ctx_raw="$ctx"
         local ctx_fmt
         format_tokens ctx_fmt "$ctx_raw"
-        # codex rows carry their window from the rollout; claude rows get
-        # it from the per-model table
         local win pct=-1 pct_fmt="-"
         win="${windows[$i]:-0}"
         [[ "$win" =~ ^[0-9]+$ ]] || win=0
@@ -629,9 +600,9 @@ build_frame() {
         (( show_turns ))  && printf -v _p " %${turns_w}s" "${turns_counts[$i]:-0}" && out+=$_p
         (( show_output )) && printf -v _p " %${out_w}s" "$out_tok" && out+=$_p
         (( show_total ))  && printf -v _p " %${all_w}s" "$all_tok" && out+=$_p
-        # COST: "$1.23" = exact (claude's own cost-state snapshot),
-        # "~$1.23" = price-sheet estimate, "5h:42%" = codex's rate-limit
-        # window usage (plan billing has no per-token cost), "-" = none
+        # cost_raw encodes its kind in its own shape: a "%" suffix is
+        # codex's rate-limit usage, a "~" prefix a price-sheet estimate,
+        # otherwise an exact cost-state number, "-" none.
         if (( show_cost )); then
             local cost_raw="${costs[$i]:--}" cost_fmt="-"
             if [[ "$cost_raw" == *"%" ]]; then
@@ -647,8 +618,6 @@ build_frame() {
         frame_rows[$i]="$out"
         out=""
 
-        # agent tree — auto-expand sessions with a working agent; 'a' forces
-        # every session's tree open (including idle-only agents)
         local expand=0
         (( agents_forced )) && expand=1
         (( working_agents > 0 )) && expand=1
@@ -656,10 +625,9 @@ build_frame() {
             local aid adepth aparent atype adesc amtime astarted actx aout aturns amdl asnip
             while IFS=$'\t' read -r aid adepth aparent atype adesc amtime astarted actx aout aturns amdl asnip; do
                 [[ -z "$aid" ]] && continue
-                # ${#row_plain} below counts a tab as 1 char, but the
-                # terminal expands it to the next 8-column stop, breaking
-                # the width math that keeps rows from wrapping. Neutralize
-                # any tab reaching these fields, whatever its source.
+                # a tab counts as 1 char in ${#...} but the terminal expands
+                # it to the next 8-column stop, breaking the width math
+                # below — neutralize any tab in these fields first.
                 adesc="${adesc//$'\t'/ }"
                 atype="${atype//$'\t'/ }"
                 asnip="${asnip//$'\t'/ }"
@@ -784,9 +752,8 @@ build_frame() {
                 (( show_cost ))   && printf -v _p " %${cost_w}s" "-" && row+=$_p
                 out+="${row}"$'\n'
 
-                # ── activity snippet: its own dim line beneath the row,
-                # indented to the description's start column. Working
-                # agents only.
+                # snippet indents to the description's start column;
+                # working agents only.
                 if (( aworking )) && [[ -n "$asnip" ]]; then
                     local snip_indent
                     printf -v snip_indent '%*s' $(( 2 + ${#sess_prefix} + 2 )) ''
@@ -818,11 +785,10 @@ build_frame() {
     frame_foot="$out"
 }
 
-# render
-#   Paints the cached frame with the cursor on row $selected. Rebuilds the
-#   frame only when the pane width changed or the cache is 30s old (the
-#   STATUS ages are baked into the rows), so j/k costs string ops, not the
-#   forks of a full rebuild. Data changes must invalidate with frame_at=0.
+# render — rebuilds the frame only when the pane width changed or the cache
+# is 30s old (STATUS ages are baked into the cached rows), so j/k costs
+# string ops, not a full rebuild's forks. A data change must invalidate via
+# frame_at=0.
 render() {
     local cols now
     cols=$(tmux display-message -p '#{pane_width}' 2>/dev/null || tput cols 2>/dev/null || echo 80)
@@ -901,7 +867,8 @@ load_data() {
         || ~/dotfiles/bin/hq-snapshot pipelines >/dev/null 2>&1
     pipeline_map_load
 
-    # collect all data in parallel — each session writes to a temp file
+    # background subshells can't set the caller's array vars — write temp
+    # files instead; the loop below reads them back after wait.
     local parallel_dir="${CACHE_DIR}/parallel.$$"
     mkdir -p "$parallel_dir"
 
@@ -909,9 +876,8 @@ load_data() {
         (
             agent="${agents[$i]:-claude}"
             if [[ "$agent" == parked ]]; then
-                # No process lives on its pane: no status/transcript/stats to
-                # read. mt carries the park epoch, so render's age suffix
-                # shows time since parked, same as an idle/done row's mtime.
+                # mt carries the park epoch here, read by render's age
+                # suffix the same as an idle/done row's actual mtime.
                 printf -- '-\t1\tparked\t0\t0\t0\t0\t-\t-\t%s\t0' "${parked_epochs[$i]:-0}" > "${parallel_dir}/${i}"
                 : > "${parallel_dir}/${i}.agents"
                 exit 0
@@ -931,8 +897,6 @@ load_data() {
             # the pane is already gone — is written as "-", a string tmux's
             # absolute pane path can never be.
             printf '%s\t%s\t%s\t%s' "${cwd:--}" "$cwd_ok" "$st" "$stats" > "${parallel_dir}/${i}"
-            # subagent trees are a claude concept (agent-*.jsonl under the
-            # session dir); codex rows get an empty file
             if [[ "$agent" == "codex" ]]; then
                 : > "${parallel_dir}/${i}.agents"
             else
@@ -1031,7 +995,6 @@ fi
 
 load_data
 
-# input loop — no auto-refresh, just respond to keys
 while true; do
     key=""
     IFS= read -rsn1 key || true
@@ -1057,14 +1020,12 @@ while true; do
             render
             ;;
         a)
-            # toggle forcing every session's agent tree open (sessions with
-            # a working agent auto-expand regardless of this toggle)
+            # toggle forcing every session's agent tree open
             (( agents_forced = !agents_forced ))
             frame_at=0
             render
             ;;
         r)
-            # soft refresh: re-collect sessions, use cached totals
             reload_sessions
             load_data
             ;;
@@ -1079,8 +1040,6 @@ while true; do
             render
             ;;
         x)
-            # kill the marked rows, else the cursor row (confirm unless every
-            # target is gone) — see plan_kill / run_kill
             if (( session_count > 0 )); then
                 _rows=()
                 for i in "${!panes[@]}"; do
@@ -1147,7 +1106,6 @@ while true; do
             fi
             ;;
         R)
-            # hard refresh: re-collect sessions, clear totals + agent caches
             reload_sessions
             rm -f "${CACHE_DIR}"/*.totals 2>/dev/null
             rm -f "${CACHE_DIR}/agents/"* 2>/dev/null
