@@ -1,28 +1,19 @@
 #!/usr/bin/env bash
 # hq-reap — stops finished /feature task sessions from holding resident
-# claude processes. Tier 1 kills a task session's tmux session outright when
-# its worktree's PR is MERGED/CLOSED and nothing unique would be lost (the
-# same removability test bin/worktrees sweep uses). Tier 2 SIGTERMs the
-# claude of a phase-`done` task session whose PR is still OPEN after a long
-# idle, leaving its tmux session, pane shell and worktree alone — "parked",
-# resumable by name. Dry run by default; --apply is the only mode that acts.
+# claude processes. Dry run by default; --apply is the only mode that acts.
 #
 # NEVER A CANDIDATE, either tier: a session that is not a task session (its
 # @task option unset and no claude on its panes carrying `/feature --run` in
-# argv — the pre-this-change fallback); one not tied to a linked worktree row
-# (session_name_for <row path> must equal the session name); one that is
-# attached; one with any agent pane working/permission/unknown; one with any
-# non-agent pane running something other than a shell or an editor.
+# argv); one not tied to a linked worktree row (session_name_for <row path>
+# must equal the session name); one that is attached; one with any agent
+# pane working/permission/unknown; one with any non-agent pane running
+# something other than a shell or an editor.
 #
 # NEVER REMOVED: no worktree, no file, ever. The log under
-# ~/.local/state/hq/reap is append-only, like the sweep archive beside it.
-# The only kills this script performs are `tmux kill-session` on a tier-1
-# verdict and `kill -TERM` of a pid VERIFIED (ps -p <pid> -o tty=,comm=)
-# still a claude on the parked pane's own tty, on a tier-2 verdict.
-#
-# Sourceable (the pure decision/builder functions below), like bin/worktrees'
-# own guard: hand them back and run nothing when sourced rather than
-# executed. See tests/test-hq-reap.sh.
+# ~/.local/state/hq/reap is append-only. The only kills this script performs
+# are `tmux kill-session` on a tier-1 verdict and `kill -TERM` of a pid
+# VERIFIED (ps -p <pid> -o tty=,comm=) still a claude on the parked pane's
+# own tty, on a tier-2 verdict.
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 # shellcheck source=/dev/null
@@ -32,21 +23,13 @@ source "$DOTFILES/bin/tmux-claude-lib"
 # shellcheck source=/dev/null
 source "$DOTFILES/bin/worktrees"
 
-# REAP_DIR comes from bin/hq-snapshot (sourced via bin/worktrees above) —
-# its one home.
 REAP_PARK_SECS="${HQ_REAP_PARK_SECS:-43200}"
 
-# ---- pure halves: decision table, command builders, detectors ----
-
-# reap_sq <string> — single-quoted for a line typed into a shell, embedded
-# quotes escaped the '\'' way (mirrors tmux-task-session's _task_sq).
 reap_sq() {
     local s="$1" q="'"
     printf "'%s'" "${s//$q/$q\\$q$q}"
 }
 
-# reap_resume_cmd <session-name> [model] [effort] — into $reap_resume_cmd_out:
-# the typed command that resumes a parked claude by name.
 reap_resume_cmd() {
     local name="$1" model="${2:-}" effort="${3:-}" cmd
     cmd="claude --resume $(reap_sq "$name")"
@@ -55,8 +38,6 @@ reap_resume_cmd() {
     reap_resume_cmd_out="$cmd"
 }
 
-# reap_parse_model_effort <ps-args> — into $reap_model_out/$reap_effort_out,
-# the seat flags a task session's claude was launched with.
 reap_parse_model_effort() {
     local args="$1"
     reap_model_out=""
@@ -65,15 +46,11 @@ reap_parse_model_effort() {
     [[ "$args" =~ --effort[[:space:]]+([A-Za-z0-9._-]+) ]] && reap_effort_out="${BASH_REMATCH[1]}"
 }
 
-# reap_is_task_args <ps-args> — true when a claude's argv still carries the
-# launch brief's leading `/feature --run` (sessions from before @task existed).
 reap_is_task_args() {
     [[ "$1" == *"/feature --run"* ]]
 }
 
-# reap_pane_busy <pane_current_command> — true when a NON-AGENT pane runs
-# something other than a shell or an editor (a leading "-" login-shell marker
-# stripped first): work in flight, so the session is never a candidate.
+# cmd may carry a login-shell leading '-'.
 reap_pane_busy() {
     local cmd="${1#-}"
     case "$cmd" in
@@ -85,13 +62,10 @@ reap_pane_busy() {
 # reap_decide <task> <tied> <attached> <busy-cmd> <bad-pane-status> \
 #             <dirty> <pr_state> <unpushed> <merged_local> <pr_head> <wt_head> \
 #             <phase> <pane_count> <has_transcript> <idle_secs> <park_secs> <parked>
-#   The whole decision table into one line on stdout: "kill <reason>" /
-#   "park <reason>" / "keep <reason>". Tier 1's bucket/removability test is
-#   bin/worktrees' own classify_worktree/sweep_is_removable with live and
-#   prunable forced false — the task session IS the liveness signal here, not
-#   lsof. Tier 2 only ever runs past an IN-REVIEW (PR OPEN) bucket, and never
-#   twice on the same park: a claude that ignored SIGTERM must not be
-#   resignalled every pass.
+#   One line on stdout: "kill <reason>" / "park <reason>" / "keep <reason>".
+#   Live and prunable forced false — the task session IS the liveness
+#   signal here, not lsof. Already-parked is never re-signalled: a claude
+#   that ignored SIGTERM must not be re-signalled every pass.
 reap_decide() {
     local task="$1" tied="$2" attached="$3" busy="$4" pane_bad="$5"
     local dirty="$6" pr_state="$7" unpushed="$8" merged_local="$9"
@@ -134,8 +108,6 @@ reap_decide() {
     printf 'park idle %ds' "$idle_secs"
 }
 
-# Sourced (tests/test-hq-reap.sh) rather than executed: hand back the pure
-# functions above and run nothing live.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 0 2>/dev/null || true
 fi
@@ -173,10 +145,6 @@ a dry run; --apply exits 2 if any action failed.
 EOF
 }
 
-# ---- live-system glue (not unit-tested; thin wrappers over tmux/ps/jq) ----
-
-# reap_session_is_task <session> — @task option, else the pre-@task
-# fallback: any pane's tty running a claude whose argv matches reap_is_task_args.
 reap_session_is_task() {
     local name="$1" v tty args
     v=$(tmux show-options -qv -t "$name" @task 2>/dev/null)
@@ -189,8 +157,7 @@ reap_session_is_task() {
     return 1
 }
 
-# reap_session_busy_pane <session> — into stdout, the first non-shell/editor
-# pane command found among the session's NON-agent panes, empty when none.
+# stdout: the first busy non-agent pane's command; empty when none.
 reap_session_busy_pane() {
     local name="$1" _pane cmd tty
     while IFS=$'\t' read -r _pane cmd tty; do
@@ -203,9 +170,6 @@ reap_session_busy_pane() {
     done < <(tmux list-panes -s -t "$name" -F $'#{pane_id}\t#{pane_current_command}\t#{pane_tty}' 2>/dev/null)
 }
 
-# reap_session_agent_panes <session> — into $reap_pane_count_out and
-# $reap_bad_status_out (first working/permission/unknown status, else empty)
-# from the already-collected machine-wide agent pane scan.
 reap_session_agent_panes() {
     local name="$1" s p _w _a st
     reap_pane_count_out=0
@@ -222,11 +186,8 @@ reap_session_agent_panes() {
     done <<< "$_REAP_AGENT_PANES"
 }
 
-# reap_claude_json <pane-id> — into $reap_pid_out/$reap_name_out/
-# $reap_sessionid_out/$reap_cwd_out, from ~/.claude/sessions/*.json whose
-# tmux field names this exact pane. Several matches (a crash, or a resumed
-# session left its old json behind) prefer the one whose pid is still alive
-# over whichever glob sorts first; empty pid when no match at all.
+# Several session files can name one pane: the one whose pid is still
+# alive wins over whichever sorts first.
 reap_claude_json() {
     local pane="$1" lines line pid first="" alive=""
     reap_pid_out=""; reap_name_out=""; reap_sessionid_out=""; reap_cwd_out=""
@@ -243,9 +204,8 @@ reap_claude_json() {
     IFS=$'\t' read -r reap_pid_out reap_name_out reap_sessionid_out reap_cwd_out <<< "${alive:-$first}"
 }
 
-# reap_worktree_rows_load — the fresh worktrees snapshot's rows into
-# $_REAP_ROWS (one recollect attempt when stale/wrong-shaped). Exit 1 and
-# nothing else on failure: the caller must act on nothing, not stale facts.
+# Exit 1 and nothing else on failure: the caller must act on nothing, not
+# stale facts.
 reap_worktree_rows_load() {
     local sv
     sv=$(snapshot_verdict "$(snapshot_age worktrees)" "$(snapshot_cadence worktrees)")
@@ -260,9 +220,6 @@ reap_worktree_rows_load() {
     _REAP_ROWS=$(snapshot_read worktrees)
 }
 
-# reap_row_for_session <session-name> — fills the f_row_* globals from the
-# one worktrees row whose session_name_for(path) matches, empty $f_row_path
-# on a miss.
 reap_row_for_session() {
     local target="$1" kind _repo _bucket _branch pr_disp flags _age _where _pipe _epoch path _locked _sweepable
     local pr_state pr_head wt_head merged_local
@@ -287,15 +244,13 @@ reap_row_for_session() {
     return 1
 }
 
-# reap_log <kind> <session> <worktree> <pr> <reason> — appends one line to
-# $REAP_DIR/log.tsv. Append-only: nothing under ~/.local/state/hq is removed.
+# reap_log <kind> <session> <worktree> <pr> <reason>: REAP_DIR comes from
+# bin/hq-snapshot, sourced transitively via bin/worktrees.
 reap_log() {
     mkdir -p "$REAP_DIR" || return 1
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" "$3" "$4" "$5" \
         >> "$REAP_DIR/log.tsv"
 }
-
-# ---- one pass over every tmux session: build a verdict line per candidate ----
 
 REAP_FAIL=0
 
@@ -305,9 +260,9 @@ reap_pass() {
 
     _REAP_AGENT_PANES=$(scan_agent_panes)
     _REAP_AGENT_TTYS=$'\n'"$(agent_ttys | cut -f1)"$'\n'
-    # comm-filtered to claude: a tty commonly carries several processes
-    # (the login shell, background npm/node tools), and the fallback below
-    # needs the claude's own argv, never whichever one ps lists first.
+    # comm-filtered to claude: a tty carries several processes, and the
+    # fallback below needs the claude's own argv, never whichever one ps
+    # lists first.
     _REAP_PS_DUMP=$(ps -A -o tty=,comm=,args= 2>/dev/null | awk '$2=="claude"{tty=$1; $1=$2=""; sub(/^  /,""); print tty "\t" $0}')
 
     reap_worktree_rows_load || return 1
@@ -364,8 +319,7 @@ reap_pass() {
             idle_secs=0
         fi
 
-        # pipeline_state's phase carries " r<round> <seat>" too (it is also
-        # the PIPELINE column's text); reap_decide only ever tests the word.
+        # phase carries " r<round> <seat>"; reap_decide tests only the first word.
         verdict=$(reap_decide "$task" "$tied" "$attached" "$busy" "$pane_bad" \
             "$dirty" "$pr_state" "$unpushed" "$merged_local" "$pr_head" "$wt_head" \
             "${phase%% *}" "$reap_pane_count_out" "$has_transcript" "$idle_secs" "$REAP_PARK_SECS" "$parked")
@@ -392,7 +346,6 @@ reap_pass() {
     done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null)
 }
 
-# reap_apply_kill <session> <worktree> <pr> <reason> — tmux kill-session, logged.
 reap_apply_kill() {
     local name="$1" wt="$2" pr="$3" reason="$4"
     if tmux kill-session -t "=${name}" 2>/dev/null; then
@@ -404,9 +357,6 @@ reap_apply_kill() {
     fi
 }
 
-# reap_apply_park <session> <pid> <peer-name> <worktree> <pr> <reason> —
-# verifies the pid is still a claude on the parked pane's own tty, SIGTERMs
-# it, then marks the session parked with the exact resume command.
 reap_apply_park() {
     local name="$1" pid="$2" peer="$3" wt="$4" pr="$5" reason="$6"
     local pane="$reap_last_pane_out" pane_tty ps_tty ps_comm args model effort epoch
@@ -438,8 +388,6 @@ reap_apply_park() {
     printf 'PARK %s: %s\n' "$name" "$reason"
 }
 
-# ---- args ----
-
 case "${1:-}" in
     -h|--help) usage; exit 0 ;;
     resume)
@@ -448,9 +396,9 @@ case "${1:-}" in
         exit $?
         ;;
     --apply)
-        # Re-exec under a held lock, like hq-snapshot tick: a second run
-        # finds it held and exits at once. -k keeps the lock file, so
-        # nothing is ever removed to release it.
+        # Re-exec under a held lock: a second run finds it held and exits
+        # at once. -k keeps the lock file, so nothing is ever removed to
+        # release it.
         if [[ -z "${HQ_REAP_LOCKED:-}" ]]; then
             HQ_REAP_LOCKED=1 exec lockf -k -s -t 0 "${TMPDIR:-/tmp}/hq-reap.lock" "$0" --apply
         fi

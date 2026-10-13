@@ -1,20 +1,11 @@
 #!/usr/bin/env bash
 # prs — your pull requests, one table per repo: OPEN rows tagged with the ONE
 # thing each PR is waiting on, then the PRs merged since --since (default:
-# today). Read-only. The deterministic half of a status check — bin/worktrees
-# is the other half (checkouts), and anything that needs judgment (what to do
-# next) is left to whoever reads the two.
+# today). Read-only.
 #
-# Two GitHub search calls for the whole run (open, merged, in parallel),
-# whatever the repo count: GraphQL `search` returns every PR by an author
-# across repos with the tag fields attached, and `archived:false` drops
-# archived repos (GitHub keeps listing their PRs, but nothing can be done to
-# them). Results are filtered locally to the repos in scope, so a repo is never
-# queried on its own. A failing call is retried once (GitHub's GraphQL returns
-# transient "Something went wrong" errors — seen 2026-09-08) and then fails the
-# run with gh's own error.
-#
-# Tag precedence is pr_tag()'s order; the tag list is in --help.
+# A failing GitHub search is retried once (GraphQL returns transient
+# "Something went wrong" errors — seen 2026-09-08) and then fails the run
+# with gh's own error.
 set -uo pipefail
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
@@ -57,8 +48,6 @@ PRS_PROFILE=1 adds a stderr line per stage with its elapsed time.
 USAGE
 }
 
-# fmt_age <seconds> — "just now" / "5m" / "3h" / "2d" / "6w". Pure; tested in
-# tests/test-prs.sh.
 fmt_age() {
     local s="$1"
     (( s < 0 )) && s=0
@@ -94,9 +83,7 @@ shorten() {
     printf '%s' "$p"
 }
 
-# github_slug <repo-dir> — owner/name from the origin remote, lowercased (the
-# API's casing can differ from the remote's); nothing when origin is not on
-# github.com.
+# Lowercased: the API's casing can differ from the remote's.
 github_slug() {
     local r
     r=$(git -C "$1" remote get-url origin 2>/dev/null) || return 0
@@ -106,10 +93,6 @@ github_slug() {
     printf '%s' "$r" | tr '[:upper:]' '[:lower:]'
 }
 
-# Colors and links only when stdout is a terminal (NO_COLOR drops the colors,
-# links stay). Same palette as bin/worktrees: green = go merge it, red = broken,
-# yellow = on you, cyan = in review, blue = live. Padding is applied to the
-# visible text first and the escapes wrapped after, so columns stay aligned.
 C_RESET=""
 LINKS=false
 if [[ -t 1 ]]; then
@@ -126,17 +109,16 @@ tag_color() {
         open)                      printf '\033[34m' ;;
     esac
 }
-# paint <tag> <width>
+# Padding is applied to the visible text first and the escapes wrapped
+# after, so columns stay aligned.
 paint() {
     local padded
     padded=$(printf "%-${2}s" "$1")
     printf '%s%s%s' "$(tag_color "$1")" "$padded" "$C_RESET"
 }
-# link_open <url> / link_close — the OSC 8 hyperlink around a whole row, on
-# a terminal only. Colors (SGR) nest inside a hyperlink without ending it.
+# SGR colors nest inside an OSC 8 hyperlink without ending it.
 link_open() { [[ "$LINKS" == true ]] && printf '\033]8;;%s\033\\' "$1"; return 0; }
 link_close() { [[ "$LINKS" == true ]] && printf '\033]8;;\033\\'; return 0; }
-# pr_num <number> <width> — "#N" padded, blue on a terminal.
 pr_num() {
     local text="#$1" n pad=""
     n=$(( $2 - ${#text} ))
@@ -148,7 +130,6 @@ pr_num() {
     fi
 }
 
-# Sourced by the test: hand back the pure functions and stop.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 0 2>/dev/null || true
 fi
@@ -171,7 +152,6 @@ while (( $# )); do
     shift
 done
 
-# --since: "7d" -> a date 7 days back; a bare date passes through; default today.
 if [[ -z "$SINCE" ]]; then
     SINCE=$(date +%Y-%m-%d)
 elif [[ "$SINCE" =~ ^([0-9]+)d$ ]]; then
@@ -181,9 +161,9 @@ fi
 
 prof_init prs "${PRS_PROFILE:-}"
 
-# The snapshot holds the searches unfiltered by repo, plus the author and
-# window they were run for: a run asking for a different pair cannot use
-# them. --snapshot is the collector's own entry and always searches.
+# The snapshot holds the searches unfiltered by repo, with the author and
+# window they were run for: a different pair cannot use them. --snapshot
+# always searches live.
 FROM_SNAPSHOT=false
 snap_open=""; snap_merged=""
 if [[ "$EMIT" == false ]]; then
@@ -217,29 +197,26 @@ if [[ "$FROM_SNAPSHOT" == false ]] && ! command -v gh >/dev/null 2>&1; then
     echo "prs: gh not installed" >&2; exit 2
 fi
 
-# gh_try <gh args...> — one retry; stderr lands in $GH_ERRF, one file per
-# background search so the two cannot clobber each other.
 TMPD=$(mktemp -d) || exit 2
 trap 'rm -rf "$TMPD"' EXIT
+# $GH_ERRF is one file per background search, so the two cannot clobber
+# each other.
 gh_try() {
     gh "$@" 2>"$GH_ERRF" && return 0
     sleep 3
     gh "$@" 2>"$GH_ERRF"
 }
-# gh_failed <errfile> — its first line, for the report.
 gh_failed() {
     local line
     line=$(head -n1 "$1" 2>/dev/null)
     printf '%s' "${line:-gh failed}"
 }
 
-# search_prs <qualifiers> <row-jq> — every page of one GitHub search, rows as
-# TSV with the lowercased repo slug first. The jq emits a trailing
-# "NEXT\t<cursor>" line while pages remain.
 SEARCH_GQL='query($q:String!,$after:String){ search(query:$q, type:ISSUE, first:100, after:$after){
   pageInfo{hasNextPage endCursor}
   nodes{ ... on PullRequest{ number title url isDraft mergeable reviewDecision updatedAt mergedAt
     repository{nameWithOwner} commits(last:1){nodes{commit{statusCheckRollup{state}}}} } } } }'
+# Rows are TSV with the lowercased repo slug first.
 search_prs() {
     local q="$1" jq="$2" after="" out line
     local -a cursor=()
@@ -262,8 +239,6 @@ OPEN_JQ='[ (.repository.nameWithOwner | ascii_downcase), .number, .isDraft, (.me
   (.reviewDecision // "-"), ((now - (.updatedAt | fromdate)) | floor), .title, .url ] | @tsv'
 MERGED_JQ='[ (.repository.nameWithOwner | ascii_downcase), .number, (.mergedAt | fromdate | strflocaltime("%H:%M")), .title, .url ] | @tsv'
 
-# The two searches run in parallel, each in its own subshell with its own
-# stderr file; the run fails as a whole if either does.
 open_pid=""; merged_pid=""
 if [[ "$FROM_SNAPSHOT" == false ]]; then
     if [[ "$WANT_OPEN" == true ]]; then
@@ -278,9 +253,8 @@ fi
 prof "searches launched"
 # Scope: "<slug>\t<dir>" per local repo, in bin/project-dirs-lib order. With
 # --any-repo the list still supplies dirs for headers, but no longer filters.
-# Computed AFTER the searches are launched: enumerating ~25 repos and reading
-# each remote costs ~1s, which overlaps the network wait instead of adding to it.
-# --snapshot stores the rows unfiltered, so it never computes one.
+# Computed AFTER the searches are launched: enumerating ~25 repos and
+# reading each remote costs ~1s, overlapping the network wait.
 scope=$'\n'
 add_scope() {
     local slug
@@ -314,8 +288,6 @@ prof "gh searches"
 [[ -n "$failed" ]] && { echo "prs: gh failed (after one retry):$failed" >&2; exit 1; }
 open_rows=""; merged_rows=""
 if [[ "$FROM_SNAPSHOT" == true ]]; then
-    # The snapshot always holds both halves; --open-only / --merged-only pick
-    # here, where the live path picks by running only one search.
     [[ "$WANT_OPEN" == true ]] && open_rows="${snap_open%$'\n'}"
     [[ "$WANT_MERGED" == true ]] && merged_rows="${snap_merged%$'\n'}"
 else
@@ -323,9 +295,6 @@ else
     [[ -n "$merged_pid" ]] && merged_rows=$(cat "$TMPD/merged")
 fi
 
-# --snapshot stores the searches unfiltered by repo, tagged with the author
-# and window they answer for. The scope filter below belongs to whoever
-# renders them.
 if [[ "$EMIT" == true ]]; then
     printf 'meta\tauthor\t%s\n' "$AUTHOR"
     printf 'meta\tsince\t%s\n' "$SINCE"
@@ -341,8 +310,6 @@ if [[ "$EMIT" == true ]]; then
     exit 0
 fi
 
-# Repo order: scope first (project-dirs order), then — with --any-repo only —
-# every other slug the rows mention, first seen.
 slugs=""
 while IFS=$'\t' read -r slug _dir; do
     [[ -n "$slug" ]] && slugs+="${slug}"$'\n'
@@ -354,14 +321,12 @@ if [[ "$ANY_REPO" == true ]]; then
     done <<< "${open_rows}"$'\n'"${merged_rows}"
 fi
 
-# rows_for <rows> <slug> — the rows of one repo, slug column dropped.
 rows_for() {
     local line
     while IFS= read -r line; do
         [[ "$line" == "${2}"$'\t'* ]] && printf '%s\n' "${line#*$'\t'}"
     done <<< "$1"
 }
-# Piped output keeps the URL as a trailing column: no terminal, no link.
 url_col() { [[ "$LINKS" == true ]] || printf '  %s' "$1"; }
 
 printed_any=false
