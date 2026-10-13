@@ -74,7 +74,6 @@ is written.
 EOF
 }
 
-# Lowercase, non-alnum runs collapse to '-', trimmed at the ends.
 decision_slug() {
     local s
     s=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')
@@ -83,8 +82,6 @@ decision_slug() {
 
 decision_dir() { printf '%s/%s' "$DECISIONS_DIR" "$1"; }
 
-# 6 lowercase hex, regenerated until no file under DECISIONS_DIR ends in
-# -<id>.json.
 decision_new_id() {
     local id
     while :; do
@@ -155,7 +152,8 @@ decision_find_file() {
     printf '%s' "$f"
 }
 
-# <file>.tmp.$$ then mv over the target.
+# Every record write goes through here; a reader never sees a half-written
+# file.
 decision_write() {
     local f="$1" json="$2" tmp
     tmp="$f.tmp.$$"
