@@ -1,21 +1,6 @@
 #!/usr/bin/env bash
-# hq-make-decision — records an owner decision (title, context, options,
-# recommendation) as one JSON file, so a hub never puts a decision only in
-# chat. `bin/hq-decisions` is read-only over the same files, apart from its
-# own interactive-viewer seen stamp.
-# Subcommands, storage layout, the dedupe key and record fields are usage()
-# below (`--help`), the reference a user reads — not restated here.
-#
-# Invariants: every write is <file>.tmp.$$ then `mv` over the target;
-# nothing here is ever removed (dots/claude/rules/deletion-safety.md) —
-# answering or updating a record rewrites its own file in place. All record
-# reads go through decision_records, ONE jq call over every file under the
-# dir — list, dedupe and bin/hq-decisions all consume it, so the record
-# shape is parsed in exactly one place.
-#
-# Sourceable: everything below the BASH_SOURCE guard is the command line,
-# skipped when another script sources this one for decision_records and the
-# dir. See tests/test-hq-make-decision.sh.
+# Nothing here is ever removed (dots/claude/rules/deletion-safety.md);
+# answering or updating a record rewrites its own file in place.
 
 DECISIONS_DIR="${HQ_DECISIONS_DIR:-$HOME/.local/state/hq/decisions}"
 
@@ -89,20 +74,14 @@ is written.
 EOF
 }
 
-# ── writer ──────────────────────────────────────────────
-
-# decision_slug <text> — lowercase, non-alnum runs to '-', trimmed.
 decision_slug() {
     local s
     s=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')
     printf '%s' "$s"
 }
 
-# decision_dir <repo> — the repo's subdirectory under DECISIONS_DIR.
 decision_dir() { printf '%s/%s' "$DECISIONS_DIR" "$1"; }
 
-# decision_new_id — 6 lowercase hex, regenerated until no file under
-# DECISIONS_DIR ends in -<id>.json.
 decision_new_id() {
     local id
     while :; do
@@ -116,8 +95,8 @@ decision_new_id() {
     done
 }
 
-# decision_session — --session's caller passes it resolved; this is the
-# fallback when none was given.
+# Only the fallback for when --session wasn't given; callers resolve a
+# given --session themselves.
 decision_session() {
     if [[ -n "${TMUX:-}" ]]; then
         tmux display -p '#S' 2>/dev/null || printf '-'
@@ -126,10 +105,9 @@ decision_session() {
     fi
 }
 
-# decision_records [--open] [--repo R] — every record under DECISIONS_DIR as
-# one compact JSON line each, via ONE jq call over every file. The only
-# reader of the on-disk shape; list, dedupe and bin/hq-decisions all call
-# this instead of parsing a file themselves.
+# One jq call over every file; the only reader of the on-disk record shape
+# — list, dedupe and bin/hq-decisions all call this instead of parsing a
+# file themselves.
 decision_records() {
     local open=false repo="" files=()
     while (( $# )); do
@@ -151,14 +129,12 @@ decision_records() {
     ' "${files[@]}" 2>/dev/null
 }
 
-# decision_find_open_key <key> — the id of the OPEN record with this key, if
-# any.
 decision_find_open_key() {
     decision_records --open | jq -r --arg key "$1" 'select(.key == $key) | .id' | head -n1
 }
 
-# decision_siblings <repo> <ref> <key> — ids of other OPEN records sharing
-# repo and pr/branch ref but a different key (likely a reworded title).
+# Ids of other OPEN records sharing repo and pr/branch ref but a different
+# key — likely a reworded title.
 decision_siblings() {
     local repo="$1" ref="$2" key="$3"
     decision_records --open --repo "$repo" \
@@ -169,7 +145,6 @@ decision_siblings() {
         '
 }
 
-# decision_find_file <id> — the one file whose name ends -<id>.json.
 decision_find_file() {
     local f
     f=$(compgen -G "$DECISIONS_DIR"/*/*"-$1.json" 2>/dev/null | head -n1)
@@ -177,7 +152,8 @@ decision_find_file() {
     printf '%s' "$f"
 }
 
-# decision_write <file> <json> — <file>.tmp.$$ then mv over the target.
+# Every record write goes through here; a reader never sees a half-written
+# file.
 decision_write() {
     local f="$1" json="$2" tmp
     tmp="$f.tmp.$$"
@@ -188,11 +164,10 @@ decision_write() {
 
 now_iso() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
-# decision_parse_option <opt> <opts_json> — validates one
-# --option 'id|label|description' (non-empty id and label, id unique within
-# opts_json) and echoes the appended options array; exits 2 with a message
-# on stderr and nothing echoed on a bad option. Shared by cmd_add/cmd_update
-# so the --option grammar is defined in exactly one place.
+# Validates one --option 'id|label|description' (non-empty id and label,
+# id unique within opts_json) and echoes the appended options array; exits
+# 2 with nothing echoed on a bad option. Shared by cmd_add/cmd_update so the
+# --option grammar is defined in exactly one place.
 decision_parse_option() {
     local opt="$1" opts_json="$2" o_id o_label o_desc rest
     o_id="${opt%%|*}"
@@ -214,8 +189,6 @@ decision_parse_option() {
     jq -nc --argjson opts "$opts_json" --arg id "$o_id" --arg lbl "$o_label" --arg desc "$o_desc" \
         '$opts + [{id: $id, label: $lbl, description: $desc}]'
 }
-
-# ── add ─────────────────────────────────────────────────
 
 cmd_add() {
     local repo="" pr="" branch="" title="" context="" context_file="" key=""
@@ -331,8 +304,6 @@ cmd_add() {
     printf '%s\n' "$id"
 }
 
-# ── update ──────────────────────────────────────────────
-
 cmd_update() {
     local id="$1"; shift
     [[ -n "$id" ]] || { echo "hq-make-decision: update needs an id" >&2; return 2; }
@@ -405,8 +376,6 @@ cmd_update() {
     printf '%s\n' "$id"
 }
 
-# ── answer ──────────────────────────────────────────────
-
 cmd_answer() {
     local auto=false id option
     if [[ "${1:-}" == "--auto" ]]; then auto=true; shift; fi
@@ -449,8 +418,6 @@ cmd_answer() {
     [[ "$restamped" == true ]] && echo "hq-make-decision: '$id' was already answered — re-stamped with this answer" >&2
     printf '%s\n' "$id"
 }
-
-# ── list ────────────────────────────────────────────────
 
 cmd_list() {
     local open=false repo="" json=false
@@ -497,8 +464,7 @@ cmd_list() {
                 printf "%-*s  %-*s  %-*s  %-*s  %-*s  %*s  %s\n", w[1], f[1], w[2], f[2], w[3], f[3], w[4], f[4], w[5], f[5], w[6], f[6], f[7] } }'
 }
 
-# decision_epoch <ISO> — UTC seconds via the platform date; empty on a
-# malformed timestamp.
+# UTC seconds via the platform date; empty on a malformed timestamp.
 decision_epoch() {
     date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" +%s 2>/dev/null \
         || date -u -d "$1" +%s 2>/dev/null
@@ -514,8 +480,8 @@ decision_fmt_secs() {
     else printf '%dd' $(( s / 86400 )); fi
 }
 
-# Sourced by bin/hq-decisions and tests/test-hq-make-decision.sh: hand back the
-# decisions and stop.
+# Sourcing only hands back decision_records and friends; this guard runs
+# nothing below it.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 0 2>/dev/null || true
 fi
