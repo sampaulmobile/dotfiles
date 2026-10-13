@@ -232,7 +232,7 @@ else
     idle_list=$'\n'
     badge_list=$'\n'
     if [[ "$SHOW_STATUS_INDICATORS" == true ]]; then
-        local sessions_body="" panes_body="" flag_keys=""
+        sessions_body="" panes_body="" flag_keys=""
         if [[ "$(snapshot_verdict "$(snapshot_age sessions)" "$(snapshot_cadence sessions)")" == fresh ]]; then
             sessions_body=$(snapshot_read sessions)
         fi
