@@ -17,7 +17,7 @@
 #   COST     $1.23 = claude's own cost-state snapshot (subagents included;
 #            live sessions rarely have one); ~$1.23 = price-sheet estimate
 #            over the main transcript only; 5h:42% = codex rate-limit usage;
-#            - = neither.
+#            - = none.
 #   STATUS   idle/done/permission rows carry an age since the transcript's
 #            last write (⏳ perm 9m); a row whose cwd is gone shows ✗ gone;
 #            ◌ parked <age> is a session bin/hq-reap ended for idling too
@@ -825,7 +825,7 @@ load_data() {
     prof "placeholder frame"
 
     build_cwd_session_map
-    # A pure filesystem scan, cheap enough to refresh on every load.
+    # A pure filesystem scan, cheap enough to recollect here whenever the snapshot is stale.
     [[ "$(snapshot_verdict "$(snapshot_age pipelines)" "$(snapshot_cadence pipelines)")" == fresh ]] \
         || ~/dotfiles/bin/hq-snapshot pipelines >/dev/null 2>&1
     pipeline_map_load
