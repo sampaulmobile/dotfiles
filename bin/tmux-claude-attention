@@ -1,19 +1,9 @@
 #!/usr/bin/env bash
 
-# Attention layer: flag files for "finished but unseen" agent panes. Fed by
-# the Stop hook, consumed by tmux-claude-statusbar (✅ count) and the C-y
-# jump binding (dots/tmux.conf).
-#
-# Flag dir: ~/.cache/claude-attention/ — one file per agent PANE,
-# `<session>@<pane-id-sans-%>.done` (e.g. `dotfiles@228.done`), touched to
-# flag and removed to clear. Everything here is per PANE, never per session:
-# "seen" means THAT pane's window became the current window of a
-# client-attached session. A session-level flag both suppresses a claude
-# finishing in a background window of an attached session and clears a
-# window nobody looked at.
-#
-# To wire up the Stop hook, add this to ~/.claude/settings.json
-# (machine-local, NOT this repo — see other/claude/ in CLAUDE.md):
+# Everything here is per agent PANE, never per session: "seen" means THAT
+# pane's window became current in a client-attached session. A
+# session-level flag would suppress a pane finishing in a background window
+# and fail to clear a window nobody looked at.
 #
 #   "hooks": {
 #     "Stop": [
@@ -30,7 +20,7 @@
 #     ]
 #   }
 #
-# Subcommands (the cmd_* functions below carry the reasoning):
+# Subcommands:
 #   flag-done              Stop hook — flag the calling pane.
 #   clear <session>        tmux client-attached / client-session-changed /
 #                          session-window-changed hooks.
@@ -49,26 +39,17 @@ usage() {
     echo "usage: $(basename "$0") {flag-done|clear <session>|list|jump [client-tty]|jump-to <client-tty> <session> <pane>|codex-session-start|codex-session-end}" >&2
 }
 
-# Pane -> codex rollout map. Claude Code records its own tmux pane in
-# ~/.claude/sessions/*.json; codex records nothing of the sort, so its
-# SessionStart hook writes the mapping here instead:
-#   <FLAG_DIR>/codex/<pane-id-sans-%>.tsv = "<session_id>\t<rollout>\t<cwd>"
-# One file per pane, replaced (not appended) on every SessionStart — codex
-# fires that on a thread's first prompt and again after /new, so the entry
-# follows the pane through new threads. $CODEX_MAP_DIR comes from
-# bin/tmux-claude-lib-codex (sourced above): writer and reader must not be
-# able to drift apart.
+# Codex records no tmux pane of its own, so SessionStart maps pane -> rollout
+# here instead. The map is replaced (not appended) each time, so a pane's
+# /new threads stay mapped.
 
-# flag_path <session> <pane-id>
-#   Pane ids are server-unique (%N), but the session name stays in the
-#   filename so the sessionizer can color rows green from a plain glob and
-#   clear/list can filter per session without a tmux round trip.
+# Pane ids are server-unique (%N), but the session name stays in the
+# filename so sessionizer glob-coloring and clear/list's per-session filter
+# need no tmux round trip.
 flag_path() {
     printf '%s/%s@%s.done' "$FLAG_DIR" "$1" "${2#%}"
 }
 
-# file_mtime <path>
-#   Prints a file's mtime as epoch seconds (GNU/BSD stat portable).
 file_mtime() {
     stat -f '%m' "$1" 2>/dev/null || stat -c '%Y' "$1" 2>/dev/null
 }
@@ -117,12 +98,11 @@ cmd_clear() {
     # window nobody watched must keep its flags.
     tmux list-clients -F '#{client_session}' 2>/dev/null | grep -qxF "$session" || exit 0
 
-    # Panes of the session's current window = what's on screen now. The
-    # trailing colon matters: list-panes takes a target-WINDOW, and a bare
-    # "=name" is first tried as a window called "name" in the caller's own
-    # session (nvim titles its window after the repo dir, so a hub session
-    # "dotfiles" has a window "dotfiles" — and the wrong window's flags got
-    # cleared). "=name:" is unambiguously that session's current window.
+    # The trailing colon matters: list-panes takes a target-WINDOW, and a
+    # bare "=name" is first tried as a window called "name" in the caller's
+    # own session (nvim titles its window after the repo dir, so a hub
+    # session "dotfiles" has a window "dotfiles" too). "=name:" is
+    # unambiguously that session's current window.
     local pane cur
     while IFS=$'\t' read -r pane cur; do
         [[ -z "$pane" ]] && continue
@@ -142,7 +122,7 @@ cmd_list() {
     live+=$'\n'
 
     # Prune map entries whose pane is gone: codex's SessionEnd removes its
-    # own, but a killed pane never gets one. Reuses the live-pane set above.
+    # own, but a killed pane never gets one.
     local m mpane
     for m in "$CODEX_MAP_DIR"/*.tsv; do
         [[ -e "$m" ]] || continue
@@ -161,33 +141,25 @@ cmd_list() {
         if [[ "$key" == *@* && "$live" == *$'\n'"${session}@%${pane}"$'\n'* ]]; then
             printf '%s\t%s\t%s\n' "$(file_mtime "$f")" "$session" "%${pane}"
         else
-            # dead pane, or a legacy session-level flag (pre-pane format)
             rm -f "$f"
         fi
     done | sort -rn | cut -f2,3
 }
 
-# do_switch <client-tty> <target-session> [pane]
-#   Switches <client-tty> (unscoped when empty) to <target-session>, and
-#   when a pane is given, lands on its window/pane and consumes its
-#   attention flag if it has one. Scoping rationale: dots/tmux.conf's C-y
-#   binding always passes #{client_tty}; run-shell spawns a plain shell
-#   whose tmux invocations are fresh clients with no attached-client
-#   identity, so an unscoped `switch-client -t` falls back to tmux's
-#   most-recently-active attached client and can yank a DIFFERENT real
-#   client to the target session — seen live. Unscoped is only for ad hoc
-#   CLI use with no argument.
+# Client scoping matters: dots/tmux.conf's C-y binding always passes
+# #{client_tty}, but run-shell spawns a fresh client with no attached-client
+# identity, so an unscoped `switch-client -t` falls back to tmux's
+# most-recently-active attached client and can yank a DIFFERENT real client
+# to the target session.
 do_switch() {
     local client="$1" target="$2" pane="$3"
     local -a cflag=()
     [[ -n "$client" ]] && cflag=(-c "$client")
     tmux switch-client "${cflag[@]}" -t "=$target"
     if [[ -n "$pane" ]]; then
-        # Land on the flagged pane's window (a pane id resolves to its
-        # window) and consume the flag here: the tmux hooks only clear
-        # what a client is looking at, and a server whose loaded config
-        # predates the session-window-changed hook would clear nothing
-        # after this select-window.
+        # Consuming the flag here (not just via the hooks) covers a server
+        # whose loaded config predates the session-window-changed hook,
+        # which would otherwise clear nothing after this select-window.
         tmux select-window -t "$pane" 2>/dev/null \
             && tmux select-pane -t "$pane" 2>/dev/null
         local f
@@ -206,12 +178,10 @@ cmd_jump() {
     local -a cflag=()
     [[ -n "$client" ]] && cflag=(-c "$client")
 
-    # Priority 1: a pane waiting on a permission prompt, most recently
-    # active session first. Via the shared scan_claude_sessions, which is
-    # tty-gated — a per-session capture with no tty gate can make a vim
-    # buffer showing prompt literals into a jump target. Its 3rd field is
-    # the pane exhibiting the status, so the jump lands on the prompt itself
-    # rather than the session's current window.
+    # scan_claude_sessions is tty-gated: without the gate, a vim buffer
+    # showing prompt literals could become a false jump target. Its 3rd
+    # field is the pane exhibiting the status, so the jump lands on the
+    # prompt itself, not the session's current window.
     local perm_s=$'\n'
     local st pane
     while IFS=$'\t' read -r session st pane; do
@@ -229,7 +199,6 @@ cmd_jump() {
         done < <(tmux list-sessions -F '#{session_activity} #{session_name}' 2>/dev/null | sort -rn | awk '{print $2}')
     fi
 
-    # Priority 2: the newest finished-but-unseen pane.
     local pane=""
     IFS=$'\t' read -r session pane < <(cmd_list | head -1)
     if [[ -n "$session" ]]; then
@@ -240,9 +209,6 @@ cmd_jump() {
     tmux display-message "${cflag[@]}" "nothing needs attention"
 }
 
-# cmd_jump_to <client-tty> <session> <pane>
-#   bin/hq-feed's `g`: do_switch for one named pane, no permission-prompt or
-#   unseen-flag search — the caller already knows exactly where to land.
 cmd_jump_to() {
     local client="$1" session="$2" pane="$3"
     [[ -n "$session" && -n "$pane" ]] || { usage; exit 1; }
@@ -268,8 +234,6 @@ cmd_codex_session_start() {
     # A payload without a transcript path is useless to the dashboard; leave
     # any existing entry alone rather than replacing it with nothing.
     [[ -z "$tpath" ]] && exit 0
-    # Never write a leading empty field: the reader splits with IFS=$'\t',
-    # a leading tab is swallowed as whitespace, and every value shifts left.
     sid=${sid:--}
 
     mkdir -p "$CODEX_MAP_DIR"
