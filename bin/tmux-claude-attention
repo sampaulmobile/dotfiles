@@ -45,6 +45,10 @@ source ~/dotfiles/bin/tmux-claude-lib
 
 FLAG_DIR="$HOME/.cache/claude-attention"
 
+usage() {
+    echo "usage: $(basename "$0") {flag-done|clear <session>|list|jump [client-tty]|jump-to <client-tty> <session> <pane>|codex-session-start|codex-session-end}" >&2
+}
+
 # Pane -> codex rollout map. Claude Code records its own tmux pane in
 # ~/.claude/sessions/*.json; codex records nothing of the sort, so its
 # SessionStart hook writes the mapping here instead:
@@ -172,9 +176,7 @@ cmd_list() {
 #   identity, so an unscoped `switch-client -t` falls back to tmux's
 #   most-recently-active attached client and can yank a DIFFERENT real
 #   client to the target session — seen live. Unscoped is only for ad hoc
-#   CLI use with no argument. A top-level function (not cmd_jump's own
-#   closure) so bin/hq-feed's `g` has a single-pane entry point without a
-#   copy of this logic.
+#   CLI use with no argument.
 do_switch() {
     local client="$1" target="$2" pane="$3"
     local -a cflag=()
@@ -243,7 +245,7 @@ cmd_jump() {
 #   unseen-flag search — the caller already knows exactly where to land.
 cmd_jump_to() {
     local client="$1" session="$2" pane="$3"
-    [[ -n "$session" && -n "$pane" ]] || exit 0
+    [[ -n "$session" && -n "$pane" ]] || { usage; exit 1; }
     do_switch "$client" "$session" "$pane"
 }
 
@@ -295,7 +297,7 @@ case "${1:-}" in
     codex-session-start) cmd_codex_session_start ;;
     codex-session-end)   cmd_codex_session_end ;;
     *)
-        echo "usage: $(basename "$0") {flag-done|clear <session>|list|jump [client-tty]|jump-to <client-tty> <session> <pane>|codex-session-start|codex-session-end}" >&2
+        usage
         exit 1
         ;;
 esac
