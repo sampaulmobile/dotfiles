@@ -7,6 +7,12 @@
 # state dir; DONE's "not yet visited" is the attention flag file, cleared
 # by tmux-claude-attention when `g` lands on it.
 #
+# Two ways in: the bare `hq-feed` command (no argument) creates/switches to
+# the dedicated `hq-feed` session; Ctrl+E (dots/tmux.conf) instead runs
+# `tmux neww ... --view` directly, a throwaway window in whatever session
+# it was pressed from. `feed_is_own_session` tells the two apart so `g`
+# closes the popup window after the jump instead of leaving it behind.
+#
 # UTF-8/width discipline, fd safety and the view loop's timeout-vs-key
 # distinction are the same bash 3.2 gotchas as bin/hq-decisions (see its
 # decisions_ensure_utf8_locale/pad, its fd-safety header and view()).
@@ -40,6 +46,10 @@ usage: hq-feed                      open (or create) the hq-feed tmux session
        hq-feed --dump               print the LIST once and exit
        hq-feed --dump --detail PANE print one block's DETAIL once
 
+Ctrl+E opens the viewer as a throwaway window in the current session (`tmux
+neww ... --view`) instead of the dedicated hq-feed session; `g` there closes
+the window after the jump, since there is no ambient session left to show it.
+
 One block per live agent pane (bin/hq-snapshot's `turns` source), bucketed by
 what it needs from the owner, newest transcript first within a bucket:
 
@@ -54,7 +64,7 @@ what it needs from the owner, newest transcript first within a bucket:
               turn ended but whose subagents are still running shows WORKING
               even though no flag can surface for it yet (see
               bin/tmux-claude-attention's deferred-flag rule)
-  IDLE        everything else; hidden by default as a count line, `a` toggles
+  IDLE        everything else; shown by default, `a` collapses it to a count line
 
 Glyphs: permission, done, working (the statusbar's own 🔴/✅/●); IDLE rows
 carry none.
@@ -99,7 +109,12 @@ Keys:
         "↑ N blocks · ↓ N blocks" line counts what is off screen
                              ⏎   DETAIL: full prompt + full stripped reply,
   a     show/hide IDLE             scrollable; q/esc/backspace back
-  g     jump the OTHER tmux client to this block's exact pane
+  g     jump the OTHER tmux client to this block's exact pane; in a Ctrl+E
+        popup window (not the dedicated hq-feed session) this also closes
+        the window, since there is no ambient session left to show it
+  q/Esc LIST only: quit, closing a Ctrl+E popup window the same way `g`
+        does; repaints instead in the dedicated hq-feed session, which has
+        nowhere else to go. DETAIL's q/esc goes back to LIST instead (above).
   r     recollect (runs `bin/hq-snapshot turns` first, then reloads)
   ^C    quit
 
@@ -759,7 +774,7 @@ build_detail_frame() {
 
 frame_rows=(); frame_row_line=(); frame_section_line=(); frame_head=""; frame_tail=""; frame_foot=""
 frame_cols=0; frame_at=0; selected=0; selected_idx=-1; frame_top=0
-cursor_map=(); show_idle=false; view_mode=list; detail_idx=-1
+cursor_map=(); show_idle=true; view_mode=list; detail_idx=-1
 
 build_frame() {
     term_size
@@ -776,7 +791,7 @@ build_frame() {
 
 paint() {
     term_size
-    local head_lines tail_lines foot_lines body total sel last i out
+    local head_lines tail_lines foot_lines body total sel hl_end last i out
     head_lines=$(count_lines "$frame_head")
     tail_lines=$(count_lines "$frame_tail")
     foot_lines=$(count_lines "$frame_foot")
@@ -784,17 +799,33 @@ paint() {
     body=$(( term_h - head_lines - tail_lines - foot_lines - 1 ))
     (( body < 1 )) && body=1
     sel=-1
+    hl_end=-1
     if (( frame_cursor_line >= 0 )); then
         sel="$frame_cursor_line"
-        # The unit of scrolling is the block: its headline, its body, and the
-        # section label above it when it is the first of its bucket. A
-        # headline alone at the screen's edge hides exactly what the cursor
-        # is pointing at.
+        # The unit of scrolling (and of the cursor highlight) is the block:
+        # its headline, its body, and the section label above it when it is
+        # the first of its bucket. A headline alone at the screen's edge
+        # hides exactly what the cursor is pointing at.
         local b_start="$sel" b_end=$(( total - 1 )) r
         for r in ${frame_row_line[@]+"${frame_row_line[@]}"}; do
             if (( r > sel )); then b_end=$(( r - 1 )); break; fi
         done
+        hl_end="$b_end"
         while (( b_end > sel )) && [[ -z "${frame_rows[$b_end]}" ]]; do b_end=$(( b_end - 1 )); done
+        # The highlight stops at this block's own last row, so it also skips
+        # the next bucket's section label (b_end, scroll-only, doesn't need
+        # to: a label staying in view while scrolling is harmless).
+        while (( hl_end > sel )); do
+            local hl_is_section=false hs
+            for hs in ${frame_section_line[@]+"${frame_section_line[@]}"}; do
+                (( hs == hl_end )) && { hl_is_section=true; break; }
+            done
+            if [[ -z "${frame_rows[$hl_end]}" || "$hl_is_section" == true ]]; then
+                hl_end=$(( hl_end - 1 ))
+            else
+                break
+            fi
+        done
         for r in ${frame_section_line[@]+"${frame_section_line[@]}"}; do
             (( r == sel - 1 )) && b_start="$r"
         done
@@ -810,10 +841,18 @@ paint() {
 
     out="$frame_head"
     for (( i = frame_top; i <= last; i++ )); do
-        if (( i == sel )); then
-            local l="${frame_rows[$i]}"
-            [[ "$view_mode" == list ]] && l="›${l:1}"
-            out+="${SEL}${l}${RST}"$'\n'
+        if (( sel >= 0 && i >= sel && i <= hl_end )); then
+            local l="${frame_rows[$i]}" rep
+            (( i == sel )) && [[ "$view_mode" == list ]] && l="›${l:1}"
+            # A row's own color resets (DIM labels, the headline's dim pipe
+            # text, an OSC 8 link's reset) each clear SEL's background
+            # partway through the line; re-open it after every one, and
+            # erase-to-EOL so the background reaches the right edge too.
+            if [[ -n "$RST" ]]; then
+                rep="$RST$SEL"
+                l="${l//"$RST"/$rep}"
+            fi
+            out+="${SEL}${l}"$'\033[K'"${RST}"$'\n'
         else
             out+="${frame_rows[$i]}"$'\n'
         fi
@@ -877,6 +916,21 @@ feed_signature() {
     file_mtime "$FLAG_DIR" 2>/dev/null
 }
 
+# A bare Esc resolves to "ESC"; an escape SEQUENCE (an arrow key's `[A`/
+# `[B`, which hq-feed binds nothing to) resolves to itself, so it falls
+# through every case arm as a no-op instead of registering as Esc.
+feed_resolve_esc() {
+    [[ -z "$1" ]] && printf 'ESC' || printf '%s' "$1"
+}
+
+# True only for the dedicated hq-feed session (bare `hq-feed`, no argument).
+# A popup window (Ctrl+E's `tmux neww ... --view`) runs in whatever session
+# it was opened from, so `g` must close it after the jump instead of leaving
+# a dead feed window behind; the dedicated session stays open.
+feed_is_own_session() {
+    [[ "$1" == hq-feed ]]
+}
+
 jump_to_pane() {
     local idx="$1" tty
     [[ "$idx" -ge 0 ]] || { STATUS_NOTE="no pane"; return 0; }
@@ -904,10 +958,11 @@ recollect() {
 # elapsed time (a non-zero read under 1s is a failure; 3 in a row exits
 # instead of spinning).
 view() {
-    local key rc idx last_sig sig fail_count=0 t0
+    local key rc idx last_sig sig fail_count=0 t0 own_session=false seq
     tput civis 2>/dev/null
     trap 'tput cnorm 2>/dev/null' EXIT
     trap 'exit 130' INT
+    feed_is_own_session "$(tmux display -p '#S' 2>/dev/null)" && own_session=true
     load_data
     build_frame
     paint
@@ -942,6 +997,19 @@ view() {
         fi
         fail_count=0
         STATUS_NOTE=""
+        # A bare Esc (0x1b with nothing following) is q's twin; an arrow
+        # key sends 0x1b immediately followed by its sequence (`[A`/`[B`),
+        # which hq-feed binds nothing to, so it must not register as Esc.
+        # bash 3.2 (/bin/bash, this script's own shebang resolves to it
+        # on a machine with no Homebrew bash) rejects a fractional `-t`,
+        # so disambiguation waits a whole second rather than 0.1s — the
+        # rest of a real escape sequence arrives in the same keystroke,
+        # long before that.
+        if [[ "$key" == $'\x1b' ]]; then
+            seq=""
+            read -rsn2 -t 1 seq || true
+            key=$(feed_resolve_esc "$seq")
+        fi
         idx=-1
         (( ${#cursor_map[@]} > 0 && selected < ${#cursor_map[@]} )) && idx="${cursor_map[$selected]}"
         if [[ "$view_mode" == list ]]; then
@@ -960,19 +1028,31 @@ view() {
                     if [[ "$show_idle" == true ]]; then show_idle=false; else show_idle=true; fi
                     build_frame
                     paint ;;
-                g) (( idx >= 0 )) && jump_to_pane "$idx"; paint ;;
+                g)
+                    (( idx >= 0 )) && jump_to_pane "$idx"
+                    if [[ "$own_session" == true ]]; then paint; else exit 0; fi
+                    ;;
                 r) recollect; build_frame; paint ;;
+                q|ESC)
+                    # The dedicated hq-feed session has nowhere else to go
+                    # on Esc/q — repaint instead of exiting it out from
+                    # under whoever's viewing it ambiently.
+                    if [[ "$own_session" == true ]]; then paint; else exit 0; fi
+                    ;;
             esac
         else
             case "$key" in
-                q|$'\e'|$'\x7f'|$'\b')
+                q|ESC|$'\x7f'|$'\b')
                     view_mode=list
                     frame_top=0
                     build_frame
                     paint ;;
                 j) frame_top=$(( frame_top + 1 )); paint ;;
                 k) frame_top=$(( frame_top - 1 )); paint ;;
-                g) jump_to_pane "$detail_idx"; paint ;;
+                g)
+                    jump_to_pane "$detail_idx"
+                    if [[ "$own_session" == true ]]; then paint; else exit 0; fi
+                    ;;
             esac
         fi
     done
@@ -988,7 +1068,6 @@ case "${1:-}" in
     -h|--help) usage; exit 0 ;;
     --dump)
         shift
-        show_idle=false
         if [[ "${1:-}" == --detail ]]; then
             shift
             pane_arg="${1:-}"

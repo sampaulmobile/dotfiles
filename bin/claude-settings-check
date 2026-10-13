@@ -1,30 +1,50 @@
 #!/usr/bin/env bash
 # claude-settings-check — report what the live Claude Code settings.json is
-# missing relative to its tracked template, other/claude/settings.json.example.
+# missing relative to its tracked template, other/claude/settings.json.example,
+# or (--apply) add those gaps to it.
 #
 # seed_other.sh copies the example ONCE and never overwrites, so a default
 # added to the example later (a new hook, an allowlist entry, a flag) silently
 # never reaches a machine that already has a settings.json. This is the
-# deterministic detector for that gap: both files are flattened to leaf
-# identities and every identity present in the example but absent from the
-# live file is printed. Nothing is written — what to do about a gap is the
-# user's call (typically: ask claude to add the listed entries). Run by
-# seed_other.sh, and so by symlink_files.sh, setup.sh and bin/doctor.
+# deterministic detector for that gap, and --apply is the fix: both files are
+# flattened to leaf identities, and every identity present in the example but
+# absent from the live file is printed (report mode) or added (--apply). Run
+# by seed_other.sh, and so by symlink_files.sh, setup.sh and bin/doctor.
 #
-#   claude-settings-check [live.json] [example.json]   (defaults: other/claude/)
+#   claude-settings-check [live.json] [example.json]            (report)
+#   claude-settings-check --apply [live.json] [example.json]    (report + add)
 #
-# What "present" means, per shape:
+# What "present" means, per shape (this is also what --apply treats as one
+# unit to add):
 #   scalar leaf        its key path exists — value differences are NOT drift
 #                      (model, theme, effortLevel legitimately differ per machine)
 #   permissions.*[]    the exact entry string is in the live list
-#   hooks.<Event>[]    a live entry has the same matcher AND command
+#   hooks.<Event>[]    a live entry has the same matcher AND command — a
+#                      missing hook joins its matcher's existing group, else
+#                      the whole group (from the example) is appended
 #   other arrays       the exact JSON value is in the live array
 #
-# Exit 0 and silent when nothing is missing; 1 with one line per gap; 2 when
-# a file is missing or not valid JSON.
+# --apply is strictly additive: it never removes, changes or reorders an
+# existing entry. It resolves the live path through any symlink (so the
+# tracked other/claude/settings.json keeps being the file ~/.claude/settings.json
+# links to, never replaced by a plain file), writes a timestamped
+# `<target>.bak.<UTC stamp>` sibling before touching anything, and only
+# `mv`s a validated, freshly-re-read-unchanged temp file over the target. A
+# failed apply leaves the target untouched; a failed write leaves its temp
+# file in place (named in the error) for inspection — nothing is ever `rm`ed.
+#
+# Exit codes: 0 nothing missing (report) or everything added/nothing to add
+# (--apply); 1 one line per gap (report) or any apply failure; 2 a file is
+# missing or not valid JSON.
 set -uo pipefail
 
 DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+
+apply=0
+if [[ "${1:-}" == "--apply" ]]; then
+    apply=1
+    shift
+fi
 live="${1:-$DOTFILES/other/claude/settings.json}"
 example="${2:-$DOTFILES/other/claude/settings.json.example}"
 
@@ -34,36 +54,142 @@ for f in "$live" "$example"; do
     jq -e . "$f" >/dev/null 2>&1 || { echo "claude-settings-check: $f is not valid JSON" >&2; exit 2; }
 done
 
-# Emit "<path>\t<label>" for every identity in the example that the live file
-# lacks. `ids` flattens a settings document to [path, label] pairs following
-# the rules in the header; the set difference is plain array subtraction.
-missing=$(jq -r --slurpfile live "$live" '
-  def ids:
-    def flat($p):
-      if type == "object" then
-        to_entries[] as $e | ($e.value | flat($p + [$e.key]))
-      elif type == "array" then
-        if $p[0] == "hooks" then
-          .[] as $h | ($h.hooks // [])[]
-            | [($p | join(".")), "matcher=\($h.matcher // "") command=\(.command // "")"]
-        elif $p[0] == "permissions" then
-          .[] | [($p | join(".")), tostring]
-        else
-          .[] | [($p | join(".")), tojson]
-        end
+short() { case "$1" in "$HOME"/*) printf '~%s' "${1#"$HOME"}" ;; *) printf '%s' "$1" ;; esac; }
+
+# Shared jq definitions for report, apply and apply's own re-check, so "what is
+# a gap" exists once. `entries` flattens a doc to one object per identity,
+# carrying both its `id` ([path, label], the report line and the dedupe key)
+# and what `addentry` needs to add it: a hook's `hook`/`group`, an array
+# item's `item`, or a scalar's `leaf`. `apply($livedoc)` folds every entry the
+# example has that `$livedoc` lacks into `$livedoc`, re-checking `ids` against
+# the accumulator after each addition — so a group appended for its first
+# missing hook is not appended again for its second.
+JQ_DEFS=$(cat <<'EOF'
+def entries:
+  def flat($p):
+    if type == "object" then
+      to_entries[] as $e | ($e.value | flat($p + [$e.key]))
+    elif type == "array" then
+      if $p[0] == "hooks" then
+        .[] as $grp | ($grp.hooks // [])[] as $hook
+          | {kind:"hook",
+             id:[($p|join(".")), "matcher=\($grp.matcher // "") command=\($hook.command // "")"],
+             p:$p, hook:$hook, group:$grp}
+      elif $p[0] == "permissions" then
+        .[] as $item | {kind:"item", id:[($p|join(".")), ($item|tostring)], p:$p, item:$item}
       else
-        [($p | join(".")), ""]
-      end;
-    [flat([])];
+        .[] as $item | {kind:"item", id:[($p|join(".")), ($item|tojson)], p:$p, item:$item}
+      end
+    else
+      {kind:"leaf", id:[($p|join(".")), ""], p:$p, leaf:.}
+    end;
+  flat([]);
+def ids: [entries | .id];
+def addentry($e):
+  if $e.kind == "hook" then
+    (getpath($e.p) // []) as $arr
+    | ([$arr | to_entries[] | select((.value.matcher // "") == ($e.group.matcher // "")) | .key] | first) as $idx
+    | if $idx != null then
+        setpath($e.p + [$idx, "hooks"]; (($arr[$idx].hooks) // []) + [$e.hook])
+      else
+        setpath($e.p; $arr + [$e.group])
+      end
+  elif $e.kind == "item" then
+    setpath($e.p; (getpath($e.p) // []) + [$e.item])
+  else
+    setpath($e.p; $e.leaf)
+  end;
+def apply($livedoc):
+  reduce entries as $e ($livedoc;
+    . as $doc
+    | ($doc | ids) as $have
+    | if any($have[]; . == $e.id) then $doc else ($doc | addentry($e)) end
+  );
+EOF
+)
+
+# Emit "<path>\t<label>" for every identity in the example that the live file
+# lacks.
+missing=$(jq -r --slurpfile live "$live" "$JQ_DEFS"'
   (ids - ($live[0] | ids))[] | "\(.[0])\t\(.[1])"
 ' "$example")
 
-[[ -z "$missing" ]] && exit 0
+if [[ -z "$missing" ]]; then
+    exit 0
+fi
 
-short() { case "$1" in "$HOME"/*) printf '~%s' "${1#"$HOME"}" ;; *) printf '%s' "$1" ;; esac; }
-count=$(printf '%s\n' "$missing" | wc -l | tr -d ' ')
-echo "$(short "$live") is missing $count entr$([[ "$count" == 1 ]] && echo y || echo ies) present in $(basename "$example"):"
+if (( ! apply )); then
+    count=$(printf '%s\n' "$missing" | wc -l | tr -d ' ')
+    echo "$(short "$live") is missing $count entr$([[ "$count" == 1 ]] && echo y || echo ies) present in $(basename "$example"):"
+    while IFS=$'\t' read -r path label; do
+        printf '  %-22s %s\n' "$path" "$label"
+    done <<< "$missing"
+    echo "  fix: bin/claude-settings-check --apply (or bin/symlink_files.sh)"
+    exit 1
+fi
+
+# --apply: resolve the live path through any symlink to its real target. A
+# portable loop (no readlink -f / realpath): each step re-resolves the
+# symlink's own directory with cd+pwd, then rebraids a relative link target
+# onto it.
+resolve_symlink() {
+    local path="$1" hops=0 dir target
+    while [[ -L "$path" ]] && (( hops < 20 )); do
+        dir=$(cd "$(dirname "$path")" && pwd)
+        target=$(readlink "$path")
+        case "$target" in
+            /*) path="$target" ;;
+            *) path="$dir/$target" ;;
+        esac
+        hops=$((hops + 1))
+    done
+    printf '%s' "$path"
+}
+
+target=$(resolve_symlink "$live")
+[[ -f "$target" ]] || { echo "claude-settings-check: resolved target $target is not a file" >&2; exit 1; }
+orig=$(cat "$target")
+
+new=$(jq --slurpfile live "$live" "$JQ_DEFS"'apply($live[0])' "$example" 2>&1)
+apply_rc=$?
+if (( apply_rc != 0 )); then
+    echo "claude-settings-check: apply failed, $target untouched: $new" >&2
+    exit 1
+fi
+
+ok=$(jq -r --argjson new "$new" "$JQ_DEFS"'(ids - ($new | ids)) == []' "$example" 2>&1)
+if [[ "$ok" != "true" ]]; then
+    echo "claude-settings-check: apply validation failed, $target untouched: $ok" >&2
+    exit 1
+fi
+
+current=$(cat "$target")
+if [[ "$current" != "$orig" ]]; then
+    echo "claude-settings-check: $target changed while this ran; re-run to pick up its current content" >&2
+    exit 1
+fi
+
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+bak="$target.bak.$stamp"
+[[ -e "$bak" ]] && bak="$bak.$$"
+cp -p "$target" "$bak" || { echo "claude-settings-check: backup to $bak failed, $target untouched" >&2; exit 1; }
+
+tmp="$target.tmp.$$"
+if ! cp -p "$target" "$tmp"; then
+    echo "claude-settings-check: could not create $tmp, $target untouched" >&2
+    exit 1
+fi
+if ! printf '%s\n' "$new" > "$tmp"; then
+    echo "claude-settings-check: write to $tmp failed; left in place for inspection, $target untouched" >&2
+    exit 1
+fi
+if ! mv "$tmp" "$target"; then
+    echo "claude-settings-check: mv $tmp -> $target failed; $tmp left in place for inspection" >&2
+    exit 1
+fi
+
 while IFS=$'\t' read -r path label; do
-    printf '  %-22s %s\n' "$path" "$label"
+    printf '  added   %-22s %s\n' "$path" "$label"
 done <<< "$missing"
-exit 1
+echo "backup: $(short "$bak")"
+exit 0

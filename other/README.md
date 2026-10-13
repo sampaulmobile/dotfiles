@@ -77,6 +77,9 @@ Because the copy happens once, a default added to an `.example` later never
 reaches an existing `<name>` on its own. For `claude/settings.json` the run
 ends with `bin/claude-settings-check`, which lists every hook, allowlist entry
 or key the example has that the live file lacks (values that legitimately
-differ per machine — model, theme — are not drift). It only reports; add what
-you want by hand or ask claude to. `bin/doctor` runs the same check
-(`bin/seed_other.sh --check`) without seeding anything.
+differ per machine — model, theme — are not drift). `bin/seed_other.sh`'s
+write mode runs `bin/claude-settings-check --apply`, which adds exactly those
+gaps (strictly additive, symlink-safe, backed up) — so a plain `bin/doctor`
+fix run (`bin/symlink_files.sh`) picks them up. `bin/doctor` itself runs the
+same check read-only (`bin/seed_other.sh --check`), naming `--apply` as the
+fix, without seeding or applying anything.

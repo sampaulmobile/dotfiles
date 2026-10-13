@@ -183,6 +183,32 @@ check "label: window 1, no name -> the session" "$(feed_label alpha 1 -)" "alpha
 check "label: window 3, no name -> session:3" "$(feed_label alpha 3 -)" "alpha:3"
 check "label: a name replaces the computed label outright" "$(feed_label alpha 3 alpha-hub)" "alpha-hub"
 
+echo "── feed_is_own_session (Ctrl+E popup vs the dedicated hq-feed session)"
+if feed_is_own_session hq-feed; then ok "the dedicated hq-feed session is its own"; else bad "feed_is_own_session hq-feed" "false"; fi
+if ! feed_is_own_session mysession; then ok "a Ctrl+E popup's host session is not its own"; else bad "feed_is_own_session mysession" "true"; fi
+if ! feed_is_own_session ""; then ok "an unreadable session name is not its own"; else bad "feed_is_own_session ''" "true"; fi
+
+echo "── feed_resolve_esc (a bare Esc vs. an arrow key's escape sequence)"
+check "nothing follows 0x1b -> ESC" "$(feed_resolve_esc '')" "ESC"
+check "an up-arrow sequence resolves to itself, unbound and so a no-op" "$(feed_resolve_esc '[A')" "[A"
+check "a down-arrow sequence resolves to itself too" "$(feed_resolve_esc '[B')" "[B"
+
+echo "── q/Esc dispatch in bin/hq-feed's view() key loop"
+view_body=$(awk '/^view\(\) \{/{f=1} f{print} f && /^\}/{exit}' "$repo/bin/hq-feed")
+if printf '%s\n' "$view_body" | grep -qE 'q\|ESC\)'; then
+    ok "LIST's case statement has a q|ESC arm"
+else
+    bad "LIST q|ESC arm" "not found"
+fi
+if printf '%s\n' "$view_body" | grep -qE "q\|ESC\|\\\$'\\\\x7f'\\|\\\$'\\\\b'\\)"; then
+    ok "DETAIL's back-to-LIST arm still includes q/ESC alongside backspace"
+else
+    bad "DETAIL q|ESC arm" "not found"
+fi
+
+echo "── IDLE defaults to expanded"
+check "show_idle defaults to true" "$show_idle" "true"
+
 echo "── condensing: strip_md and the 4-line budget with a (+N lines) marker"
 idle_reply=$(get_last_exchange "$fx/idle.jsonl" | cut -f4 | jq -r '.')
 stripped=$(printf '%s' "$idle_reply" | jq -Rs "$_FEED_STRIP_MD_JQ"'strip_md')
@@ -250,12 +276,53 @@ check "counts: 1 needs you" "$n_needs" "1"
 check "counts: 1 done" "$n_done" "1"
 check "counts: 1 working" "$n_working" "1"
 check "counts: 1 idle" "$n_idle" "1"
+
+echo "── cursor highlight covers the whole block, not just the headline"
+COLUMNS=100 LINES=40 build_frame
+if (( ${#cursor_map[@]} >= 1 )); then
+    # needsyou (the first block) carries a "you › -" body row, so a correct
+    # highlight must span 2 rows: the headline and that body line.
+    selected=0
+    selected_idx="${cursor_map[0]}"
+    frame_cursor_line="${frame_row_line[0]}"
+    SEL="<<SEL>>"; RST="<<RST>>"
+    painted=$(COLUMNS=100 LINES=40 paint)
+    SEL=""; RST=""
+    hl_lines=$(grep -c '<<SEL>>' <<< "$painted")
+    check "a block with a body row highlights headline + body (2 rows)" "$hl_lines" "2"
+    if [[ "$painted" == *'<<SEL>>  you › -'$'\033[K''<<RST>>'* ]]; then
+        ok "the body row itself is inside the highlight, not just the headline"
+    else
+        bad "body row highlight" "$painted"
+    fi
+    if [[ "$painted" != *'<<SEL>>'*'DONE'*'<<RST>>'* ]]; then
+        ok "the highlight stops before the next bucket's section label"
+    else
+        bad "highlight bled into the next section label" "$painted"
+    fi
+
+    # The last block overall (idlepane) has no body row: a 1-row highlight.
+    selected=$(( ${#cursor_map[@]} - 1 ))
+    selected_idx="${cursor_map[$selected]}"
+    frame_cursor_line="${frame_row_line[$selected]}"
+    SEL="<<SEL>>"; RST="<<RST>>"
+    painted_last=$(COLUMNS=100 LINES=40 paint)
+    SEL=""; RST=""
+    hl_lines_last=$(grep -c '<<SEL>>' <<< "$painted_last")
+    check "a block with no body row highlights only its headline (1 row)" "$hl_lines_last" "1"
+else
+    bad "cursor_map empty, cannot test the cursor highlight" "-"
+fi
+
 rm -f "$work/flags/doneflag@2.done"
 
 echo "── --dump and --dump --detail"
 dump_out=$("$repo/bin/hq-feed" --dump 2>&1)
 if [[ "$dump_out" == *'NEEDS YOU'* ]]; then ok "--dump renders the NEEDS YOU section"; else bad "--dump output" "$dump_out"; fi
 if [[ "$dump_out" == *'needsyou'* ]]; then ok "--dump shows the needs-you pane"; else bad "--dump pane" "$dump_out"; fi
+if [[ "$dump_out" == *'IDLE'* ]]; then ok "--dump shows IDLE expanded by default"; else bad "--dump IDLE section" "$dump_out"; fi
+if [[ "$dump_out" == *'idlepane'* ]]; then ok "--dump shows the idle pane itself, not just a count"; else bad "--dump idle pane" "$dump_out"; fi
+if [[ "$dump_out" != *'hidden — a to show'* ]]; then ok "--dump does not collapse IDLE to a count line"; else bad "--dump IDLE collapsed" "$dump_out"; fi
 detail_out=$("$repo/bin/hq-feed" --dump --detail %4 2>&1)
 if [[ "$detail_out" == *'idlepane'* ]]; then ok "--dump --detail renders the named pane"; else bad "--dump --detail" "$detail_out"; fi
 bad_detail=$("$repo/bin/hq-feed" --dump --detail %999 2>&1; echo "rc=$?")
@@ -365,6 +432,66 @@ if (( elapsed_dump <= 5 )); then
     ok "--dump over the long-prompt snapshot completes in <=5s"
 else
     bad "--dump elapsed" "${elapsed_dump}s"
+fi
+
+echo "── the highlight fills edge-to-edge: SEL survives a row's own resets"
+# A row's own color resets (a DIM label, an OSC 8 link's reset) each clear
+# SEL's background partway through the line unless every reset reopens it.
+# This needs REAL escape codes, not the sentinel strings the earlier cursor
+# tests use — set before build_frame so they're baked into frame_rows the
+# way a real terminal would. Last in the file: it overwrites turns.tsv and
+# nothing after it depends on the shared fixture.
+link_json=$(jq -Rn --arg t 'see https://github.com/acme/widgets/pull/42 for details' '$t | tojson')
+{
+    printf '# generated 2026-01-01T00:00:00Z\n'
+    printf 'linkpane\t%%5\t1\tclaude\tidle\t-\t-\t%s\t-\tyou\t"-"\t-\t%s\t-\t-\t-\n' "$mtime_now" "$link_json"
+} > "$work/snapshot/turns.tsv"
+RST=$'\033[0m'; SEL=$'\033[48;5;236m'; DIM=$'\033[2m'
+LINK=$'\033[34;4m'; LINKS=true
+C_NEEDS=$'\033[33m'; C_DONE=$'\033[32m'; C_WORKING=$'\033[34m'
+load_data
+COLUMNS=60 LINES=40 build_frame
+if (( ${#cursor_map[@]} >= 1 )); then
+    selected=0
+    selected_idx="${cursor_map[0]}"
+    frame_cursor_line="${frame_row_line[0]}"
+    painted=$(COLUMNS=60 LINES=40 paint)
+
+    # A correctly-filled highlighted line is SEL, then the row text with
+    # every internal reset immediately reopening SEL, then erase-to-EOL,
+    # then the one reset that's allowed to stay bare (the final close).
+    check_hl_edge_to_edge() {
+        local line="$1" label="$2" body stripped
+        if [[ "$line" == *$'\033[K'"$RST" ]]; then
+            ok "$label ends with erase-to-EOL then the final reset"
+        else
+            bad "$label suffix" "$(cat -v <<< "$line")"
+        fi
+        body="${line%$'\033[K'"$RST"}"
+        body="${body#"$SEL"}"
+        stripped="${body//"$RST$SEL"/}"
+        if [[ "$stripped" != *"$RST"* ]]; then
+            ok "$label has no internal reset left unfilled"
+        else
+            bad "$label leaves a bare reset (background drops mid-line)" "$(cat -v <<< "$line")"
+        fi
+    }
+
+    body_line=$(grep -F "${DIM}you" <<< "$painted")
+    if [[ -n "$body_line" ]]; then
+        check_hl_edge_to_edge "$body_line" "the DIM you › body row"
+    else
+        bad "no DIM you › row found in the painted frame" "$(cat -v <<< "$painted")"
+    fi
+
+    link_line=$(grep -F '#42' <<< "$painted")
+    if [[ -n "$link_line" ]]; then
+        check_hl_edge_to_edge "$link_line" "the it › row with a PR link"
+    else
+        bad "no PR link row found in the painted frame" "$(cat -v <<< "$painted")"
+    fi
+else
+    bad "cursor_map empty, cannot test edge-to-edge fill" "-"
 fi
 
 echo
