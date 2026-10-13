@@ -25,7 +25,11 @@
 #   flag-done              Stop hook — flag the calling pane.
 #   clear <session>        tmux client-attached / client-session-changed /
 #                          session-window-changed hooks.
-#   list                   Flagged live panes, newest first.
+#   list                   Flagged live panes, newest first, minus a pane
+#                          whose background subagents are still live — the
+#                          flag FILE stays on disk and surfaces once the
+#                          fresh panes snapshot reads 0 for it; stale or
+#                          missing snapshot means no filtering (fail open).
 #   jump [client-tty]      C-y. Permission prompt first, else newest flag.
 #   jump-to <client-tty> <session> <pane>
 #                          bin/hq-feed's `g` — one named pane, no search.
@@ -33,6 +37,7 @@
 #   codex-session-end      codex SessionEnd hook.
 
 source ~/dotfiles/bin/tmux-claude-lib
+source ~/dotfiles/bin/hq-snapshot
 
 FLAG_DIR="$HOME/.cache/claude-attention"
 
@@ -128,19 +133,35 @@ cmd_list() {
         [[ "$live" == *"@%${mpane}"$'\n'* ]] || rm -f "$m"
     done
 
-    local f key session pane
-    for f in "$FLAG_DIR"/*.done; do
-        [[ -e "$f" ]] || continue
-        key="${f##*/}"
-        key="${key%.done}"
-        session="${key%@*}"
-        pane="${key##*@}"
-        if [[ "$key" == *@* && "$live" == *$'\n'"${session}@%${pane}"$'\n'* ]]; then
-            printf '%s\t%s\t%s\n' "$(file_mtime "$f")" "$session" "%${pane}"
-        else
-            rm -f "$f"
-        fi
-    done | sort -rn | cut -f2,3
+    local f key session pane flagged
+    flagged=$(
+        for f in "$FLAG_DIR"/*.done; do
+            [[ -e "$f" ]] || continue
+            key="${f##*/}"
+            key="${key%.done}"
+            session="${key%@*}"
+            pane="${key##*@}"
+            if [[ "$key" == *@* && "$live" == *$'\n'"${session}@%${pane}"$'\n'* ]]; then
+                printf '%s\t%s\t%s\n' "$(file_mtime "$f")" "$session" "%${pane}"
+            else
+                rm -f "$f"
+            fi
+        done | sort -rn | cut -f2,3
+    )
+    [[ -n "$flagged" ]] || return 0
+
+    # Deferral at READ time (A3): a parent pane whose background subagents
+    # are still live shows no flag until the fresh panes snapshot reads 0
+    # for it — flag time cannot work, since the parent's next Stop (fired
+    # by a background agent finishing) would still see that agent's jsonl
+    # within LIVE_AGENT_SECS and re-suppress forever. The flag FILE is
+    # never touched here. Fails open (no filtering) when the panes snapshot
+    # is stale or missing.
+    if [[ "$(snapshot_verdict "$(snapshot_age panes)" "$(snapshot_cadence panes)")" == fresh ]]; then
+        drop_deferred_flags "$flagged" "$(snapshot_read panes 2>/dev/null)"
+    else
+        printf '%s\n' "$flagged"
+    fi
 }
 
 # Client scoping matters: dots/tmux.conf's C-y binding always passes
@@ -177,7 +198,9 @@ cmd_jump() {
 
     local perm_s=$'\n'
     local st pane
-    while IFS=$'\t' read -r session st pane; do
+    # Trailing `_`: scan_claude_sessions now carries a 4th field (agents),
+    # which a 3-var read would otherwise fold into $pane as "<pane>\t<agents>".
+    while IFS=$'\t' read -r session st pane _; do
         [[ "$st" == "permission" ]] && perm_s+="${session}"$'\t'"${pane}"$'\n'
     done < <(scan_claude_sessions)
     if [[ "$perm_s" != $'\n' ]]; then

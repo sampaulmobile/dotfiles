@@ -6,8 +6,10 @@
 # @task option unset and no claude on its panes carrying `/feature --run` in
 # argv); one not tied to a linked worktree row (session_name_for <row path>
 # must equal the session name); one that is attached; one with any agent
-# pane working/permission/unknown; one with any non-agent pane running
-# something other than a shell or an editor.
+# pane working/permission/unknown or carrying live background subagents
+# (agents > 0 — killing/parking the parent would kill its children); one
+# with any non-agent pane running something other than a shell or an
+# editor.
 #
 # NEVER REMOVED: no worktree, no file, ever. The log under
 # ~/.local/state/hq/reap is append-only. The only kills this script performs
@@ -131,9 +133,9 @@ Tiers (see the file header for the invariants):
                  (Ctrl+F, wt-tmux-jump, Ctrl+G's Enter), resumes its claude.
 
 Never a candidate: not a task session, not tied to a linked worktree,
-attached, any agent pane working/permission/unknown, any non-agent pane
-busy with something other than a shell or editor. Never removed: no
-worktree, no file — ever.
+attached, any agent pane working/permission/unknown or carrying live
+background subagents, any non-agent pane busy with something other than a
+shell or editor. Never removed: no worktree, no file — ever.
 
 Env overrides:
   HQ_REAP_DIR         default ~/.local/state/hq/reap — last-run stamp + log
@@ -170,12 +172,15 @@ reap_session_busy_pane() {
     done < <(tmux list-panes -s -t "$name" -F $'#{pane_id}\t#{pane_current_command}\t#{pane_tty}' 2>/dev/null)
 }
 
+# reap_bad_status_out is "agents" (not a classify_pane_status value) when
+# the pane's own status is clean but it carries live background subagents —
+# still enough to keep the session out of both tiers.
 reap_session_agent_panes() {
-    local name="$1" s p _w _a st
+    local name="$1" s p _w _a st ag
     reap_pane_count_out=0
     reap_bad_status_out=""
     reap_last_pane_out=""
-    while IFS=$'\t' read -r s p _w _a st; do
+    while IFS=$'\t' read -r s p _w _a st ag; do
         [[ "$s" == "$name" ]] || continue
         reap_pane_count_out=$(( reap_pane_count_out + 1 ))
         reap_last_pane_out="$p"
@@ -183,6 +188,9 @@ reap_session_agent_panes() {
             working|permission|unknown)
                 [[ -z "$reap_bad_status_out" ]] && reap_bad_status_out="$st" ;;
         esac
+        if [[ -z "$reap_bad_status_out" && "$ag" != "-" ]] && (( ag > 0 )); then
+            reap_bad_status_out="agents"
+        fi
     done <<< "$_REAP_AGENT_PANES"
 }
 

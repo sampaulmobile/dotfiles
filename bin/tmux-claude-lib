@@ -317,8 +317,10 @@ get_pane_status() {
 }
 
 # One line per agent pane, any window of any session:
-# "<session>\t<pane>\t<window>\t<agent>\t<status>", status being
-# classify_pane_status's permission | working | idle | unknown.
+# "<session>\t<pane>\t<window>\t<agent>\t<status>\t<agents>", status being
+# classify_pane_status's permission | working | idle | unknown and agents
+# the claude pane's live background-subagent count from live_agent_counts
+# ("-" for 0 and for every codex pane).
 #
 # Two tmux round trips regardless of session count: one list-panes -a, then
 # one batched capture of ONLY the panes whose tty belongs to an agent
@@ -340,14 +342,18 @@ scan_agent_panes() {
     [[ -z "$pane_list" ]] && return 0
 
     local -a targets=()
-    local sname pid wid ptty
+    local sname pid wid ptty agent claude_pane_ids=""
     while IFS=$'\t' read -r sname pid wid ptty; do
         [[ -z "$pid" ]] && continue
         rest="${map#*$'\n'"${ptty#/dev/}"$'\t'}"
         [[ "$rest" == "$map" ]] && continue
-        targets+=("${sname}"$'\t'"${pid}"$'\t'"${wid}"$'\t'"${rest%%$'\n'*}")
+        agent="${rest%%$'\n'*}"
+        targets+=("${sname}"$'\t'"${pid}"$'\t'"${wid}"$'\t'"${agent}")
+        [[ "$agent" == claude ]] && claude_pane_ids+="${pid}"$'\n'
     done <<< "$pane_list"
     (( ${#targets[@]} == 0 )) && return 0
+
+    live_agent_counts "$claude_pane_ids"
 
     # Randomized separator: a fixed literal could appear in pane content and
     # split a block early.
@@ -365,7 +371,7 @@ scan_agent_panes() {
     local combined
     combined=$(tmux "${args[@]}" 2>/dev/null)
 
-    local block="" line name pane agent st
+    local block="" line name pane st agents wid2
     while IFS= read -r line; do
         if [[ "$line" == "$sep"* ]]; then
             entry="${line#"$sep"}"
@@ -373,9 +379,13 @@ scan_agent_panes() {
             rest="${entry#*$'\t'}"
             pane="%${rest%%$'\t'*}"
             rest="${rest#*$'\t'}"
+            wid2="${rest%%$'\t'*}"
             agent="${rest#*$'\t'}"
             st=$(classify_pane_status "$block" "$agent")
-            printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$pane" "${rest%%$'\t'*}" "$agent" "$st"
+            agents="-"
+            rest="${LIVE_AGENTS_OUT#*$'\n'"${pane}"$'\t'}"
+            [[ "$rest" != "$LIVE_AGENTS_OUT" ]] && agents="${rest%%$'\n'*}"
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$pane" "$wid2" "$agent" "$st" "$agents"
             block=""
         else
             block+="$line"$'\n'
@@ -383,19 +393,21 @@ scan_agent_panes() {
     done <<< "$combined"
 }
 
-# One line per session: "<session>\t<status>\t<pane>". Status is the worst
-# across the session's agent panes (permission > working > idle > unknown)
-# and pane is the id of the one exhibiting it ("-" when unknown, first-seen
-# wins on a tie), which is what lets C-y land on the prompt itself rather
-# than on the session's current window while the prompt blocks in another.
+# One line per session: "<session>\t<status>\t<pane>\t<agents>". Status is
+# the worst across the session's agent panes (permission > working > idle >
+# unknown) and pane is the id of the one exhibiting it ("-" when unknown,
+# first-seen wins on a tie), which is what lets C-y land on the prompt
+# itself rather than on the session's current window while the prompt
+# blocks in another. agents is the SUM of the session's panes' live
+# subagent counts ("-" for 0).
 aggregate_session_status() {
     # Delimited strings and a first-seen order array (bash 3.2 has no
     # associative arrays), searched by prefix stripping, never command
     # substitution: this runs inside the statusbar's ~200ms scan.
     local perm_s=$'\n' work_s=$'\n' idle_s=$'\n' seen=$'\n'
     local -a order=()
-    local name pane _w _a st rest
-    while IFS=$'\t' read -r name pane _w _a st; do
+    local name pane _w _a st ag rest
+    while IFS=$'\t' read -r name pane _w _a st ag; do
         [[ -z "$name" ]] && continue
         case "$st" in
             permission) perm_s+="${name}"$'\t'"${pane}"$'\n' ;;
@@ -408,6 +420,13 @@ aggregate_session_status() {
         fi
     done <<< "$1"
 
+    # One awk pass sums agents per session (bash 3.2 has no associative
+    # arrays to accumulate into across repeated lines for one key).
+    local agent_sums=$'\n'
+    agent_sums+=$(awk -F'\t' '{n=($6=="-"?0:$6)+0; a[$1]+=n} END{for (k in a) print k "\t" a[k]}' <<< "$1")
+    agent_sums+=$'\n'
+
+    local agents
     for name in "${order[@]}"; do
         st="unknown"
         pane="-"
@@ -418,7 +437,13 @@ aggregate_session_status() {
         elif rest="${idle_s#*$'\n'"$name"$'\t'}"; [[ "$rest" != "$idle_s" ]]; then
             st="idle"; pane="${rest%%$'\n'*}"
         fi
-        printf '%s\t%s\t%s\n' "$name" "$st" "$pane"
+        agents="-"
+        rest="${agent_sums#*$'\n'"$name"$'\t'}"
+        if [[ "$rest" != "$agent_sums" ]]; then
+            agents="${rest%%$'\n'*}"
+            (( agents == 0 )) && agents="-"
+        fi
+        printf '%s\t%s\t%s\t%s\n' "$name" "$st" "$pane" "$agents"
     done
 }
 
@@ -427,18 +452,22 @@ scan_claude_sessions() {
 }
 
 # "<window>\t<status>", status being permission > working > done > idle.
-# Unknown counts as idle: an agent process does live there.
+# Unknown counts as idle: an agent process does live there. A pane with
+# agents > 0 counts as working unless its own status is permission.
 window_status_from_panes() {
     local done_s=$'\n'"${2}"$'\n'
     local perm_s=$'\n' work_s=$'\n' dn_s=$'\n' seen=$'\n'
     local -a order=()
-    local _n pane win _a st
-    while IFS=$'\t' read -r _n pane win _a st; do
+    local _n pane win _a st ag
+    while IFS=$'\t' read -r _n pane win _a st ag; do
         [[ -z "$win" ]] && continue
         case "$st" in
             permission) perm_s+="${win}"$'\n' ;;
             working)    work_s+="${win}"$'\n' ;;
         esac
+        if [[ "$st" != permission && "$ag" != "-" ]] && (( ag > 0 )); then
+            work_s+="${win}"$'\n'
+        fi
         [[ "$done_s" == *$'\n'"${pane}"$'\n'* ]] && dn_s+="${win}"$'\n'
         if [[ "$seen" != *$'\n'"${win}"$'\n'* ]]; then
             seen+="${win}"$'\n'
@@ -456,6 +485,35 @@ window_status_from_panes() {
     done
 }
 
+# drop_deferred_flags <flag-lines> <pane-lines>
+#   <flag-lines>: "<session>\t<pane>" per line (bin/tmux-claude-attention's
+#   cmd_list, pre-deferral). <pane-lines>: scan_agent_panes' own 6-field
+#   format. Prints the flag lines whose pane does NOT carry live agents
+#   (agents > 0) — per PANE, never per session, since the attention layer's
+#   flags are themselves per pane. A3 in the workplan: deferral belongs at
+#   READ time, not at flag time, so this is a pure filter the reader applies,
+#   never a second flag state.
+drop_deferred_flags() {
+    local flags="$1" panes="$2"
+    [[ -n "$flags" ]] || return 0
+
+    local busy=$'\n'
+    local _s p _w _a _st ag
+    while IFS=$'\t' read -r _s p _w _a _st ag; do
+        [[ -n "$p" ]] || continue
+        if [[ "$ag" != "-" ]] && (( ag > 0 )); then
+            busy+="${p}"$'\n'
+        fi
+    done <<< "$panes"
+
+    local line pane
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        pane="${line##*$'\t'}"
+        [[ "$busy" == *$'\n'"${pane}"$'\n'* ]] || printf '%s\n' "$line"
+    done <<< "$flags"
+}
+
 get_pane_cwd() {
     local session="$1"
     tmux list-panes -t "${session}:1" -F '#{pane_current_path}' 2>/dev/null | head -1
@@ -467,14 +525,82 @@ encode_cwd() {
     echo "$1" | sed 's|[/._]|-|g'
 }
 
+# Shared by build_cwd_session_map, live_agent_counts and bin/hq-snapshot's
+# collect_turns: pane id (with "%", "-" when untracked), cwd, sessionId.
+_CWD_MAP_JQ='[((.tmux // "") | [scan("%[0-9]+$")] | .[0] // "-"), .cwd, .sessionId] | @tsv'
+
 # One line per live claude: "paneId\tcwd\tsessionId", paneId is "-" when
 # unknown. Call once before the pane-exact lookups below, which read from
 # this file ($_CWD_MAP_FILE).
 _CWD_MAP_FILE=""
 build_cwd_session_map() {
     _CWD_MAP_FILE=$(mktemp /tmp/claude-cwd-map.XXXXXX)
-    jq -r '[((.tmux // "") | [scan("%[0-9]+$")] | .[0] // "-"), .cwd, .sessionId] | @tsv' \
-        "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null > "$_CWD_MAP_FILE"
+    jq -r "$_CWD_MAP_JQ" "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null > "$_CWD_MAP_FILE"
+}
+
+# live_agent_counts <newline-separated claude pane ids, with "%">
+#   Sets LIVE_AGENTS_OUT to "\n%N\t<count>\n..." (leading newline, only
+#   panes with count > 0) via prefix-stripping lookups — no subshell, so a
+#   caller already paying for the one jq + one find below adds no fork of
+#   its own reading the result. Live = the dashboard's own "+N": a
+#   subagent's jsonl mtime within LIVE_AGENT_SECS AND a .meta.json on disk
+#   (list_session_agents requires the same pair).
+LIVE_AGENTS_OUT=$'\n'
+live_agent_counts() {
+    LIVE_AGENTS_OUT=$'\n'
+    local pane_ids="$1"
+    [[ -n "$pane_ids" ]] || return 0
+
+    local map
+    map=$(jq -r "$_CWD_MAP_JQ" "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null)
+    [[ -n "$map" ]] || return 0
+    map=$'\n'"$map"$'\n'
+
+    # Pane-exact only (no find_pane_jsonl cwd fallback): A1 in the workplan
+    # verified every live claude pane resolves pane-exactly on this machine.
+    local -a dirs=() dir_panes=()
+    local pane rest line pcwd psid dir
+    while IFS= read -r pane; do
+        [[ -n "$pane" ]] || continue
+        rest="${map#*$'\n'"${pane}"$'\t'}"
+        [[ "$rest" == "$map" ]] && continue
+        line="${rest%%$'\n'*}"
+        pcwd="${line%%$'\t'*}"
+        psid="${line#*$'\t'}"
+        # Bash form of encode_cwd's sed (verified equal under /bin/bash
+        # 3.2), not a call to it: encode_cwd forks echo+sed per use, which
+        # a per-pane loop on the statusbar's ~200ms budget cannot afford.
+        dir="${CLAUDE_PROJECTS_DIR}/${pcwd//[\/._]/-}/${psid}/subagents"
+        [[ -d "$dir" ]] || continue
+        dirs+=("$dir")
+        dir_panes+=("$pane")
+    done <<< "$pane_ids"
+    (( ${#dirs[@]} == 0 )) && return 0
+
+    local found
+    # BSD find's "-mtime -Ns" ("modified less than N seconds ago") is
+    # macOS-only syntax (A4, verified against /usr/bin/find here); GNU find
+    # rejects the trailing "s" on -mtime and this count silently reads 0
+    # there, never an error.
+    found=$(find "${dirs[@]}" -maxdepth 1 -name 'agent-*.jsonl' -mtime -$(( LIVE_AGENT_SECS + 1 ))s 2>/dev/null)
+    [[ -n "$found" ]] || return 0
+
+    local -a count=()
+    local i path meta pdir
+    for (( i = 0; i < ${#dirs[@]}; i++ )); do count[i]=0; done
+    while IFS= read -r path; do
+        [[ -n "$path" ]] || continue
+        meta="${path%.jsonl}.meta.json"
+        [[ -f "$meta" ]] || continue
+        pdir="${path%/*}"
+        for (( i = 0; i < ${#dirs[@]}; i++ )); do
+            [[ "${dirs[i]}" == "$pdir" ]] && count[i]=$(( count[i] + 1 ))
+        done
+    done <<< "$found"
+
+    for (( i = 0; i < ${#dirs[@]}; i++ )); do
+        (( count[i] > 0 )) && LIVE_AGENTS_OUT+="${dir_panes[i]}"$'\t'"${count[i]}"$'\n'
+    done
 }
 
 # sessions/*.json records each claude's tmux pane id
