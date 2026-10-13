@@ -175,6 +175,24 @@ if feed_is_own_session hq-feed; then ok "the dedicated hq-feed session is its ow
 if ! feed_is_own_session mysession; then ok "a Ctrl+E popup's host session is not its own"; else bad "feed_is_own_session mysession" "true"; fi
 if ! feed_is_own_session ""; then ok "an unreadable session name is not its own"; else bad "feed_is_own_session ''" "true"; fi
 
+echo "── feed_resolve_esc (a bare Esc vs. an arrow key's escape sequence)"
+check "nothing follows 0x1b -> ESC" "$(feed_resolve_esc '')" "ESC"
+check "an up-arrow sequence resolves to itself, unbound and so a no-op" "$(feed_resolve_esc '[A')" "[A"
+check "a down-arrow sequence resolves to itself too" "$(feed_resolve_esc '[B')" "[B"
+
+echo "── q/Esc dispatch in bin/hq-feed's view() key loop"
+view_body=$(awk '/^view\(\) \{/{f=1} f{print} f && /^\}/{exit}' "$repo/bin/hq-feed")
+if printf '%s\n' "$view_body" | grep -qE 'q\|ESC\)'; then
+    ok "LIST's case statement has a q|ESC arm"
+else
+    bad "LIST q|ESC arm" "not found"
+fi
+if printf '%s\n' "$view_body" | grep -qE "q\|ESC\|\\\$'\\\\x7f'\\|\\\$'\\\\b'\\)"; then
+    ok "DETAIL's back-to-LIST arm still includes q/ESC alongside backspace"
+else
+    bad "DETAIL q|ESC arm" "not found"
+fi
+
 echo "── IDLE defaults to expanded"
 check "show_idle defaults to true" "$show_idle" "true"
 
@@ -259,7 +277,7 @@ if (( ${#cursor_map[@]} >= 1 )); then
     SEL=""; RST=""
     hl_lines=$(grep -c '<<SEL>>' <<< "$painted")
     check "a block with a body row highlights headline + body (2 rows)" "$hl_lines" "2"
-    if [[ "$painted" == *'<<SEL>>  you › -<<RST>>'* ]]; then
+    if [[ "$painted" == *'<<SEL>>  you › -'$'\033[K''<<RST>>'* ]]; then
         ok "the body row itself is inside the highlight, not just the headline"
     else
         bad "body row highlight" "$painted"
@@ -372,6 +390,66 @@ if (( elapsed_dump <= 5 )); then
     ok "--dump over the long-prompt snapshot completes in <=5s"
 else
     bad "--dump elapsed" "${elapsed_dump}s"
+fi
+
+echo "── the highlight fills edge-to-edge: SEL survives a row's own resets"
+# A row's own color resets (a DIM label, an OSC 8 link's reset) each clear
+# SEL's background partway through the line unless every reset reopens it.
+# This needs REAL escape codes, not the sentinel strings the earlier cursor
+# tests use — set before build_frame so they're baked into frame_rows the
+# way a real terminal would. Last in the file: it overwrites turns.tsv and
+# nothing after it depends on the shared fixture.
+link_json=$(jq -Rn --arg t 'see https://github.com/acme/widgets/pull/42 for details' '$t | tojson')
+{
+    printf '# generated 2026-01-01T00:00:00Z\n'
+    printf 'linkpane\t%%5\t1\tclaude\tidle\t-\t%s\t-\tyou\t"-"\t-\t%s\t-\t-\t-\n' "$mtime_now" "$link_json"
+} > "$work/snapshot/turns.tsv"
+RST=$'\033[0m'; SEL=$'\033[48;5;236m'; DIM=$'\033[2m'
+LINK=$'\033[34;4m'; LINKS=true
+C_NEEDS=$'\033[33m'; C_DONE=$'\033[32m'; C_WORKING=$'\033[34m'
+load_data
+COLUMNS=60 LINES=40 build_frame
+if (( ${#cursor_map[@]} >= 1 )); then
+    selected=0
+    selected_idx="${cursor_map[0]}"
+    frame_cursor_line="${frame_row_line[0]}"
+    painted=$(COLUMNS=60 LINES=40 paint)
+
+    # A correctly-filled highlighted line is SEL, then the row text with
+    # every internal reset immediately reopening SEL, then erase-to-EOL,
+    # then the one reset that's allowed to stay bare (the final close).
+    check_hl_edge_to_edge() {
+        local line="$1" label="$2" body stripped
+        if [[ "$line" == *$'\033[K'"$RST" ]]; then
+            ok "$label ends with erase-to-EOL then the final reset"
+        else
+            bad "$label suffix" "$(cat -v <<< "$line")"
+        fi
+        body="${line%$'\033[K'"$RST"}"
+        body="${body#"$SEL"}"
+        stripped="${body//"$RST$SEL"/}"
+        if [[ "$stripped" != *"$RST"* ]]; then
+            ok "$label has no internal reset left unfilled"
+        else
+            bad "$label leaves a bare reset (background drops mid-line)" "$(cat -v <<< "$line")"
+        fi
+    }
+
+    body_line=$(grep -F "${DIM}you" <<< "$painted")
+    if [[ -n "$body_line" ]]; then
+        check_hl_edge_to_edge "$body_line" "the DIM you › body row"
+    else
+        bad "no DIM you › row found in the painted frame" "$(cat -v <<< "$painted")"
+    fi
+
+    link_line=$(grep -F '#42' <<< "$painted")
+    if [[ -n "$link_line" ]]; then
+        check_hl_edge_to_edge "$link_line" "the it › row with a PR link"
+    else
+        bad "no PR link row found in the painted frame" "$(cat -v <<< "$painted")"
+    fi
+else
+    bad "cursor_map empty, cannot test edge-to-edge fill" "-"
 fi
 
 echo

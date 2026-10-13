@@ -106,6 +106,9 @@ Keys:
   g     jump the OTHER tmux client to this block's exact pane; in a Ctrl+E
         popup window (not the dedicated hq-feed session) this also closes
         the window, since there is no ambient session left to show it
+  q/Esc LIST only: quit, closing a Ctrl+E popup window the same way `g`
+        does; repaints instead in the dedicated hq-feed session, which has
+        nowhere else to go. DETAIL's q/esc goes back to LIST instead (above).
   r     recollect (runs `bin/hq-snapshot turns` first, then reloads)
   ^C    quit
 
@@ -820,9 +823,17 @@ paint() {
     out="$frame_head"
     for (( i = frame_top; i <= last; i++ )); do
         if (( sel >= 0 && i >= sel && i <= hl_end )); then
-            local l="${frame_rows[$i]}"
+            local l="${frame_rows[$i]}" rep
             (( i == sel )) && [[ "$view_mode" == list ]] && l="›${l:1}"
-            out+="${SEL}${l}${RST}"$'\n'
+            # A row's own color resets (DIM labels, the headline's dim pipe
+            # text, an OSC 8 link's reset) each clear SEL's background
+            # partway through the line; re-open it after every one, and
+            # erase-to-EOL so the background reaches the right edge too.
+            if [[ -n "$RST" ]]; then
+                rep="$RST$SEL"
+                l="${l//"$RST"/$rep}"
+            fi
+            out+="${SEL}${l}"$'\033[K'"${RST}"$'\n'
         else
             out+="${frame_rows[$i]}"$'\n'
         fi
@@ -886,6 +897,13 @@ feed_signature() {
     file_mtime "$FLAG_DIR" 2>/dev/null
 }
 
+# A bare Esc resolves to "ESC"; an escape SEQUENCE (an arrow key's `[A`/
+# `[B`, which hq-feed binds nothing to) resolves to itself, so it falls
+# through every case arm as a no-op instead of registering as Esc.
+feed_resolve_esc() {
+    [[ -z "$1" ]] && printf 'ESC' || printf '%s' "$1"
+}
+
 # True only for the dedicated hq-feed session (bare `hq-feed`, no argument).
 # A popup window (Ctrl+E's `tmux neww ... --view`) runs in whatever session
 # it was opened from, so `g` must close it after the jump instead of leaving
@@ -921,7 +939,7 @@ recollect() {
 # elapsed time (a non-zero read under 1s is a failure; 3 in a row exits
 # instead of spinning).
 view() {
-    local key rc idx last_sig sig fail_count=0 t0 own_session=false
+    local key rc idx last_sig sig fail_count=0 t0 own_session=false seq
     tput civis 2>/dev/null
     trap 'tput cnorm 2>/dev/null' EXIT
     trap 'exit 130' INT
@@ -960,6 +978,19 @@ view() {
         fi
         fail_count=0
         STATUS_NOTE=""
+        # A bare Esc (0x1b with nothing following) is q's twin; an arrow
+        # key sends 0x1b immediately followed by its sequence (`[A`/`[B`),
+        # which hq-feed binds nothing to, so it must not register as Esc.
+        # bash 3.2 (/bin/bash, this script's own shebang resolves to it
+        # on a machine with no Homebrew bash) rejects a fractional `-t`,
+        # so disambiguation waits a whole second rather than 0.1s — the
+        # rest of a real escape sequence arrives in the same keystroke,
+        # long before that.
+        if [[ "$key" == $'\x1b' ]]; then
+            seq=""
+            read -rsn2 -t 1 seq || true
+            key=$(feed_resolve_esc "$seq")
+        fi
         idx=-1
         (( ${#cursor_map[@]} > 0 && selected < ${#cursor_map[@]} )) && idx="${cursor_map[$selected]}"
         if [[ "$view_mode" == list ]]; then
@@ -983,10 +1014,16 @@ view() {
                     if [[ "$own_session" == true ]]; then paint; else exit 0; fi
                     ;;
                 r) recollect; build_frame; paint ;;
+                q|ESC)
+                    # The dedicated hq-feed session has nowhere else to go
+                    # on Esc/q — repaint instead of exiting it out from
+                    # under whoever's viewing it ambiently.
+                    if [[ "$own_session" == true ]]; then paint; else exit 0; fi
+                    ;;
             esac
         else
             case "$key" in
-                q|$'\e'|$'\x7f'|$'\b')
+                q|ESC|$'\x7f'|$'\b')
                     view_mode=list
                     frame_top=0
                     build_frame
