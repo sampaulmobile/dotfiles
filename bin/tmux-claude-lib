@@ -956,6 +956,130 @@ get_agent_stats() {
     printf '%s' "$result"
 }
 
+# _AGENT_TOOL_LINE_JQ — a `def tool_line: ...;` shared by get_agent_snippet
+# and get_last_exchange: given a tool_use object as `.`, renders
+# "Name: arg" (no arrow — each caller prefixes its own). Field-name
+# heuristic over tool-call rendering, kept in exactly one place so the two
+# callers cannot drift. Concatenate as a separate single-quoted segment
+# ahead of a caller's own jq program (bash does not expand $-vars inside
+# single quotes, and this string is full of jq's own $vars).
+_AGENT_TOOL_LINE_JQ='
+def tool_line:
+  (.input // {}) as $in
+  | ((["command","pattern","query","url","file_path","path","description","message","prompt"]
+        | map($in[.]?) | map(select(type == "string" and length > 0)) | first)
+     // ([$in | to_entries[] | .value | select(type == "string" and length > 0)] | first)) as $raw
+  | (if $raw == null then ""
+     else ($raw | split("\n")[0]) as $line
+        | (if ($line | test("^[^ ]*/[^ ]*$")) and ($line | test("://") | not)
+            then ($line | split("/") | last) else $line end)
+     end) as $arg
+  | (.name // "tool") + (if ($arg | length) > 0 then ": " + $arg else "" end);
+'
+
+# get_last_exchange <jsonl>
+#   Prints one tab-separated line: kind prompt from reply tool pending.
+#   kind is "you"|"msg"|"-"; every other field is a JSON-encoded string
+#   (tojson) or "-", so none carries a raw tab or newline that would shift
+#   a TSV reader's columns. Claude transcripts only.
+#
+#   Prompt side: the byte offset of the LAST user record whose origin.kind
+#   is "human" or "peer" (grep -b — the only full-file pass here; a typed
+#   prompt can sit far behind a 100+ KB run of tool results, so a bounded
+#   tail would miss it — see workplans/hq-feed-plan.md). A peer record newer
+#   than the last human one is a cross-session message (kind "msg", "from"
+#   its origin.name) UNLESS it carries no name — a subagent hand-back
+#   (senderTaskId, no name) — in which case it is skipped and the human
+#   record answers instead. A record with neither key (an older transcript,
+#   or a harness task-notification/local-command-stdout, whose origin.kind
+#   is "task-notification" or absent) never matches, so "you ›" is never
+#   drawn from one.
+#
+#   Assistant side: get_agent_snippet's bounded tail -c 131072, parsed once
+#   for the last non-empty text block (reply), the last tool_use (tool) and
+#   the last tool_use whose id has no matching tool_result in the window
+#   (pending; AskUserQuestion renders as its first question's text).
+#
+#   No caching: the mtime gate against re-parsing an unchanged transcript
+#   lives in the caller (bin/hq-snapshot's turns_rows).
+get_last_exchange() {
+    local jsonl="$1"
+    if [[ ! -f "$jsonl" ]]; then
+        printf -- '-\t-\t-\t-\t-\t-'
+        return 0
+    fi
+
+    local offsets human_off="" peer_off=""
+    offsets=$(grep -abE '"origin":\{"kind":"(human|peer)"' "$jsonl" 2>/dev/null)
+    human_off=$(printf '%s\n' "$offsets" | grep -F '"origin":{"kind":"human"' | tail -1)
+    human_off="${human_off%%:*}"
+    peer_off=$(printf '%s\n' "$offsets" | grep -F '"origin":{"kind":"peer"' | tail -1)
+    peer_off="${peer_off%%:*}"
+
+    local kind="-" prompt="-" from="-" line rec
+
+    if [[ -n "$peer_off" ]] && { [[ -z "$human_off" ]] || (( peer_off > human_off )); }; then
+        # A pipefail-safe read: `head -1` closing early SIGPIPEs `tail`, and
+        # the collector's `set -o pipefail` would otherwise surface that as
+        # this command's exit status.
+        line=$(tail -c +"$(( peer_off + 1 ))" "$jsonl" 2>/dev/null | head -1) || true
+        rec=$(printf '%s' "$line" | jq -c 'select(.origin.name != null)' 2>/dev/null)
+        if [[ -n "$rec" ]]; then
+            kind="msg"
+            from=$(printf '%s' "$rec" | jq -r '(.origin.name // "-") | tojson' 2>/dev/null)
+            prompt=$(printf '%s' "$rec" | jq -r '
+                (.origin.body //
+                 (.message.content
+                  | if type == "string" then .
+                    else ([.[]? | select(.type == "text") | .text] | join("\n"))
+                    end))
+                | tojson' 2>/dev/null)
+        fi
+    fi
+
+    if [[ "$kind" == "-" && -n "$human_off" ]]; then
+        line=$(tail -c +"$(( human_off + 1 ))" "$jsonl" 2>/dev/null | head -1) || true
+        prompt=$(printf '%s' "$line" | jq -r '
+            def clean:
+                gsub("<command-name>(?<n>[^<]*)</command-name>\\s*<command-message>[^<]*</command-message>\\s*<command-args>(?<a>[^<]*)</command-args>"; "\(.n) \(.a)")
+                | gsub("<pasted_content[^>]*>.*?</pasted_content>"; "[pasted]"; "m");
+            (.message.content
+             | if type == "string" then .
+               else ([.[]? | select(.type == "text") | .text] | join("\n"))
+               end)
+            | clean | tojson' 2>/dev/null)
+        if [[ -n "$prompt" && "$prompt" != "null" ]]; then
+            kind="you"
+        else
+            prompt="-"
+        fi
+    fi
+    [[ -z "$prompt" ]] && prompt="-"
+
+    local asst reply tool pending
+    asst=$(tail -c 131072 "$jsonl" 2>/dev/null | jq -Rn -r "$_AGENT_TOOL_LINE_JQ"'
+        [inputs | fromjson?] as $recs |
+        ($recs | map(select(.type == "assistant")) | map((.message.content // [])[]?)) as $blocks |
+        ($recs | map(select(.type == "user")) | map((.message.content // [])[]? | select(.type == "tool_result") | .tool_use_id)) as $results |
+        ([$blocks[] | select(.type == "text") | .text | select(length > 0)] | last) as $reply_raw |
+        ($blocks | map(select(.type == "tool_use"))) as $tool_uses |
+        ($tool_uses | last) as $tool_tu |
+        ($tool_uses | map(select(. as $t | ($results | index($t.id)) == null)) | last) as $pending_tu |
+        ( if $reply_raw == null then "-" else ($reply_raw[0:32768] | tojson) end ) as $out_reply |
+        ( if $tool_tu == null then "-" else ($tool_tu | tool_line | tojson) end ) as $out_tool |
+        ( if $pending_tu == null then "-"
+          elif $pending_tu.name == "AskUserQuestion" then
+              (($pending_tu.input.questions[0].question // "") | tojson)
+          else ($pending_tu | tool_line | tojson)
+          end ) as $out_pending |
+        [$out_reply, $out_tool, $out_pending] | join("\t")
+    ' 2>/dev/null)
+    reply="-"; tool="-"; pending="-"
+    [[ -n "$asst" ]] && IFS=$'\t' read -r reply tool pending <<< "$asst"
+
+    printf '%s\t%s\t%s\t%s\t%s\t%s' "$kind" "$prompt" "$from" "${reply:--}" "${tool:--}" "${pending:--}"
+}
+
 # get_agent_snippet <agent-jsonl> <maxlen> [cache-file]
 #   A one-line "what is this agent doing", flattened and truncated to maxlen.
 #   Prefers the most recent non-empty assistant text (narration); with none
@@ -987,7 +1111,7 @@ get_agent_snippet() {
     fi
 
     local text
-    text=$(tail -c 131072 "$jsonl" | jq -Rn -r --argjson maxlen "$maxlen" '
+    text=$(tail -c 131072 "$jsonl" | jq -Rn -r --argjson maxlen "$maxlen" "$_AGENT_TOOL_LINE_JQ"'
         [inputs | fromjson?] as $recs |
         # all assistant content blocks, in order, most recent last
         [$recs[] | select(.type == "assistant") | (.message.content // [])[]?] as $blocks |
@@ -995,27 +1119,16 @@ get_agent_snippet() {
         (if $narration != null then
             $narration
         else
-            # Keyed on input FIELD names, never tool names: command/path/
-            # query are shared across many tools and stable over time, where
-            # a switch on tool names rots on every new tool, rename or mcp__*
-            # name. Falling through to the first string value in the input
-            # means an unknown or MCP tool still gets a summary.
+            # Keyed on input FIELD names, never tool names, inside tool_line
+            # (command/path/query are shared across many tools and stable
+            # over time; a switch on tool names rots on every new tool,
+            # rename or mcp__* name, and falling through to the first string
+            # input value means an unknown or MCP tool still gets a summary).
             ($blocks | map(select(.type == "tool_use")) | last) as $tu |
             if $tu == null then
                 empty
             else
-                ($tu.input // {}) as $in |
-                ((["command","pattern","query","url","file_path","path","description","message","prompt"]
-                    | map($in[.]?) | map(select(type == "string" and length > 0)) | first)
-                 // ([$in | to_entries[] | .value | select(type == "string" and length > 0)] | first)) as $raw |
-                (if $raw == null then ""
-                 else ($raw | split("\n")[0]) as $line |
-                    # basename path-like values (a slash, no spaces, not a
-                    # URL) so "/a/b/thing.py" reads as "thing.py"
-                    (if ($line | test("^[^ ]*/[^ ]*$")) and ($line | test("://") | not)
-                        then ($line | split("/") | last) else $line end)
-                 end) as $arg |
-                "→ " + ($tu.name // "tool") + (if ($arg | length) > 0 then ": " + $arg else "" end)
+                "→ " + ($tu | tool_line)
             end
         end)
         # Flatten to one line. A surviving tab counts as 1 char in
