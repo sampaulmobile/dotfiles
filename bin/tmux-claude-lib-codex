@@ -113,7 +113,7 @@ CODEX_MAP_DIR="$HOME/.cache/claude-attention/codex"
 
 # The SessionStart hook's map is pane-exact, written on a thread's first
 # prompt and again after /new; the newest-rollout-by-cwd fallback below
-# covers a codex started before the hooks were trusted.
+# covers a codex not yet prompted or started before the hooks were trusted.
 #
 # tmux reuses pane ids after a server restart, so a mapped entry is trusted
 # only while its recorded cwd still matches the pane's own; a mismatch

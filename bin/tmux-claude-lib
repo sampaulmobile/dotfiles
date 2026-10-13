@@ -390,7 +390,8 @@ scan_agent_panes() {
 # than on the session's current window while the prompt blocks in another.
 aggregate_session_status() {
     # Delimited strings and a first-seen order array (bash 3.2 has no
-    # associative arrays).
+    # associative arrays), searched by prefix stripping, never command
+    # substitution: this runs inside the statusbar's ~200ms scan.
     local perm_s=$'\n' work_s=$'\n' idle_s=$'\n' seen=$'\n'
     local -a order=()
     local name pane _w _a st rest
@@ -875,8 +876,9 @@ def tool_line:
 # (tojson) or "-", so none carries a raw tab or newline that would shift
 # a TSV reader's columns. Claude transcripts only.
 #
-# grep -b — the only full-file pass here; a typed prompt can sit far behind
-# a 100+ KB run of tool results, so a bounded tail would miss it — see
+# Prompt offset: grep -b for the last human or peer record, the only
+# full-file pass here; a typed prompt can sit far behind a 100+ KB run of
+# tool results, so a bounded tail would miss it — see
 # workplans/hq-feed-plan.md. A peer record newer than the last human one is
 # a cross-session message (kind "msg", "from" its origin.name) UNLESS it
 # carries no name — a subagent hand-back (senderTaskId, no name) — in which
@@ -886,9 +888,10 @@ def tool_line:
 # "task-notification" or absent) never matches, so "you ›" is never drawn
 # from one.
 #
-# The last non-empty text block (reply), the last tool_use (tool) and the
-# last tool_use whose id has no matching tool_result in the window
-# (pending; AskUserQuestion renders as its first question's text).
+# Assistant side, from the bounded tail (tail -c 131072): the last
+# non-empty text block (reply), the last tool_use (tool) and the last
+# tool_use whose id has no matching tool_result in that tail (pending;
+# AskUserQuestion renders as its first question's text).
 #
 # No caching: the mtime gate against re-parsing an unchanged transcript
 # lives in the caller (bin/hq-snapshot's turns_rows).
