@@ -62,6 +62,7 @@ expect claude-idle.txt            claude idle
 expect claude-working.txt         claude working
 expect claude-permission.txt      claude permission
 expect claude-plan-permission.txt claude permission
+expect claude-idle-yes-no-prose.txt claude idle
 expect claude-idle-agents-list.txt    claude idle
 expect claude-working-agents-list.txt claude working
 
