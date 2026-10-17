@@ -37,7 +37,7 @@ it returns.
 Before dispatching anything that touches an EXISTING PR or branch (review
 fixes, branch catch-up merges, follow-ups), check whether work on it is
 already in flight:
-`bin/worktrees` lists a worktree for that branch with its PIPELINE column, and
+`deck pick --dump --worktrees` lists a session for that branch, and
 the user may be steering an agent there. If so, do NOT launch a second run —
 send the new direction to that session by name and ask it to fold the work in,
 drop what the user has since overridden, and reply with the current state.
@@ -93,16 +93,10 @@ ask the user, before dispatching.
 - In-flight state comes from the FILES the pipelines write, never from this
   conversation and never from a ledger of your own: each worktree's
   `.feature/status.jsonl`, whose LAST line is that run's current
-  phase/round/seat. The collector publishes every one of them, refreshed
-  every ~5s; read the file, and refresh it first if you need this second's
-  state:
-  ```
-  ~/dotfiles/bin/hq-snapshot pipelines   # optional: collect before reading
-  cat ~/.local/state/hq/snapshot/pipelines.tsv
-  ```
-  Columns: worktree · tmux session · repo · branch · `<phase> r<round>
-  <seat>` · PR · updated. A worktree with no run in flight has no row.
-  `bin/worktrees` shows the same state as its PIPELINE column.
+  phase/round/seat. deck's daemon collects every one of them, refreshed
+  every few seconds; `deck feed --dump` prints each task session's block
+  with its `<phase> r<round> <seat>` tag and age, and `deck pick --dump
+  --worktrees` lists every worktree session.
   A `phase: gate` line means that run is waiting on the requester, not
   working: review and give or relay the go per
   `~/.claude/skills/feature/SKILL.md`'s "After a Launch, on the requester's
@@ -111,9 +105,8 @@ ask the user, before dispatching.
   it arrived here as a message, and otherwise it is at the top of that
   worktree's `workplans/<slug>-plan.md`, or of `.feature/plan.md` when
   workplans are off.
-- A decision that is the owner's call never goes into chat without a
-  record — the auto-take test, the asked/auto-taken split and the
-  `hq-make-decision` calls are all in that same section of
+- A decision that is the owner's call: the auto-take test and the
+  asked/auto-taken split are in that same section of
   `~/.claude/skills/feature/SKILL.md`; this session follows it rather than
   its own copy.
 - A turn that ends waiting on the owner's answer ends with a final line
@@ -123,12 +116,12 @@ ask the user, before dispatching.
   findings when a `--quick` run produced no commits, not implementation detail.
 - Multi-repo: report per-piece status; the feature is done only when every
   piece lands.
-- Steering: relay user feedback onward by message to the task session, named
-  in the run's `pipelines.tsv` row — the same name Launch reported and Ctrl+F
-  lists (Ctrl+W there shows every worktree session). If the user wants
+- Steering: relay user feedback onward by message to the task session — the
+  name Launch reported, which Ctrl+F lists (Ctrl+W there shows every worktree
+  session). If the user wants
   hands-on control, name that session to jump to (Ctrl+F).
-- `deck reap --apply` (run by the status bar's snapshot tick every ~2
-  minutes) ends finished task sessions on its own: a merged/closed one
+- `deck reap --apply` (nothing schedules it yet; run it yourself) ends
+  finished task sessions: a merged/closed one
   is killed within a few minutes, worktree untouched; a phase-`done` one
   with the PR still open gets its claude ended ("parked") after 12h idle,
   session kept. A message to a parked session sits unread until someone

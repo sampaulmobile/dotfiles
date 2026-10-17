@@ -1,12 +1,11 @@
 # Codex as a second agent backend
 
-Codex (OpenAI's CLI) runs in the same tmux workflow as Claude Code:
-Ctrl+Space toggles its window, prefix+C opens an extra one, the status bar
-counts its prompts and Ctrl+Y jumps to them. Which agent a session runs is
-the tmux session option `@agent`. deck has no codex adapter yet: `deck pick`
+Codex (OpenAI's CLI) runs in the same tmux workflow as Claude Code. Which
+agent a session runs is the tmux session option `@agent`. deck has no codex adapter yet: `deck pick`
 (Ctrl+F) and `deck launch` build claude sessions, and its screens read no
-codex rollout. A codex session is any session whose `@agent` is `codex`
-before Ctrl+Space first opens its agent window.
+codex rollout. A codex session is any session whose `@agent` is `codex`,
+set by hand (`tmux set-option -t <session> @agent codex`) since nothing
+builds one.
 
 Verified against codex-cli 0.153.4.
 
@@ -58,14 +57,11 @@ Verified against codex-cli 0.153.4.
 5. **Trust the hooks.** Codex refuses to run hooks it has not been shown.
    Start `codex` and either answer the startup prompt ("Hooks need review")
    with *Trust all and continue*, or run `/hooks` and press `t`. The table
-   must show 4 hooks, all Active:
+   must show 1 hook, Active:
 
    | Event | What it does |
    |-------|--------------|
-   | SessionStart | writes the pane → rollout map `tmux-claude-lib-codex` reads |
-   | SessionEnd | removes that map entry |
-   | Stop | flags the pane "finished but unseen" (✅ in the status bar, Ctrl+Y target) |
-   | PermissionRequest | bell + macOS notification titled *Codex* |
+   | Stop | flags the pane "finished but unseen" (deck's Feed reads the flag) |
 
    **Any edit to `hooks.json` invalidates the trust** and the prompt comes
    back — expected, not a bug.
@@ -89,10 +85,8 @@ convention. Two things only true here:
 
 ## What differs from claude in the tooling
 
-- **Rollout reader** (`bin/tmux-claude-lib-codex`): the context window
-  comes from the rollout itself, and the plan's rate-limit usage (e.g.
-  `5h:42%`) stands in for cost — plan billing has no per-token cost. Turns
-  are counted as `task_started` events, one per prompt you submit.
+- **No deck adapter yet**: a codex pane appears in deck's screens with no
+  status, tokens, context or cost, and no permission bell.
 - **Rules and skills**: codex has no rules directory, and only
   harness-neutral skills are shared — see CLAUDE.md's Agents convention for
   which, and why.
@@ -114,4 +108,4 @@ convention. Two things only true here:
   exited with code 126").
 - The first run in a new directory asks a separate "Do you trust the
   contents of this directory?" question. Both that and the hook-trust prompt
-  count as "needs attention" in the status bar, since both block the agent.
+  block the agent, and deck shows neither yet.

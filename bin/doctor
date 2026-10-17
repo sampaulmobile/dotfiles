@@ -21,9 +21,6 @@ section "machine-local config (other/)"
 section "symlinks"
 "$DOTFILES/bin/symlink_files.sh" --check || failed=1
 
-section "status snapshot (~/.local/state/hq/snapshot)"
-"$DOTFILES/bin/hq-snapshot" --check || failed=1
-
 section "private state repos (other/, hq, wiki)"
 if [ -x "$DOTFILES/other/bin/sync" ]; then
     "$DOTFILES/other/bin/sync" --check || failed=1

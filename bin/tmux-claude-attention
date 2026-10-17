@@ -5,7 +5,11 @@
 # session-level flag would suppress a pane finishing in a background window
 # of an attached session, and clear the flags of a window nobody looked at.
 #
-# Stop hook for ~/.claude/settings.json:
+# The flag files (~/.cache/claude-attention/<session>@<pane>.done) are what
+# deck's Feed and picker read as "finished, not yet visited" (its
+# `attention_dir`); nothing here reads them back.
+#
+# Stop hook for ~/.claude/settings.json (and dots/codex/hooks.json):
 #   "hooks": {
 #     "Stop": [
 #       {
@@ -25,34 +29,20 @@
 #   flag-done              Stop hook — flag the calling pane.
 #   clear <session>        tmux client-attached / client-session-changed /
 #                          session-window-changed hooks.
-#   list                   Flagged live panes, newest first, minus a pane
-#                          whose background subagents are still live — the
-#                          flag FILE stays on disk and surfaces once the
-#                          fresh panes snapshot reads 0 for it; stale or
-#                          missing snapshot means no filtering (fail open).
-#   jump [client-tty]      C-y. Permission prompt first, else newest flag.
 #   jump-to <client-tty> <session> <pane>
 #                          deck's Feed `g` (its attention_cmd) — one named
 #                          pane, no search.
-#   codex-session-start    codex SessionStart hook (dots/codex/hooks.json).
-#   codex-session-end      codex SessionEnd hook.
-
-source ~/dotfiles/bin/tmux-claude-lib
 
 FLAG_DIR="$HOME/.cache/claude-attention"
 
 usage() {
-    echo "usage: $(basename "$0") {flag-done|clear <session>|list|jump [client-tty]|jump-to <client-tty> <session> <pane>|codex-session-start|codex-session-end}" >&2
+    echo "usage: $(basename "$0") {flag-done|clear <session>|jump-to <client-tty> <session> <pane>}" >&2
 }
 
 # Pane ids are server-unique (%N), but the session name stays in the
-# filename so clear/list's per-session filter needs no tmux round trip.
+# filename so clear's per-session filter needs no tmux round trip.
 flag_path() {
     printf '%s/%s@%s.done' "$FLAG_DIR" "$1" "${2#%}"
-}
-
-file_mtime() {
-    stat -f '%m' "$1" 2>/dev/null || stat -c '%Y' "$1" 2>/dev/null
 }
 
 cmd_flag_done() {
@@ -60,8 +50,8 @@ cmd_flag_done() {
     # the pane that finished.
     [[ -z "${TMUX_PANE:-}" ]] && exit 0
 
-    local session wactive cur
-    IFS=$'\t' read -r session wactive cur < <(tmux display -pt "$TMUX_PANE" $'#{session_name}\t#{window_active}\t#{@agent_status}' 2>/dev/null)
+    local session wactive
+    IFS=$'\t' read -r session wactive < <(tmux display -pt "$TMUX_PANE" $'#{session_name}\t#{window_active}' 2>/dev/null)
     [[ -z "$session" ]] && exit 0
 
     # Suppress the flag only when THIS pane is on screen: its window is the
@@ -75,13 +65,6 @@ cmd_flag_done() {
 
     mkdir -p "$FLAG_DIR"
     touch "$(flag_path "$session" "$TMUX_PANE")"
-
-    # A still-busy sibling agent pane in the same window outranks the flag
-    # (window_status_from_panes precedence), so leave those alone.
-    case "$cur" in
-        permission|working) ;;
-        *) tmux set-option -wq -t "$TMUX_PANE" @agent_status done 2>/dev/null ;;
-    esac
 }
 
 cmd_clear() {
@@ -104,71 +87,17 @@ cmd_clear() {
     # own session (nvim titles its window after the repo dir, so a hub
     # session "dotfiles" has a window "dotfiles" too). "=name:" is
     # unambiguously that session's current window.
-    local pane cur
-    while IFS=$'\t' read -r pane cur; do
+    local pane
+    while IFS= read -r pane; do
         [[ -z "$pane" ]] && continue
         rm -f "$(flag_path "$session" "$pane")"
-    done < <(tmux list-panes -t "=${session}:" -F $'#{pane_id}\t#{@agent_status}' 2>/dev/null)
-    [[ "$cur" == "done" ]] && tmux set-option -wq -t "=${session}:" @agent_status idle 2>/dev/null
+    done < <(tmux list-panes -t "=${session}:" -F '#{pane_id}' 2>/dev/null)
 }
 
-cmd_list() {
-    [[ -d "$FLAG_DIR" ]] || return 0
-
-    # One tmux round trip for the whole live-pane set, then test each flag
-    # against it in pure bash: a per-flag tmux call blows the statusbar's
-    # 200ms budget as soon as more than a couple of panes are flagged.
-    local live=$'\n'
-    live+=$(tmux list-panes -a -F '#{session_name}@#{pane_id}' 2>/dev/null)
-    live+=$'\n'
-
-    # Prune map entries whose pane is gone: codex's SessionEnd removes its
-    # own, but a killed pane never gets one.
-    local m mpane
-    for m in "$CODEX_MAP_DIR"/*.tsv; do
-        [[ -e "$m" ]] || continue
-        mpane="${m##*/}"
-        mpane="${mpane%.tsv}"
-        [[ "$live" == *"@%${mpane}"$'\n'* ]] || rm -f "$m"
-    done
-
-    local f key session pane flagged
-    flagged=$(
-        for f in "$FLAG_DIR"/*.done; do
-            [[ -e "$f" ]] || continue
-            key="${f##*/}"
-            key="${key%.done}"
-            session="${key%@*}"
-            pane="${key##*@}"
-            if [[ "$key" == *@* && "$live" == *$'\n'"${session}@%${pane}"$'\n'* ]]; then
-                printf '%s\t%s\t%s\n' "$(file_mtime "$f")" "$session" "%${pane}"
-            else
-                rm -f "$f"
-            fi
-        done | sort -rn | cut -f2,3
-    )
-    [[ -n "$flagged" ]] || return 0
-
-    # Sourced here, not at file top: cmd_clear (every window switch) and
-    # the Stop hook never reach this line, so they skip hq-snapshot's own
-    # parse and fork.
-    source ~/dotfiles/bin/hq-snapshot
-
-    # The flag FILE is never touched here, so it reappears once the fresh
-    # panes snapshot reads 0 for this pane. Stale/missing snapshot: no
-    # filtering (fail open).
-    if [[ "$(snapshot_verdict "$(snapshot_age panes)" "$(snapshot_cadence panes)")" == fresh ]]; then
-        drop_deferred_flags "$flagged" "$(snapshot_read panes 2>/dev/null)"
-    else
-        printf '%s\n' "$flagged"
-    fi
-}
-
-# Client scoping matters: dots/tmux.conf's C-y binding always passes
-# #{client_tty}, but run-shell spawns a fresh client with no attached-client
-# identity, so an unscoped `switch-client -t` falls back to tmux's
-# most-recently-active attached client and can yank a DIFFERENT real client
-# to the target session.
+# Client scoping matters: run-shell spawns a fresh client with no
+# attached-client identity, so an unscoped `switch-client -t` falls back to
+# tmux's most-recently-active attached client and can yank a DIFFERENT real
+# client to the target session.
 do_switch() {
     local client="$1" target="$2" pane="$3"
     local -a cflag=()
@@ -180,49 +109,8 @@ do_switch() {
         # which would otherwise clear nothing after this select-window.
         tmux select-window -t "$pane" 2>/dev/null \
             && tmux select-pane -t "$pane" 2>/dev/null
-        local f
-        f=$(flag_path "$target" "$pane")
-        if [[ -e "$f" ]]; then
-            rm -f "$f"
-            tmux set-option -wq -t "$pane" @agent_status idle 2>/dev/null
-        fi
+        rm -f "$(flag_path "$target" "$pane")"
     fi
-}
-
-cmd_jump() {
-    local client="$1"
-    local session
-
-    local -a cflag=()
-    [[ -n "$client" ]] && cflag=(-c "$client")
-
-    local perm_s=$'\n'
-    local st pane
-    # Trailing `_` absorbs scan_claude_sessions' 4th field (agents); a
-    # 3-var read folds it into $pane as "<pane>\t<agents>".
-    while IFS=$'\t' read -r session st pane _; do
-        [[ "$st" == "permission" ]] && perm_s+="${session}"$'\t'"${pane}"$'\n'
-    done < <(scan_claude_sessions)
-    if [[ "$perm_s" != $'\n' ]]; then
-        local rest
-        while IFS= read -r session; do
-            [[ -z "$session" ]] && continue
-            rest="${perm_s#*$'\n'"$session"$'\t'}"
-            if [[ "$rest" != "$perm_s" ]]; then
-                do_switch "$client" "$session" "${rest%%$'\n'*}"
-                return
-            fi
-        done < <(tmux list-sessions -F '#{session_activity} #{session_name}' 2>/dev/null | sort -rn | awk '{print $2}')
-    fi
-
-    local pane=""
-    IFS=$'\t' read -r session pane < <(cmd_list | head -1)
-    if [[ -n "$session" ]]; then
-        do_switch "$client" "$session" "$pane"
-        return
-    fi
-
-    tmux display-message "${cflag[@]}" "nothing needs attention"
 }
 
 cmd_jump_to() {
@@ -231,55 +119,10 @@ cmd_jump_to() {
     do_switch "$client" "$session" "$pane"
 }
 
-cmd_codex_session_start() {
-    # Hooks inherit the shell environment, so $TMUX_PANE is the pane codex
-    # runs in. It becomes a filename below: accept only tmux's own %N form.
-    [[ "${TMUX_PANE:-}" =~ ^%[0-9]+$ ]] || exit 0
-
-    local input sid tpath cwd
-    input=$(cat)
-    # One field per LINE, not @tsv: tab is IFS whitespace, so a tab-split
-    # read collapses an empty field and shifts every value after it.
-    {
-        read -r sid
-        read -r tpath
-        read -r cwd
-    } <<< "$(printf '%s' "$input" |
-        jq -r '.session_id // "", .transcript_path // "", .cwd // ""' 2>/dev/null)"
-
-    # A payload without a transcript path is useless to the dashboard; leave
-    # any existing entry alone rather than replacing it with nothing.
-    [[ -z "$tpath" ]] && exit 0
-    # Leading field never empty: codex_find_pane_jsonl tab-splits this file
-    # (see the IFS note above).
-    sid=${sid:--}
-
-    mkdir -p "$CODEX_MAP_DIR"
-    local out="$CODEX_MAP_DIR/${TMUX_PANE#%}.tsv"
-    local tmp="${out}.$$.tmp"
-    # Atomic (the dashboard reads this while codex writes it) and replaced,
-    # not appended, so the reader (which takes only line 1) always sees a
-    # pane's latest /new thread.
-    if printf '%s\t%s\t%s\n' "$sid" "$tpath" "$cwd" > "$tmp" 2>/dev/null; then
-        mv -f "$tmp" "$out"
-    else
-        rm -f "$tmp"
-    fi
-}
-
-cmd_codex_session_end() {
-    [[ "${TMUX_PANE:-}" =~ ^%[0-9]+$ ]] || exit 0
-    rm -f "$CODEX_MAP_DIR/${TMUX_PANE#%}.tsv"
-}
-
 case "${1:-}" in
-    flag-done)           cmd_flag_done ;;
-    clear)               cmd_clear "${2:-}" ;;
-    list)                cmd_list ;;
-    jump)                cmd_jump "${2:-}" ;;
-    jump-to)             cmd_jump_to "${2:-}" "${3:-}" "${4:-}" ;;
-    codex-session-start) cmd_codex_session_start ;;
-    codex-session-end)   cmd_codex_session_end ;;
+    flag-done) cmd_flag_done ;;
+    clear)     cmd_clear "${2:-}" ;;
+    jump-to)   cmd_jump_to "${2:-}" "${3:-}" "${4:-}" ;;
     *)
         usage
         exit 1

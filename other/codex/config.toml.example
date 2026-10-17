@@ -21,8 +21,7 @@ project_doc_fallback_filenames = ["CLAUDE.md"]
 hooks = true
 
 [tui]
-# Desktop notification when codex wants approval. The PermissionRequest hook
-# covers the tmux side (🔴 in the status bar, Ctrl+Y jump) independently.
+# Desktop notification when codex wants approval; deck shows no codex status yet.
 notifications = ["approval-requested"]
 # status_line = { ... }
 

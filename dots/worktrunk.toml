@@ -7,7 +7,7 @@
 #   {{ repo_path }}/../{{ repo }}.{{ branch | sanitize }}
 # e.g. ~/dev/myproject + feat/x -> ~/dev/myproject.feat-x
 # (Ctrl+F's picker finds these at depth 1; dots become underscores in
-# session names, so Ctrl+F / Ctrl+Space / Ctrl+G all work unmodified)
+# session names, so Ctrl+F / Ctrl+E / Ctrl+G all work unmodified)
 
 post-switch = "wt-tmux-jump {{ worktree_path }}"
 # post-merge/post-remove run AFTER the worktree directory is gone (`wt hook
