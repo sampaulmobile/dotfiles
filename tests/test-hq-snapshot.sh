@@ -369,6 +369,59 @@ else
     bad "collect_prs producer" "does not run bin/prs --snapshot"
 fi
 
+echo "── tick spawns deck reap --apply on its stamp's cadence, only with deck on PATH"
+# PATH is built from scratch so the real deck can never be the one found; the
+# stub only records its argv. worktrees/prs are pre-written fresh so the tick
+# spawns no gh-backed collector.
+sys_path=/usr/bin:/bin:/usr/sbin:/sbin
+if ! command -v lockf >/dev/null 2>&1; then
+    echo "  skip (no lockf off Darwin)"
+elif PATH="$sys_path" command -v deck >/dev/null 2>&1; then
+    echo "  skip (a deck on $sys_path would be the real one)"
+else
+    stub="$work/stubbin"
+    mkdir -p "$stub" "$work/ticktmp"
+    printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s"\n' "$work/deck-calls" > "$stub/deck"
+    chmod +x "$stub/deck"
+    for s in worktrees prs; do
+        : | HQ_SNAPSHOT_DIR="$work/ticksnap" snapshot_write "$s"
+    done
+    tick_() {   # tick_ <PATH>
+        HOME="$fh" PROJECT_DIRS_LOCAL=/nonexistent TMPDIR="$work/ticktmp" \
+            HQ_SNAPSHOT_DIR="$work/ticksnap" HQ_REAP_DIR="$work/reap" PATH="$1" \
+            "$repo/bin/hq-snapshot" tick >/dev/null 2>&1
+    }
+    calls_() { [[ -f "$work/deck-calls" ]] && grep -c . "$work/deck-calls" || echo 0; }
+
+    tick_ "$sys_path"
+    if [[ ! -e "$work/reap/last-run" ]]; then
+        ok "no deck on PATH: no stamp, no spawn"
+    else
+        bad "tick without deck" "stamped $work/reap/last-run"
+    fi
+
+    tick_ "$stub:$sys_path"
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        [[ "$(calls_)" != 0 ]] && break
+        sleep 0.2
+    done
+    if [[ -e "$work/reap/last-run" ]]; then ok "tick touches the reap stamp"; else bad "reap stamp" "missing"; fi
+    got=$(cat "$work/deck-calls" 2>/dev/null)
+    if [[ "$got" == "reap --apply" ]]; then
+        ok "tick spawns deck reap --apply"
+    else
+        bad "deck spawn" "got [$got]"
+    fi
+
+    tick_ "$stub:$sys_path"
+    sleep 1
+    if [[ "$(calls_)" == 1 ]]; then
+        ok "a fresh stamp gates the next tick's spawn"
+    else
+        bad "reap cadence" "deck called $(calls_) times"
+    fi
+fi
+
 echo
 if (( fail )); then
     echo "FAILED: $fail failed, $pass passed"

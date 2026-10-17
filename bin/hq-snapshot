@@ -19,18 +19,14 @@ DOTFILES="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 
 SNAPSHOT_DIR="${HQ_SNAPSHOT_DIR:-$HOME/.local/state/hq/snapshot}"
 
-# INBOX_DIR's thread logs are appended to, never rewritten or removed.
-INBOX_DIR="${HQ_INBOX_DIR:-$HOME/.local/state/hq/inbox}"
-
 REAP_DIR="${HQ_REAP_DIR:-$HOME/.local/state/hq/reap}"
 REAP_CADENCE=120
 
 # <name>:<cadence seconds>. The cadence is both the tick interval a source is
 # collected on and, times three, the age at which a reader stops trusting it.
-# `all` walks this list BACKWARDS (slowest first), so a source that joins two
-# others — inbox, over pipelines and prs — is listed before them to be
-# collected after them.
-SNAPSHOT_SOURCES="inbox:5 sessions:5 pipelines:5 worktrees:15 prs:30 turns:5 panes:5"
+# `all` walks this list BACKWARDS (slowest first), so a source that joins
+# others is listed before them to be collected after them.
+SNAPSHOT_SOURCES="sessions:5 pipelines:5 worktrees:15 prs:30 panes:5"
 
 snapshot_file() { printf '%s/%s.tsv' "$SNAPSHOT_DIR" "$1"; }
 
@@ -111,22 +107,6 @@ snapshot_read() {
     return 0
 }
 
-# / -> -, the same mapping session_name_for_branch uses, so a branch, its
-# worktree and its thread agree. A thread's ONLY identity that survives a
-# sweep — once the worktree is gone only the file name remains — so
-# anything keyed per thread (inbox archive and seen marks included) keys by
-# this, never by the real branch.
-inbox_slug_out=""
-inbox_slug() {
-    inbox_slug_out="${1//\//-}"
-}
-
-inbox_thread_file_out=""
-inbox_thread_file() {
-    inbox_slug "$2"
-    inbox_thread_file_out="$INBOX_DIR/$1/$inbox_slug_out.md"
-}
-
 # Status records are append-only, so the last line is current.
 jsonl_last_line() {
     local f="$1" l last=""
@@ -177,140 +157,6 @@ pipeline_for_cwd() {
     return 0
 }
 
-# turns_rows <pane-body> <pane-meta> <name-map> <prev-body>
-#   Relies on tmux-claude-lib's find_pane_jsonl, codex_find_pane_jsonl,
-#   _agent_file_mtime and get_last_exchange already being sourced (done by
-#   collect_turns). <pane-body> is scan_agent_panes' line format: session,
-#   pane, window_id, agent, status, agents. Output, one line per input line:
-#     session pane window agent status agents name mtime jsonl kind prompt
-#     from reply tool pending cwd
-#   (- for empty; leading fields never empty). <pane-meta> is
-#   "pane_id\twindow_index\tcwd", <name-map> is "pane_num\tname" (no %),
-#   <prev-body> is the previous turns snapshot's own body — all three
-#   LEADING-newlined.
-#
-#   The mtime gate reuses a previous record's six exchange fields when a
-#   pane's jsonl and mtime both match it, as ONE awk pass over <prev-body>:
-#   a bash `${var#*pattern}` strip against a pane's up-to-32KB reply
-#   measured SLOWER than re-parsing every transcript (same cost
-#   get_agent_snippet documents for `${var//x/y}`). The agents value always
-#   comes from the CURRENT pane body, never from a reused record — a parent
-#   pane's live subagent count is a per-tick fact, not an exchange field.
-turns_rows() {
-    local pane_body="$1" pane_meta="$2" name_map="$3" prev_body="$4"
-    local session pane _wid agent status agents
-    local -a claude_lines=()
-    while IFS=$'\t' read -r session pane _wid agent status agents; do
-        [[ -n "$pane" ]] || continue
-        [[ -n "$agents" ]] || agents="-"
-
-        local rest widx cwd name
-        widx="-"; cwd="-"
-        rest="${pane_meta#*$'\n'"${pane}"$'\t'}"
-        if [[ "$rest" != "$pane_meta" ]]; then
-            widx="${rest%%$'\t'*}"
-            cwd="${rest#*$'\t'}"
-            cwd="${cwd%%$'\n'*}"
-            [[ -n "$widx" ]] || widx="-"
-            [[ -n "$cwd" ]] || cwd="-"
-        fi
-
-        name="-"
-        rest="${name_map#*$'\n'"${pane#%}"$'\t'}"
-        if [[ "$rest" != "$name_map" ]]; then
-            local nm="${rest%%$'\n'*}"
-            [[ -n "$nm" && "$nm" != "-" && "$nm" != "$session" ]] && name="$nm"
-        fi
-
-        if [[ "$agent" == codex ]]; then
-            local mtime="-" jsonl
-            jsonl=$(codex_find_pane_jsonl "$pane" 2>/dev/null)
-            [[ -n "$jsonl" ]] || jsonl="-"
-            [[ "$jsonl" != "-" ]] && { mtime=$(_agent_file_mtime "$jsonl"); [[ -n "$mtime" ]] || mtime="-"; }
-            printf '%s\t%s\t%s\t%s\t%s\t-\t%s\t%s\t%s\t-\t-\t-\t-\t-\t-\t%s\n' \
-                "$session" "$pane" "$widx" "$agent" "$status" "$name" "$mtime" "$jsonl" "$cwd"
-        else
-            local jsonl mtime="-"
-            jsonl=$(find_pane_jsonl "$pane" 2>/dev/null)
-            [[ -n "$jsonl" ]] || jsonl="-"
-            if [[ "$jsonl" == "-" ]]; then
-                printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t-\t-\t-\t-\t-\t-\t-\t-\t%s\n' \
-                    "$session" "$pane" "$widx" "$agent" "$status" "$agents" "$name" "$cwd"
-            else
-                mtime=$(_agent_file_mtime "$jsonl")
-                [[ -n "$mtime" ]] || mtime="-"
-                claude_lines+=("${session}"$'\t'"${pane}"$'\t'"${widx}"$'\t'"${agent}"$'\t'"${status}"$'\t'"${agents}"$'\t'"${name}"$'\t'"${mtime}"$'\t'"${jsonl}"$'\t'"${cwd}")
-            fi
-        fi
-    done <<< "$pane_body"
-
-    (( ${#claude_lines[@]} == 0 )) && return 0
-
-    # claude_lines fields (1-indexed, awk): 1 session 2 pane 3 window
-    # 4 agent 5 status 6 agents 7 name 8 mtime 9 jsonl 10 cwd. A previous
-    # (gated) record's own fields 10-15 are kind/prompt/from/reply/tool/
-    # pending, reused when mtime(8)/jsonl(9) both still match.
-    local gated f1 rest16
-    gated=$(awk -F'\t' -v OFS='\t' '
-        FNR == NR { if ($0 != "") { prev[$1 SUBSEP $2] = $0 }; next }
-        {
-            key = $1 SUBSEP $2
-            if ((key in prev)) {
-                split(prev[key], pf, "\t")
-                if (pf[8] == $8 && pf[9] == $9) {
-                    print "REUSE", $1,$2,$3,$4,$5,$6,$7,$8,$9,$10, pf[10],pf[11],pf[12],pf[13],pf[14],pf[15]
-                    next
-                }
-            }
-            print "PARSE", $1,$2,$3,$4,$5,$6,$7,$8,$9,$10
-        }
-    ' <(printf '%s\n' "$prev_body") <(printf '%s\n' "${claude_lines[@]}"))
-
-    snapshot_lines_preserve "$gated"
-    local line
-    for line in "${SPLIT_OUT[@]}"; do
-        [[ -n "$line" ]] || continue
-        f1="${line%%$'\t'*}"
-        rest16="${line#*$'\t'}"
-        if [[ "$f1" == REUSE ]]; then
-            local session2 pane2 widx2 agent2 status2 agents2 name2 mtime2 jsonl2 cwd2
-            local kind2 prompt2 from2 reply2 tool2 pending2
-            IFS=$'\t' read -r session2 pane2 widx2 agent2 status2 agents2 name2 mtime2 jsonl2 cwd2 \
-                kind2 prompt2 from2 reply2 tool2 pending2 <<< "$rest16"
-            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-                "$session2" "$pane2" "$widx2" "$agent2" "$status2" "$agents2" "$name2" "$mtime2" "$jsonl2" \
-                "$kind2" "$prompt2" "$from2" "$reply2" "$tool2" "$pending2" "$cwd2"
-        else
-            local session3 pane3 widx3 agent3 status3 agents3 name3 mtime3 jsonl3 cwd3
-            IFS=$'\t' read -r session3 pane3 widx3 agent3 status3 agents3 name3 mtime3 jsonl3 cwd3 <<< "$rest16"
-            local kind3 prompt3 from3 reply3 tool3 pending3
-            IFS=$'\t' read -r kind3 prompt3 from3 reply3 tool3 pending3 < <(get_last_exchange "$jsonl3")
-            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-                "$session3" "$pane3" "$widx3" "$agent3" "$status3" "$agents3" "$name3" "$mtime3" "$jsonl3" \
-                "$kind3" "$prompt3" "$from3" "$reply3" "$tool3" "$pending3" "$cwd3"
-        fi
-    done
-}
-
-# SPLIT_OUT spares callers `<<<`/`< <(...)`: bash 3.2 leaks their fd in the
-# long-lived viewers that source this file.
-snapshot_lines_preserve() {
-    local text="$1" rest line
-    SPLIT_OUT=()
-    rest="$text"
-    while :; do
-        if [[ "$rest" == *$'\n'* ]]; then
-            line="${rest%%$'\n'*}"
-            rest="${rest#*$'\n'}"
-        else
-            line="$rest"
-            rest=""
-        fi
-        SPLIT_OUT+=("$line")
-        [[ -z "$rest" ]] && break
-    done
-}
-
 # Nothing above this guard sets a shell option or collects anything, so a
 # screen can source this file at any point.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
@@ -326,36 +172,29 @@ usage: hq-snapshot <source>...      collect those sources now
        hq-snapshot tick             the statusbar's entry (see below)
        hq-snapshot age [<source>]   seconds since each source was written
        hq-snapshot --check          doctor mode: every source present and fresh
-                                    (inbox: present)
 
 Sources and their cadence, one TSV each under ~/.local/state/hq/snapshot/
 (override the directory with HQ_SNAPSHOT_DIR):
-  sessions   5s   per-session agent status, for the sessionizer's row colors
+  sessions   5s   per-session agent status
   pipelines  5s   the last .feature/status.jsonl line of every worktree
   worktrees 15s   bin/worktrees' classification of every project
   prs       30s   bin/prs' GitHub search rows
-  inbox      5s   bin/hq-inbox's threads: pipelines and prs joined to the
-                  hub-written thread logs under ~/.local/state/hq/inbox
-                  (override that directory with HQ_INBOX_DIR)
-  turns      5s   bin/hq-feed's per-pane last exchange (prompt/reply/tool)
-  panes      5s   bin/hq-feed's per-pane status, for turns to join against
-                  with no second scan_agent_panes/get_claude_panes of its own
+  panes      5s   per-pane agent status, which bin/tmux-claude-attention reads
+                  to defer a flag whose pane still has live subagents
 
 Every file starts with a `# generated <ISO time>` line. A reader treats a
 snapshot older than three times its cadence as unusable and computes live.
 
 tick is called by bin/tmux-claude-statusbar every ~5s: it collects pipelines
-and turns inline and spawns the slower sources when they are due and not
-already running; a tick that finds another one running exits at once. inbox
-is not ticked: bin/hq-inbox recollects it when it is stale, so --check flags
-it only when missing. sessions and panes are written by the statusbar
-itself, which has just run the scan each publishes from — `hq-snapshot
-sessions` / `hq-snapshot panes` are the standalone paths, for a machine
-whose status bar is not ticking (collect_turns falls back to scanning
-itself when the panes snapshot is stale or missing). tick also spawns
-`hq-reap --apply` (its own last-run stamp under ~/.local/state/hq/reap gates
-it, default every 120s) — hq-snapshot's own job stays collect-only; it kills
-and removes nothing.
+inline and spawns the slower sources when they are due and not already
+running; a tick that finds another one running exits at once. sessions and
+panes are written by the statusbar itself, which has just run the scan each
+publishes from — `hq-snapshot sessions` / `hq-snapshot panes` are the
+standalone paths, for a machine whose status bar is not ticking. tick also
+spawns `deck reap --apply` when deck is on PATH, every 120s, gated by the
+last-run stamp it touches under ~/.local/state/hq/reap (override with
+HQ_REAP_DIR) — hq-snapshot's own job stays collect-only; it kills and
+removes nothing.
 
 Nothing under ~/.local/state/hq is ever removed, by this script or any other.
 A failed write leaves <file>.tmp.<pid> behind on purpose; to clear them, run
@@ -377,39 +216,6 @@ collect_panes() {
     # shellcheck source=/dev/null
     source "$DOTFILES/bin/tmux-claude-lib" || return 1
     scan_agent_panes
-}
-
-# Never get_claude_panes or a second scan_agent_panes here: both measured
-# well over the 5s tick's ~50ms budget.
-#
-# find_pane_jsonl's pane-exact lookup needs _CWD_MAP_FILE primed, else it
-# falls through to a tmux display-message plus a jq scan PER CLAUDE PANE
-# (measured ~150ms/pane live — the dominant cost, not get_last_exchange).
-# Primed at a fixed path, replaced by mv, never removed.
-collect_turns() {
-    # shellcheck source=/dev/null
-    source "$DOTFILES/bin/tmux-claude-lib" || return 1
-
-    local pane_body verdict
-    verdict=$(snapshot_verdict "$(snapshot_age panes)" "$(snapshot_cadence panes)")
-    if [[ "$verdict" == fresh ]]; then
-        pane_body=$(snapshot_read panes 2>/dev/null)
-    else
-        pane_body=$(scan_agent_panes)
-    fi
-    [[ -n "$pane_body" ]] || return 0
-
-    _CWD_MAP_FILE="${TMPDIR:-/tmp}/hq-snapshot-cwd-map.tsv"
-    jq -r "$_CWD_MAP_JQ" "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null > "${_CWD_MAP_FILE}.tmp.$$"
-    mv -f "${_CWD_MAP_FILE}.tmp.$$" "$_CWD_MAP_FILE"
-
-    local pane_meta name_map prev_body
-    pane_meta=$'\n'"$(tmux list-panes -a -F $'#{pane_id}\t#{window_index}\t#{pane_current_path}' 2>/dev/null)"
-    name_map=$'\n'"$(jq -r '[((.tmux // "") | [scan("%[0-9]+$")] | .[0] // "-"), (.name // "-")] | @tsv' \
-        "${CLAUDE_SESSIONS_DIR}"/*.json 2>/dev/null)"
-    prev_body=$'\n'"$(snapshot_read turns 2>/dev/null)"
-
-    turns_rows "$pane_body" "$pane_meta" "$name_map" "$prev_body"
 }
 
 # collect_pipelines — one row per worktree running a /feature or
@@ -446,100 +252,6 @@ collect_worktrees() {
 
 collect_prs() {
     "$DOTFILES/bin/prs" --snapshot
-}
-
-# The headline is the first non-blank line after the LAST `## ` header.
-thread_mtime=""; thread_entries=0; thread_headline=""
-thread_facts() {
-    local f="$1" l want=0
-    thread_mtime=""; thread_entries=0; thread_headline=""
-    thread_mtime=$(file_mtime "$f") || { thread_mtime=""; return 0; }
-    while IFS= read -r l || [[ -n "$l" ]]; do
-        case "$l" in
-            '## '*)
-                thread_entries=$(( thread_entries + 1 ))
-                thread_headline=""
-                want=1
-                ;;
-            *)
-                if (( want )) && [[ -n "${l//[[:space:]]/}" ]]; then
-                    thread_headline="$l"
-                    want=0
-                fi
-                ;;
-        esac
-    done < "$f"
-    thread_headline="${thread_headline//$'\t'/ }"
-}
-
-# status.jsonl's `pr` is a URL by contract but a bare PR number in real
-# data, so a number is matched too, scoped to its own repo.
-pr_row_tag() {
-    local repo="$1" pr="$2" map="$3" url slug num kind draft mergeable ci review
-    [[ -n "$pr" && "$pr" != "-" && -n "$map" ]] || return 0
-    while IFS=$'\t' read -r url slug num kind draft mergeable ci review; do
-        [[ -n "$url" ]] || continue
-        if [[ "$pr" != "$url" ]]; then
-            [[ "$pr" == "$num" && "${slug##*/}" == "$repo" ]] || continue
-        fi
-        if [[ "$kind" == merged ]]; then printf 'merged'; else pr_tag "$draft" "$mergeable" "$ci" "$review"; fi
-        return 0
-    done <<< "$map"
-    return 0
-}
-
-# collect_inbox — one row per thread, the unit bin/hq-inbox lists:
-#   <worktree> <session> <repo> <branch> <state> <pr> <pr-tag>
-#   <thread-mtime> <thread-entries> <headline>
-# A thread log whose worktree has been swept keeps a row, with - in
-# worktree, session and state, so it stays reachable until archived.
-collect_inbox() {
-    local line kind slug num draft mergeable ci review title url
-    local path session repo branch state pr map="" tag seen=$'\n' d f b
-    # shellcheck source=/dev/null
-    source "$DOTFILES/bin/prs" || return 1
-    while IFS= read -r line; do
-        case "$line" in
-            "open"$'\t'*)
-                IFS=$'\t' read -r slug num draft mergeable ci review _ title url <<< "${line#open$'\t'}"
-                map+="${url}"$'\t'"${slug}"$'\t'"${num}"$'\t'"open"$'\t'"${draft}"$'\t'"${mergeable}"$'\t'"${ci}"$'\t'"${review}"$'\n'
-                ;;
-            "merged"$'\t'*)
-                IFS=$'\t' read -r slug num _ title url <<< "${line#merged$'\t'}"
-                map+="${url}"$'\t'"${slug}"$'\t'"${num}"$'\t'"merged"$'\t-\t-\t-\t-'$'\n'
-                ;;
-        esac
-    done < <(snapshot_read prs 2>/dev/null)
-
-    while IFS=$'\t' read -r path session repo branch state pr _; do
-        [[ -n "$path" && -n "$repo" ]] || continue
-        [[ "$branch" == "-" ]] && branch=""
-        thread_mtime=""; thread_entries=0; thread_headline=""
-        if [[ -n "$branch" ]]; then
-            inbox_thread_file "$repo" "$branch"
-            thread_facts "$inbox_thread_file_out"
-        fi
-        tag=$(pr_row_tag "$repo" "$pr" "$map")
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-            "$path" "${session:--}" "$repo" "${branch:--}" "${state:--}" \
-            "${pr:--}" "${tag:--}" "${thread_mtime:--}" "$thread_entries" "${thread_headline:--}"
-        inbox_slug "$branch"
-        seen+="${repo}/${inbox_slug_out}"$'\n'
-    done < <(snapshot_read pipelines 2>/dev/null)
-
-    for d in "$INBOX_DIR"/*/; do
-        [[ -d "$d" ]] || continue
-        repo="${d%/}"; repo="${repo##*/}"
-        [[ "$repo" == "_state" ]] && continue
-        for f in "$d"*.md; do
-            [[ -f "$f" ]] || continue
-            b="${f##*/}"; b="${b%.md}"
-            [[ "$seen" == *$'\n'"${repo}/${b}"$'\n'* ]] && continue
-            thread_facts "$f"
-            printf -- '-\t-\t%s\t%s\t-\t-\t-\t%s\t%s\t%s\n' \
-                "$repo" "$b" "${thread_mtime:--}" "$thread_entries" "${thread_headline:--}"
-        done
-    done
 }
 
 # collect_one: the body is held in full first — a producer that fails must
@@ -583,7 +295,6 @@ case "${1:-}" in
         for s in $SNAPSHOT_SOURCES; do
             name="${s%%:*}"
             v=$(snapshot_verdict "$(snapshot_age "$name")" "${s#*:}")
-            [[ "$name" == inbox && "$v" == stale ]] && continue
             [[ "$v" == fresh ]] || miss+="  $name: $v"$'\n'
         done
         if [[ -n "$miss" ]]; then
@@ -622,18 +333,21 @@ case "${1:-}" in
                 "${TMPDIR:-/tmp}/hq-snapshot-tick.lock" "$0" tick
         fi
         collect_one pipelines || rc=1
-        collect_one turns || rc=1
         for s in worktrees prs; do
             declare -f "collect_$s" >/dev/null 2>&1 || continue
             due "$s" || continue
             already_running "$s" && continue
             ( "$0" "$s" >/dev/null 2>&1 & )
         done
-        # hq-reap takes its own lock, so a tick overlapping an already-running
-        # reap is a no-op, not a second pass.
-        reap_mtime=$(file_mtime "$REAP_DIR/last-run") || reap_mtime=-1
-        if [[ "$reap_mtime" == -1 ]] || (( $(date +%s) - reap_mtime >= REAP_CADENCE )); then
-            ( "$DOTFILES/bin/hq-reap" --apply >/dev/null 2>&1 & )
+        # deck reap takes its own lock, so a tick overlapping an
+        # already-running reap is a no-op, not a second pass. deck writes no
+        # stamp here, so the tick touches it before spawning.
+        if command -v deck >/dev/null 2>&1; then
+            reap_mtime=$(file_mtime "$REAP_DIR/last-run") || reap_mtime=-1
+            if [[ "$reap_mtime" == -1 ]] || (( $(date +%s) - reap_mtime >= REAP_CADENCE )); then
+                mkdir -p "$REAP_DIR" && touch "$REAP_DIR/last-run"
+                ( deck reap --apply >/dev/null 2>&1 & )
+            fi
         fi
         exit "$rc"
         ;;
