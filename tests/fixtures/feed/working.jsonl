@@ -1,2 +1,0 @@
-{"type":"user","message":{"role":"user","content":"run the tests"},"origin":{"kind":"human"}}
-{"type":"assistant","message":{"content":[{"type":"tool_use","id":"w1","name":"Bash","input":{"command":"tests/run.sh"}}]}}

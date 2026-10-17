@@ -1,10 +1,11 @@
 # Codex as a second agent backend
 
-Codex (OpenAI's CLI) runs in the same tmux workflow as Claude Code: the
-sessionizer builds its sessions, Ctrl+Space toggles its window, prefix+C
-opens an extra one, the status bar counts its prompts, Ctrl+Y jumps to them,
-and Ctrl+G shows its tokens. Which agent a session runs is decided when the
-session is created and pinned as the tmux session option `@agent`.
+Codex (OpenAI's CLI) runs in the same tmux workflow as Claude Code. Which
+agent a session runs is the tmux session option `@agent`. deck has no codex adapter yet: `deck pick`
+(Ctrl+F) and `deck launch` build claude sessions, and its screens read no
+codex rollout. A codex session is any session whose `@agent` is `codex`,
+set by hand (`tmux set-option -t <session> @agent codex`) since nothing
+builds one.
 
 Verified against codex-cli 0.153.4.
 
@@ -56,14 +57,12 @@ Verified against codex-cli 0.153.4.
 5. **Trust the hooks.** Codex refuses to run hooks it has not been shown.
    Start `codex` and either answer the startup prompt ("Hooks need review")
    with *Trust all and continue*, or run `/hooks` and press `t`. The table
-   must show 4 hooks, all Active:
+   must show 2 hooks, both Active:
 
    | Event | What it does |
    |-------|--------------|
-   | SessionStart | writes the pane → rollout map the Ctrl+G dashboard reads |
-   | SessionEnd | removes that map entry |
-   | Stop | flags the pane "finished but unseen" (✅ in the status bar, Ctrl+Y target) |
-   | PermissionRequest | bell + macOS notification titled *Codex* |
+   | Stop | `deck hook done`: deck's Feed lists the pane DONE until its window is visited |
+   | PermissionRequest | `deck hook permission`: the bell and macOS notification, once deck ships them |
 
    **Any edit to `hooks.json` invalidates the trust** and the prompt comes
    back — expected, not a bug.
@@ -82,18 +81,13 @@ convention. Two things only true here:
 - **Check what a session got**: `tmux show-options -t <session> @agent` — a
   plain session name, since the `=name` exact-match form comes back empty
   for options.
-- Worktree sessions from `wt switch -c` always get the default agent.
+- Worktree sessions from `wt switch -c` are built by `deck pick`, so they
+  run claude.
 
 ## What differs from claude in the tooling
 
-- **Dashboard (Ctrl+G)**: codex rows take their context window from the
-  rollout itself, show the model id raw, and put the plan's rate-limit usage
-  (e.g. `5h:42%`) in the COST column — plan billing has no per-token cost.
-  Rows show no subagent tree; codex subagents are not read yet.
-- **Turns**: counted as `task_started` events in the rollout — one per
-  prompt you submit.
-- **`bin/claude-tokens`** (the offline analyzer) still only reads claude
-  transcripts.
+- **No deck adapter yet**: a codex pane appears in deck's screens with no
+  status, tokens, context or cost, and no permission bell.
 - **Rules and skills**: codex has no rules directory, and only
   harness-neutral skills are shared — see CLAUDE.md's Agents convention for
   which, and why.
@@ -101,12 +95,8 @@ convention. Two things only true here:
 ## Gotchas found while wiring this up
 
 - `SessionStart` fires on a thread's **first prompt**, not when the TUI
-  launches — so a codex you started but never prompted has no map entry
-  yet. The dashboard falls back to the newest rollout whose `session_meta`
-  cwd matches the pane's.
-- `/new` starts a new thread and fires `SessionStart` again (source is
-  still `startup`), so the map follows the new rollout.
-- `SessionEnd` fires on `/quit` even for a thread that never started.
+  launches; `/new` fires it again (source still `startup`); `SessionEnd`
+  fires on `/quit` even for a thread that never started.
 - `hooks.json` accepts only two top-level keys, `description` and `hooks`;
   anything else is a parse error and ALL hooks are dropped (codex prints a
   warning line in the TUI). Hook commands are shell-expanded, so `$HOME`
@@ -115,4 +105,4 @@ convention. Two things only true here:
   exited with code 126").
 - The first run in a new directory asks a separate "Do you trust the
   contents of this directory?" question. Both that and the hook-trust prompt
-  count as "needs attention" in the status bar, since both block the agent.
+  block the agent, and deck shows neither yet.

@@ -1,4 +1,0 @@
-{"type":"user","message":{"role":"user","content":"start the migration"},"origin":{"kind":"human"}}
-{"type":"assistant","message":{"content":[{"type":"text","text":"starting now"}]}}
-{"type":"user","message":{"role":"user","content":"[Subagent hand-back] done"},"origin":{"kind":"peer","from":"taskid123","senderTaskId":"taskid123"}}
-{"type":"user","message":{"role":"user","content":[{"type":"text","text":"go ahead with the migration"}]},"origin":{"kind":"peer","from":"uds:/tmp/x.sock","name":"beta-hub","body":"go ahead with the migration"}}

@@ -106,7 +106,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/dotfiles/bin/tmux-claude-notify",
+            "command": "command -v deck >/dev/null 2>&1 && exec deck hook permission; exit 0",
             "async": true
           }
         ]
@@ -118,7 +118,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/dotfiles/bin/tmux-claude-attention flag-done",
+            "command": "command -v deck >/dev/null 2>&1 && exec deck hook done; exit 0",
             "async": true
           }
         ]

@@ -35,13 +35,13 @@ item or the env-var name. The gitleaks hook is the backstop, not the rule.
 | `zshrc.local` | sourced at the end of `~/.zshrc` | env vars, extra PATH, anything shell |
 | `aliases.local` | sourced by `~/.zshrc` after shared aliases | machine/work-specific aliases & functions |
 | `gitconfig.local` | `[include]` in `~/.gitconfig` | per-machine git identity/overrides |
-| `tmux-sessionizer.local` | sourced by `bin/project-dirs-lib` (used by `bin/tmux-sessionizer` and `bin/worktrees`) | override `search_dirs` |
+| `tmux-sessionizer.local` | sourced by `bin/project-dirs-lib` (used by `bin/runners` and `bin/wt-tmux-cleanup`) | override `search_dirs` |
 | `claude/settings.json` | file-symlinked to `~/.claude/settings.json` | Claude Code settings (seeded from the .example) |
 | `claude/skills/`, `claude/rules/`, `claude/agents/` | dir-symlinked to `~/.claude/{skills,rules,agents}` | private Claude skills/rules/agents, plus per-item links to the tracked generic set (see below) |
 | `codex/config.toml` | file-symlinked to `~/.codex/config.toml` | Codex settings, seeded from the .example — codex writes its own `[projects]` trust entries here |
 | `codex/AGENTS.md` | file-symlinked to `~/.codex/AGENTS.md` | Codex global instructions (seeded from the .example); codex has no rules dir, so this is hand-written |
 | `codex/skills/` | dir-symlinked to `~/.agents/skills` | private Codex skills, plus per-item links to the tracked skills named in `dots/codex/shared-skills` |
-| `tmux-agent-default` | read by `bin/tmux-claude-lib` | one line, `claude` or `codex` — the agent new tmux sessions get (missing = claude) |
+| `tmux-agent-default` | read by nothing today (deck builds every session as claude) | one line, `claude` or `codex` |
 
 ## Agent config: two layers, per agent
 

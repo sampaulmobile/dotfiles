@@ -1,55 +1,9 @@
 # Test fixtures
 
-Pane captures fed to `classify_pane_status` by `tests/test-classify.sh`. One
-file per (agent, state) the attention layer has to tell apart. Keep them
-realistic: they are the only place the UI strings the classifier depends on
-are written down.
-
-| Fixture | Agent | Expected status | Provenance |
-|---------|-------|-----------------|------------|
-| `claude-idle.txt` | claude | idle | hand-written from the strings the classifier matches (`❯` prompt) |
-| `claude-working.txt` | claude | working | hand-written (`esc to interrupt`, `s · ↓ … tokens`, `⎿  Running…`) |
-| `claude-permission.txt` | claude | permission | hand-written (Yes/No selector) |
-| `claude-idle-agents-list.txt` | claude | idle | real capture, sanitized: a finished pipeline session whose last painted frame still shows the agents list, whose rows end in a bare `36m 12s · ↓ 421.5k tokens` tail the spinner test must not match |
-| `claude-working-agents-list.txt` | claude | working | same list, genuinely working: three rows push the spinner past the 10-line window, so this reads `idle` unless the chrome after `← for agents` is dropped first |
-| `claude-plan-permission.txt` | claude | permission | hand-written (plan-mode question, `Enter to select` on the last line — deliberately has no "No" option so it exercises that branch and not the Yes/No one) |
-| `codex-idle.txt` | codex | idle | real `tmux capture-pane -p` from codex-cli 0.153.4 |
-| `codex-working.txt` | codex | working | real capture, mid-turn |
-| `codex-permission.txt` | codex | permission | real capture of the command-approval overlay |
-| `codex-dir-trust.txt` | codex | permission | real capture of the first-run directory-trust prompt |
-| `codex-hook-trust.txt` | codex | permission | real capture of the hook-trust prompt (shown after any `hooks.json` change) |
-
 `settings-example.json`, `settings-live-clean.json` and
 `settings-live-gappy.json` are the trio `tests/test-settings-check.sh` feeds
 to `bin/claude-settings-check`: a cut-down settings.json template, a live file
 that differs from it only in non-drift ways (key order, scalar values, local
 extras), and one missing a hook, an allowlist entry, a nested key and a whole
 object. Hand-written; the command strings are the repo's own `~/dotfiles/bin`
-paths.
-
-`inbox-pipelines.tsv`, `inbox-prs.tsv`, `inbox-threads/` and
-`inbox-state/` are `tests/test-hq-inbox.sh`'s stand-ins for a live
-`~/.local/state/hq`: two snapshot bodies (without their `# generated` line,
-which the suite adds), five hub-written thread logs and the archive/seen
-marks over them. Hand-written against the real record shapes; the repos are
-`proj`/`lib` on `acme`, the worktree paths the `~/dev/proj` placeholder.
-`inbox-prs.tsv` covers an open PR joined by URL, one joined by a bare number
-(what `status.jsonl` carries in practice) and a merged one;
-`inbox-state/archived.tsv` carries the epochs the suite `touch -t`s the logs
-to, so it must be edited together with those `touch` lines. Both state files
-key by the branch SLUG (`feat-done`, not `feat/done`), and an archived row
-with no state writes `-`.
-
-The codex captures (the pane text above and `codex-rollout.jsonl`, the real
-rollout `tests/test-codex-rollout.sh` reads) were taken on a throwaway tmux
-socket in a scratch directory and scrubbed: every real path was replaced with `~/dev/proj`, the
-model id with the neutral placeholder `gpt-5`, and the account's `plan_type`
-with `plan` (nothing reads either field — the model string is only echoed
-into the dashboard's MODEL column). Nothing here may carry a private path,
-host, org name or non-public model/deployment name — this repo is public.
-
-To refresh one: run the agent in a throwaway tmux session
-(`tmux -L fixture-grab new-session -d -x 180 -y 45 codex`), drive it into the
-state you want, `tmux -L fixture-grab capture-pane -p -t 0 -S -30 > file`,
-scrub the paths, then `tmux -L fixture-grab kill-server`. Never use the
-default tmux server for this.
+paths and the `deck hook done` Stop line.

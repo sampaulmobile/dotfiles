@@ -21,14 +21,35 @@ section "machine-local config (other/)"
 section "symlinks"
 "$DOTFILES/bin/symlink_files.sh" --check || failed=1
 
-section "status snapshot (~/.local/state/hq/snapshot)"
-"$DOTFILES/bin/hq-snapshot" --check || failed=1
-
 section "private state repos (other/, hq, wiki)"
 if [ -x "$DOTFILES/other/bin/sync" ]; then
     "$DOTFILES/other/bin/sync" --check || failed=1
 else
     echo "  other/ is not the private repo — skipped (see other/README.md)"
+fi
+
+section "deck"
+if ! command -v deck >/dev/null 2>&1; then
+    echo "  deck not on PATH — fix: uv tool install -e <deck checkout>"
+    failed=1
+else
+    if [ -L "$HOME/.config/deck/config.toml" ]; then
+        echo "  config: ~/.config/deck/config.toml is a symlink"
+    else
+        echo "  ~/.config/deck/config.toml is not a symlink"
+        echo "  fix: ln -s <deck checkout>/config.toml ~/.config/deck/config.toml"
+        failed=1
+    fi
+    if deck_out=$(deck status 2>&1); then
+        echo "  deck status: all collectors fresh"
+    else
+        printf '%s\n' "$deck_out" | sed 's/^/    /'
+        case "$deck_out" in
+            *"daemon lock: held"*) echo "  a collector is stale while the daemon runs — recheck shortly" ;;
+            *) echo "  fix: start the daemon (deck daemon)" ;;
+        esac
+        failed=1
+    fi
 fi
 
 section "brew (etc/Brewfile_mac)"

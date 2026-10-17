@@ -1,3 +1,0 @@
-{"type":"user","message":{"role":"user","content":"check the build"},"origin":{"kind":"human"}}
-{"type":"assistant","message":{"content":[{"type":"text","text":"build is green"}]}}
-{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>abc</task-id>\n</task-notification>"},"origin":{"kind":"task-notification"}}
