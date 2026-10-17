@@ -1,5 +1,5 @@
 {
-  "description": "deck's done event: the Feed lists the pane DONE until its window is visited (see notes/codex.md)",
+  "description": "deck's hook events: done (the Feed lists the pane DONE until its window is visited) and permission (the bell and notification); see notes/codex.md",
   "hooks": {
     "Stop": [
       {
@@ -7,6 +7,17 @@
           {
             "type": "command",
             "command": "deck hook done",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "deck hook permission",
             "async": true
           }
         ]

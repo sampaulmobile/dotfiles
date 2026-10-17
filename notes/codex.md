@@ -57,11 +57,12 @@ Verified against codex-cli 0.153.4.
 5. **Trust the hooks.** Codex refuses to run hooks it has not been shown.
    Start `codex` and either answer the startup prompt ("Hooks need review")
    with *Trust all and continue*, or run `/hooks` and press `t`. The table
-   must show 1 hook, Active:
+   must show 2 hooks, both Active:
 
    | Event | What it does |
    |-------|--------------|
    | Stop | `deck hook done`: deck's Feed lists the pane DONE until its window is visited |
+   | PermissionRequest | `deck hook permission`: the bell and macOS notification, once deck ships them |
 
    **Any edit to `hooks.json` invalidates the trust** and the prompt comes
    back — expected, not a bug.
