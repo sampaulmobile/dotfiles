@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v deck >/dev/null 2>&1 && exec deck hook done; exit 0",
+            "command": "deck hook done",
             "async": true
           }
         ]

@@ -94,12 +94,8 @@ convention. Two things only true here:
 ## Gotchas found while wiring this up
 
 - `SessionStart` fires on a thread's **first prompt**, not when the TUI
-  launches — so a codex you started but never prompted has no map entry
-  yet. `codex_find_pane_jsonl` falls back to the newest rollout whose
-  `session_meta` cwd matches the pane's.
-- `/new` starts a new thread and fires `SessionStart` again (source is
-  still `startup`), so the map follows the new rollout.
-- `SessionEnd` fires on `/quit` even for a thread that never started.
+  launches; `/new` fires it again (source still `startup`); `SessionEnd`
+  fires on `/quit` even for a thread that never started.
 - `hooks.json` accepts only two top-level keys, `description` and `hooks`;
   anything else is a parse error and ALL hooks are dropped (codex prints a
   warning line in the TUI). Hook commands are shell-expanded, so `$HOME`

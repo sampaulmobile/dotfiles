@@ -37,8 +37,9 @@ it returns.
 Before dispatching anything that touches an EXISTING PR or branch (review
 fixes, branch catch-up merges, follow-ups), check whether work on it is
 already in flight:
-`deck pick --dump --worktrees` lists a session for that branch, and
-the user may be steering an agent there. If so, do NOT launch a second run —
+`deck feed --dump` shows that branch's task session with a `<phase> r<round>
+<seat>` run tag, and the user may be steering an agent there. If so, do NOT
+launch a second run —
 send the new direction to that session by name and ask it to fold the work in,
 drop what the user has since overridden, and reply with the current state.
 Fresh work needs no check.
