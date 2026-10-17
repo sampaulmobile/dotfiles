@@ -28,6 +28,14 @@
   single implementer for scripts, reports and analysis. A peer's or a skill's
   default is not the user's choice of either.
 
+- **Size the round to the diff, and never queue a small change behind a
+  large one.** When the diff is already known — a hotfix whose fix is in
+  hand, a rule flip, a rename — make it directly or with `/feature --quick`;
+  the plan/review/fix pipeline is for work whose shape is still open. A
+  small change on the same surface as a large PR in flight ships FIRST on
+  its own branch, and the large PR merges master afterwards — never the
+  reverse, and never folded into the large PR's next round.
+
 - **Size safeguards to the actual risk, and ask what that is first.** Before
   designing protection against a leak, a loss or a misuse, state in one line
   what could realistically go wrong and who it would hurt, and let the owner
