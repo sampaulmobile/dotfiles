@@ -24,8 +24,6 @@ REAP_CADENCE=120
 
 # <name>:<cadence seconds>. The cadence is both the tick interval a source is
 # collected on and, times three, the age at which a reader stops trusting it.
-# `all` walks this list BACKWARDS (slowest first), so a source that joins
-# others is listed before them to be collected after them.
 SNAPSHOT_SOURCES="sessions:5 pipelines:5 worktrees:15 prs:30 panes:5"
 
 snapshot_file() { printf '%s/%s.tsv' "$SNAPSHOT_DIR" "$1"; }

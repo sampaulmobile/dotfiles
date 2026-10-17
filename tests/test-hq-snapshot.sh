@@ -384,8 +384,10 @@ else
     printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s"\n' "$work/deck-calls" > "$stub/deck"
     chmod +x "$stub/deck"
     for s in worktrees prs; do
-        : | HQ_SNAPSHOT_DIR="$work/ticksnap" snapshot_write "$s"
+        : | SNAPSHOT_DIR="$work/ticksnap" snapshot_write "$s"
     done
+    inode_() { stat -f '%i' "$1" 2>/dev/null || stat -c '%i' "$1" 2>/dev/null; }
+    seeded=$(inode_ "$work/ticksnap/worktrees.tsv"):$(inode_ "$work/ticksnap/prs.tsv")
     tick_() {   # tick_ <PATH>
         HOME="$fh" PROJECT_DIRS_LOCAL=/nonexistent TMPDIR="$work/ticktmp" \
             HQ_SNAPSHOT_DIR="$work/ticksnap" HQ_REAP_DIR="$work/reap" PATH="$1" \
@@ -419,6 +421,12 @@ else
         ok "a fresh stamp gates the next tick's spawn"
     else
         bad "reap cadence" "deck called $(calls_) times"
+    fi
+    if [[ -f "$work/ticksnap/worktrees.tsv" && -f "$work/ticksnap/prs.tsv" \
+        && "$(inode_ "$work/ticksnap/worktrees.tsv"):$(inode_ "$work/ticksnap/prs.tsv")" == "$seeded" ]]; then
+        ok "the pre-written worktrees/prs are the ones the tick reads, never recollected"
+    else
+        bad "tick collectors" "ticksnap worktrees/prs missing or rewritten (seeded [$seeded])"
     fi
 fi
 

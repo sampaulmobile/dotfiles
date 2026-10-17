@@ -524,8 +524,7 @@ encode_cwd() {
     echo "$1" | sed 's|[/._]|-|g'
 }
 
-# Shared by build_cwd_session_map, live_agent_counts and bin/hq-snapshot's
-# collect_turns: pane id (with "%", "-" when untracked), cwd, sessionId.
+# Per sessions/*.json: pane id (with "%", "-" when untracked), cwd, sessionId.
 _CWD_MAP_JQ='[((.tmux // "") | [scan("%[0-9]+$")] | .[0] // "-"), .cwd, .sessionId] | @tsv'
 
 # One line per live claude: "paneId\tcwd\tsessionId", paneId is "-" when
@@ -1015,9 +1014,6 @@ def tool_line:
 # non-empty text block (reply), the last tool_use (tool) and the last
 # tool_use whose id has no matching tool_result in that tail (pending;
 # AskUserQuestion renders as its first question's text).
-#
-# No caching: the mtime gate against re-parsing an unchanged transcript
-# lives in the caller (bin/hq-snapshot's turns_rows).
 get_last_exchange() {
     local jsonl="$1"
     if [[ ! -f "$jsonl" ]]; then
