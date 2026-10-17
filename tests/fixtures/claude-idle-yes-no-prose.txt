@@ -1,0 +1,10 @@
+⏺ Yes, exactly that. The old workers died with that error.
+
+  Nothing since, and the queue is still 0.
+
+✻ Worked for 13s · done 8:16 AM
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ ❯                                                                            │
+╰──────────────────────────────────────────────────────────────────────────────╯
+  ? for shortcuts

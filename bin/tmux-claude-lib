@@ -273,8 +273,15 @@ classify_pane_status() {
         fi
     done
 
-    # Must be tested before idle: ❯ appears in the Yes/No selector too.
-    if [[ "$content" == *"Yes"* && "$content" == *"No"* ]]; then
+    # Must be tested before idle: ❯ appears in the Yes/No selector too. Only
+    # the selector's numbered rows count — a reply saying "Yes, exactly" above
+    # "Nothing since" is prose, not a prompt.
+    local sel_yes=0 sel_no=0
+    for w in "${window[@]}"; do
+        [[ "$w" == *[0-9]". Yes"* ]] && sel_yes=1
+        [[ "$w" == *[0-9]". No"* ]] && sel_no=1
+    done
+    if (( sel_yes && sel_no )); then
         echo "permission"
         return
     fi
