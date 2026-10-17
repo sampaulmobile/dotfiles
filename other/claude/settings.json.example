@@ -118,11 +118,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/dotfiles/bin/tmux-claude-attention flag-done",
-            "async": true
-          },
-          {
-            "type": "command",
             "command": "command -v deck >/dev/null 2>&1 && exec deck hook done; exit 0",
             "async": true
           }

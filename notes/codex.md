@@ -61,7 +61,7 @@ Verified against codex-cli 0.153.4.
 
    | Event | What it does |
    |-------|--------------|
-   | Stop | flags the pane "finished but unseen" (deck's Feed reads the flag) |
+   | Stop | `deck hook done`: deck's Feed lists the pane DONE until its window is visited |
 
    **Any edit to `hooks.json` invalidates the trust** and the prompt comes
    back — expected, not a bug.

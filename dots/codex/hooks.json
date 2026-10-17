@@ -1,12 +1,12 @@
 {
-  "description": "tmux attention layer: flag finished turns for deck's Feed (see notes/codex.md)",
+  "description": "deck's done event: the Feed lists the pane DONE until its window is visited (see notes/codex.md)",
   "hooks": {
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/dotfiles/bin/tmux-claude-attention flag-done",
+            "command": "command -v deck >/dev/null 2>&1 && exec deck hook done; exit 0",
             "async": true
           }
         ]

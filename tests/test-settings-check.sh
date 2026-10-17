@@ -64,7 +64,7 @@ expect_line    "hook with a different command"     "hooks.PreToolUse       match
 expect_line    "allowlist entry"                   "permissions.allow      Bash(uv tree:*)"
 expect_line    "nested scalar key"                 "voice.enabled"
 expect_line    "whole missing object"              "statusLine.type"
-expect_no_line "present hook is not reported"      "flag-done"
+expect_no_line "present hook is not reported"      "deck hook done"
 expect_no_line "differing scalar value is not drift" "effortLevel"
 expect_no_line "local-only entries are not drift"  "git push"
 expect_line    "names the fix"                     "fix: bin/claude-settings-check --apply"
