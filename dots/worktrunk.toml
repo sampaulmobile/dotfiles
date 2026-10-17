@@ -6,7 +6,7 @@
 # Worktree paths use the default template:
 #   {{ repo_path }}/../{{ repo }}.{{ branch | sanitize }}
 # e.g. ~/dev/myproject + feat/x -> ~/dev/myproject.feat-x
-# (sessionizer picks these up at depth 1; dots become underscores in
+# (Ctrl+F's picker finds these at depth 1; dots become underscores in
 # session names, so Ctrl+F / Ctrl+Space / Ctrl+G all work unmodified)
 
 post-switch = "wt-tmux-jump {{ worktree_path }}"

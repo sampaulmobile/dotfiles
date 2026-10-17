@@ -76,12 +76,12 @@ Plan: <ABSOLUTE plan path>
 
 <FEATURE / the brief, verbatim>
 LAUNCH_EOF
-~/dotfiles/bin/tmux-task-session --model <ORCH_MODEL> --effort <ORCH_EFFORT> "$WT" "$(cat "$LAUNCH_FILE")"
+deck launch --model <ORCH_MODEL> --effort <ORCH_EFFORT> "$WT" "$(cat "$LAUNCH_FILE")"
 ```
 
 The quoted heredoc delimiter and the `"$(cat ...)"` are what make this exact: the task, the flags and the requester reach Run through a file, never through a string a model retyped. `<PASSTHROUGH FLAGS>` is every flag this Launch received except `--repo=` and `--orchestrator=`, whose seat is already on the claude command line above, and `--requester=`, filled in below. `<REQUESTER>` is that flag's value when Launch received one, else this session's own tmux session name whenever it answers in `ListAgents` — hub or hq alike. Drop `--requester=` entirely only when neither is available, and drop the `Plan:` line when no workplan was given.
 
-`tmux-task-session` prints the session name. It is creation-only: it never switches a client, so the caller's screen does not move, and it leaves an existing session of that name alone.
+`deck launch` prints the session name and keeps the prompt as `.feature/launch-prompt.md`. It is creation-only: it never switches a client, so the caller's screen does not move, and it leaves an existing session of that name alone.
 
 **7. Report** the session name, the worktree path and the branch, and stop. Launch is done here.
 
@@ -95,7 +95,7 @@ Auto-taken: `add`, then `answer --auto <id> <recommended-option>`, naming it and
 
 When this Launch named this session as `--requester=`, the task session's FIRST message back is the plan digest (unless `--go`), and nothing else arrives until it is answered. Review it — the gate stays, and your own corrections and adjustments are wanted, never skipped; the digest's Question, if any, counts as one of them. Run every adjustment through the auto-take test above. If all of them pass it, `SendMessage` the task session BY NAME with "go" plus the adjustments yourself — a second `/feature` would start over — record each adjustment that had alternatives as an auto-taken decision, and report the go, with those ids, to the user and onward to the session that dispatched this run when one did. If any adjustment fails the test, relay the digest plus every adjustment to the user (and onward) instead, the passing ones marked already decided with their ids, and wait only on the failing ones; once the user answers, send the go the same way. Everything said about the plan goes back the same way. With no requester named — the launching session's tmux name did not answer in `ListAgents` — the digest appears in the task session's own terminal instead: tell the user the session name to visit (Ctrl+F) and there is nothing to relay.
 
-A task session the owner does not clean up still ends on its own (`bin/hq-reap`, running every ~2 minutes): one whose PR gets merged or closed has its tmux session killed within a few minutes, worktree untouched; one still at phase `done` with the PR left open gets its claude ended after 12h idle ("parked") while the session stays. A `SendMessage` to a parked session does not arrive until someone visits it (Ctrl+F, `wt switch`) or runs `~/dotfiles/bin/hq-reap resume <session>` — check first if a report seems to be going nowhere.
+A task session the owner does not clean up still ends on its own (`deck reap --apply`, run by the status bar's snapshot tick every ~2 minutes): one whose PR gets merged or closed has its tmux session killed within a few minutes, worktree untouched; one still at phase `done` with the PR left open gets its claude ended after 12h idle ("parked") while the session stays. A `SendMessage` to a parked session does not arrive until someone visits it (Ctrl+F, `wt switch`) or runs `deck reap resume <session>` — check first if a report seems to be going nowhere.
 
 This session never edits the pipeline's branch or PR by hand — not to fix a wrong result, not to finish a partial one. The loop's guarantee is that no code ships unreviewed, and a hand edit here is exactly that. A wrong or empty result is relayed as it is; the fix is a corrected brief and a new run, a resume of the task session with the correction, or the human's own hands.
 

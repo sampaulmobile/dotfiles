@@ -116,17 +116,21 @@ ask the user, before dispatching.
   `hq-make-decision` calls are all in that same section of
   `~/.claude/skills/feature/SKILL.md`; this session follows it rather than
   its own copy.
+- A turn that ends waiting on the owner's answer ends with a final line
+  `? <one-line question>`, nothing after it: deck matches `^\? ` against the
+  reply's last non-empty line and lists the session as ASKING in its Feed.
 - Relay results to the user as they land — PR URLs and summaries, or the
   findings when a `--quick` run produced no commits, not implementation detail.
 - Multi-repo: report per-piece status; the feature is done only when every
   piece lands.
 - Steering: relay user feedback onward by message to the task session, named
   in the run's `pipelines.tsv` row — the same name Launch reported and Ctrl+F
-  lists. If the user wants hands-on control, name that session to jump
-  to (Ctrl+F).
-- `bin/hq-reap` ends finished task sessions on its own: a merged/closed one
+  lists (Ctrl+W there shows every worktree session). If the user wants
+  hands-on control, name that session to jump to (Ctrl+F).
+- `deck reap --apply` (run by the status bar's snapshot tick every ~2
+  minutes) ends finished task sessions on its own: a merged/closed one
   is killed within a few minutes, worktree untouched; a phase-`done` one
   with the PR still open gets its claude ended ("parked") after 12h idle,
   session kept. A message to a parked session sits unread until someone
-  visits it or runs `~/dotfiles/bin/hq-reap resume <session>` — if a
+  visits it or runs `deck reap resume <session>` — if a
   steering message seems to go nowhere, check that before escalating.
