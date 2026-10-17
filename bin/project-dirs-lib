@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
-# Constraints: project_dirs() runs on the sessionizer's hot path before fzf
-# draws, so this file must stay fork-free (globs, [[ ]], `read`, parameter
-# expansion — no $(...), no git, no basename) and free of side effects beyond
-# sourcing the .local override. bash 3.2 (macOS /bin/bash): no mapfile, no
+# Constraints: project_dirs() runs on every ~5s snapshot tick (hq-snapshot's
+# collect_pipelines), so this file must stay fork-free (globs, [[ ]], `read`,
+# parameter expansion — no $(...), no git, no basename) and free of side
+# effects beyond sourcing the .local override. bash 3.2 (macOS /bin/bash): no mapfile, no
 # associative arrays, no ${var,,}, no `local -n`.
 
 # Entries are "path:depth" — depth 0 = the directory is itself a project,

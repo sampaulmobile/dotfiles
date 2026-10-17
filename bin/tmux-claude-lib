@@ -95,10 +95,8 @@ new_hub_session() {
     fi
 }
 
-# A non-parked session (the common case, paid on every
-# sessionizer/wt-tmux-jump/dashboard visit) costs exactly one display -p and
-# returns. CREATION-only per tmux-task-session's rule: display-message,
-# send-keys, set-option.
+# A non-parked session (the common case) costs exactly one display -p and
+# returns. CREATION-only: display-message, send-keys, set-option.
 unpark_session() {
     local session="$1" pane cmd tty
     IFS=$'\t' read -r pane cmd < <(tmux display -p -t "$session" $'#{@parked_pane}\t#{@parked_cmd}' 2>/dev/null)
@@ -753,9 +751,7 @@ get_totals_incremental() {
     fi
 
     # Line-tolerant (fromjson?) so a mid-write partial line drops that one
-    # record instead of zeroing the whole delta. The price sheet below is
-    # duplicated from bin/claude-tokens' JQ_PRELUDE, the source of truth —
-    # edit both together.
+    # record instead of zeroing the whole delta.
     local delta_out=0 delta_all=0 delta_turns=0 delta_scost="-" delta_est=0
     local delta
     delta=$(tail -c +"$(( cached_offset + 1 ))" "$jsonl" | jq -Rn -r --argjson inc_sc "$inc_sc" '

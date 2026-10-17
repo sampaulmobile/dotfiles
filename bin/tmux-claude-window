@@ -9,8 +9,8 @@
 #
 # --extra names its new window "<agent>+": the trailing + is what keeps the
 # toggle's by-name lookup from ever grabbing it. The attention layer finds
-# agents by tty, so extra windows still reach the statusbar, dashboard and
-# C-y with no wiring of their own.
+# agents by tty, so extra windows still reach the statusbar and C-y with no
+# wiring of their own.
 #
 # Both start the agent by typing into an initialized shell rather than
 # running it as the window command: other/zshrc.local env (model, TLS, ...)

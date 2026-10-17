@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # profile-lib — opt-in stage timings for the scripts whose speed is a feature
-# (bin/worktrees, bin/prs, bin/tmux-claude-dashboard). Sourceable, never run.
+# (bin/worktrees, bin/prs). Sourceable, never run.
 #
 #   source "$DOTFILES/bin/profile-lib"
 #   prof_init worktrees "${WORKTREES_PROFILE:-}"   # once, before stage 1

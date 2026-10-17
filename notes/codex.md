@@ -1,10 +1,12 @@
 # Codex as a second agent backend
 
-Codex (OpenAI's CLI) runs in the same tmux workflow as Claude Code: the
-sessionizer builds its sessions, Ctrl+Space toggles its window, prefix+C
-opens an extra one, the status bar counts its prompts, Ctrl+Y jumps to them,
-and Ctrl+G shows its tokens. Which agent a session runs is decided when the
-session is created and pinned as the tmux session option `@agent`.
+Codex (OpenAI's CLI) runs in the same tmux workflow as Claude Code:
+Ctrl+Space toggles its window, prefix+C opens an extra one, the status bar
+counts its prompts and Ctrl+Y jumps to them. Which agent a session runs is
+the tmux session option `@agent`. deck has no codex adapter yet: `deck pick`
+(Ctrl+F) and `deck launch` build claude sessions, and its screens read no
+codex rollout. A codex session is any session whose `@agent` is `codex`
+before Ctrl+Space first opens its agent window.
 
 Verified against codex-cli 0.153.4.
 
@@ -60,7 +62,7 @@ Verified against codex-cli 0.153.4.
 
    | Event | What it does |
    |-------|--------------|
-   | SessionStart | writes the pane → rollout map the Ctrl+G dashboard reads |
+   | SessionStart | writes the pane → rollout map `tmux-claude-lib-codex` reads |
    | SessionEnd | removes that map entry |
    | Stop | flags the pane "finished but unseen" (✅ in the status bar, Ctrl+Y target) |
    | PermissionRequest | bell + macOS notification titled *Codex* |
@@ -82,18 +84,15 @@ convention. Two things only true here:
 - **Check what a session got**: `tmux show-options -t <session> @agent` — a
   plain session name, since the `=name` exact-match form comes back empty
   for options.
-- Worktree sessions from `wt switch -c` always get the default agent.
+- Worktree sessions from `wt switch -c` are built by `deck pick`, so they
+  run claude.
 
 ## What differs from claude in the tooling
 
-- **Dashboard (Ctrl+G)**: codex rows take their context window from the
-  rollout itself, show the model id raw, and put the plan's rate-limit usage
-  (e.g. `5h:42%`) in the COST column — plan billing has no per-token cost.
-  Rows show no subagent tree; codex subagents are not read yet.
-- **Turns**: counted as `task_started` events in the rollout — one per
-  prompt you submit.
-- **`bin/claude-tokens`** (the offline analyzer) still only reads claude
-  transcripts.
+- **Rollout reader** (`bin/tmux-claude-lib-codex`): the context window
+  comes from the rollout itself, and the plan's rate-limit usage (e.g.
+  `5h:42%`) stands in for cost — plan billing has no per-token cost. Turns
+  are counted as `task_started` events, one per prompt you submit.
 - **Rules and skills**: codex has no rules directory, and only
   harness-neutral skills are shared — see CLAUDE.md's Agents convention for
   which, and why.
@@ -102,8 +101,8 @@ convention. Two things only true here:
 
 - `SessionStart` fires on a thread's **first prompt**, not when the TUI
   launches — so a codex you started but never prompted has no map entry
-  yet. The dashboard falls back to the newest rollout whose `session_meta`
-  cwd matches the pane's.
+  yet. `codex_find_pane_jsonl` falls back to the newest rollout whose
+  `session_meta` cwd matches the pane's.
 - `/new` starts a new thread and fires `SessionStart` again (source is
   still `startup`), so the map follows the new rollout.
 - `SessionEnd` fires on `/quit` even for a thread that never started.

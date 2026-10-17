@@ -32,7 +32,8 @@
 #                          missing snapshot means no filtering (fail open).
 #   jump [client-tty]      C-y. Permission prompt first, else newest flag.
 #   jump-to <client-tty> <session> <pane>
-#                          bin/hq-feed's `g` — one named pane, no search.
+#                          deck's Feed `g` (its attention_cmd) — one named
+#                          pane, no search.
 #   codex-session-start    codex SessionStart hook (dots/codex/hooks.json).
 #   codex-session-end      codex SessionEnd hook.
 
@@ -45,8 +46,7 @@ usage() {
 }
 
 # Pane ids are server-unique (%N), but the session name stays in the
-# filename so sessionizer glob-coloring and clear/list's per-session filter
-# need no tmux round trip.
+# filename so clear/list's per-session filter needs no tmux round trip.
 flag_path() {
     printf '%s/%s@%s.done' "$FLAG_DIR" "$1" "${2#%}"
 }
