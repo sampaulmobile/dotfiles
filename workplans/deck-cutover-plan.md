@@ -70,6 +70,10 @@ Reading the code changed: the brief's premises on codex dual-wiring, tab
 tint and the inbox-log step (it is not in the tracked hq skill — it lives in
 the private layer) were wrong; the delete set shrank from 16 to 8 scripts.
 
+Gate (dotfiles-hub, decision cb5cf9): go as digested — keep the bash
+statusbar, attention, notify, lib(+codex), hq-snapshot and every hook that
+feeds them; delete only the 8 scripts. PR body gains the still-bash list.
+
 ## Goal
 
 dotfiles stops owning the agent screens, picker, launcher, reaper and token
@@ -184,8 +188,9 @@ keeps working.
 - The running tmux server keeps its old PATH: restart it, or `tmux
   set-environment -g PATH "$PATH"` from a new shell, before the bare
   `deck` bindings work.
-- deck follow-ups: `@agent_status` + glyphs, bell/notification, a
-  jump-to-attention for C-y, `attention_cmd`, codex adapter — then
+- A short "Still bash, retires when deck ports it" list: tab tint via
+  `@agent_status` (+ the statusbar glyphs), bell/notification, the C-y jump
+  (and deck's `attention_cmd`), the codex adapter. Once deck ports them,
   statusbar/attention/notify/lib/hq-snapshot retire together.
 - The private inbox recorder and the inbox-log step live in the private
   layer; remove them there.
